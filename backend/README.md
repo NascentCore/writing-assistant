@@ -22,3 +22,6 @@ backend/
 - 在backend目录下`export PYTHONPATH=$PYTHONPATH:$(pwd)`    
 - 在backend/app/目录下执行`uvicorn main:app --reload`
 
+## swagger
+- http://localhost:8000/docs 
+- http://localhost:8000/redoc

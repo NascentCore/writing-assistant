@@ -1,0 +1,64 @@
+# 后端 Python 相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+.env
+.venv
+venv/
+ENV/
+
+# 前端相关
+node_modules/
+/frontend/build
+/frontend/.env
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE相关
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 数据库相关
+*.sqlite3
+*.db
+
+# 日志文件
+*.log
+logs/
+log/
+
+# 媒体和静态文件（根据需要调整）
+/media/
+/static/
+uploads/
+
+# 其他
+.coverage
+htmlcov/
+.pytest_cache/
