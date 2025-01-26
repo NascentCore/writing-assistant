@@ -1,21 +1,100 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { AiEditor } from "aieditor";
 import "aieditor/dist/style.css";
 import "./custom.css";
 import ExportBtnGroup from "./components/export-btn-group";
 import { saveAsDocx, saveAsPdf } from "./utils";
+import { debounce } from "lodash";
+import { API_BASE_URL } from './config';
+import LoginForm from './components/login-form';
+import UserProfile from './components/user-profile';
+import RegisterForm from './components/register-form';
+import VersionHistory from './components/version-history';
+
+// 添加常量
+const CURRENT_DOC_KEY = 'current_document_id';
+
 
 function App() {
   const divRef = useRef(null);
-  const [headings, setHeadings] = useState([]);
   const editorRef = useRef(null);
+  const [headings, setHeadings] = useState([]);
   const [showOutline, setShowOutline] = useState(true); // 控制目录显示/隐藏
   const [outlineWidth, setOutlineWidth] = useState(280); // 目录区宽度
   const [isDragging, setIsDragging] = useState(false); // 是否正在拖动分隔线
   const [lastSavedTime, setLastSavedTime] = useState(null);
-  const STORAGE_KEY = "aieditor_content";
-  const AUTOSAVE_DELAY = 1000; // 自动保存延迟（毫秒）
-  const autoSaveTimerRef = useRef(null);
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [pendingInput, setPendingInput] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [currentDocId, setCurrentDocId] = useState(() => {
+    return localStorage.getItem(CURRENT_DOC_KEY) || null;
+  });
+  const [showNewDocDialog, setShowNewDocDialog] = useState(false);
+  const [newDocTitle, setNewDocTitle] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return !!localStorage.getItem('token');
+  });
+  const [showProfile, setShowProfile] = useState(false);
+  const [showRegister, setShowRegister] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+
+    // 添加文件类型和大小限制常量
+    const ALLOWED_FILE_TYPES = {
+        // 文档类型
+        'text/markdown': { maxSize: 30 * 1024 * 1024, ext: 'md' },
+        'text/plain': { maxSize: 30 * 1024 * 1024, ext: 'txt' },
+        'application/pdf': { maxSize: 30 * 1024 * 1024, ext: 'pdf' },
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { maxSize: 30 * 1024 * 1024, ext: 'docx' },
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { maxSize: 30 * 1024 * 1024, ext: 'xlsx' },
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': { maxSize: 30 * 1024 * 1024, ext: 'pptx' },
+        'message/rfc822': { maxSize: 30 * 1024 * 1024, ext: 'eml' },
+        'text/csv': { maxSize: 30 * 1024 * 1024, ext: 'csv' },
+        // 图片类型
+        'image/jpeg': { maxSize: 5 * 1024 * 1024, ext: ['jpg', 'jpeg'] },
+        'image/png': { maxSize: 5 * 1024 * 1024, ext: 'png' }
+    };
+
+    const MAX_TOTAL_SIZE = 125 * 1024 * 1024; // 125MB
+
+    // 添加文件验证函数
+    const validateFiles = (files) => {
+        let totalSize = 0;
+        const errors = [];
+        const validFiles = [];
+
+        for (const file of files) {
+            // 检查文件类型
+            const fileType = ALLOWED_FILE_TYPES[file.type];
+            if (!fileType) {
+                errors.push(`不支持的文件类型: ${file.name}`);
+                continue;
+            }
+
+            // 检查文件大小
+            if (file.size > fileType.maxSize) {
+                const maxSizeMB = fileType.maxSize / (1024 * 1024);
+                const isImage = file.type.startsWith('image/');
+                errors.push(`${file.name} 超过${isImage ? '图片' : '文档'}大小限制 (${maxSizeMB}MB)`);
+                continue;
+            }
+
+            totalSize += file.size;
+            validFiles.push(file);
+        }
+
+        // 检查总大小
+        if (totalSize > MAX_TOTAL_SIZE) {
+            errors.push(`文件总大小超过限制 (125MB)`);
+            return { valid: false, errors, files: [] };
+        }
+
+        return {
+            valid: errors.length === 0,
+            errors,
+            files: validFiles
+        };
+    };
 
   // 修改拖动处理函数
   const handleMouseDown = (e) => {
@@ -46,29 +125,6 @@ function App() {
       };
     }
   }, [isDragging]);
-
-  // 保存内容到 localStorage
-  const saveContent = (content) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, content);
-      setLastSavedTime(new Date());
-    } catch (error) {
-      console.error("Save content error:", error);
-    }
-  };
-
-  // 从 localStorage 加载内容
-  const loadContent = () => {
-    try {
-      const savedContent = localStorage.getItem(STORAGE_KEY);
-      if (savedContent) {
-        return savedContent;
-      }
-    } catch (error) {
-      console.error("Load content error:", error);
-      return ``;
-    }
-  };
 
   // 添加标题解析函数
   const parseHeadings = (content) => {
@@ -132,18 +188,14 @@ function App() {
     }
   }
 
+  // 修改编辑器初始化代码
   useEffect(() => {
-    if (divRef.current) {
-      // 加载缓存的内容
-      const initialContent = loadContent();
-
-      // 初始化时解析标题
-      setHeadings(parseHeadings(initialContent));
-
+    // 只有在已认证状态下才初始化编辑器
+    if (divRef.current && isAuthenticated) {
       const aiEditor = new AiEditor({
         element: divRef.current,
         placeholder: "点击输入内容...",
-        content: initialContent,
+        content: "",
         toolbarKeys: [
           "undo",
           "redo",
@@ -191,62 +243,171 @@ function App() {
           "ai",
         ],
         toolbarSize: "small",
-        onCreated: (editor) => {
-          updateOutLine(editor);
-          // 获取当前内容
-          const content = editor.getHtml();
+        onCreated: async (editor) => {
+          // 在编辑器创建完成后，如果有当前文档ID，就加载文档内容
+          if (currentDocId) {
+            try {
+              const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents/` + currentDocId);
+              if (response && response.ok) {
+                const result = await response.json();
+                const content = result.data.content || '';
+                
+                // 创建临时 div 来解析内容
+                const tempDiv = document.createElement("div");
+                tempDiv.innerHTML = content;
 
-          // 创建临时 div 来解析内容
-          const tempDiv = document.createElement("div");
-          tempDiv.innerHTML = content;
+                // 查找所有段落和标题元素并处理样式
+                const elements = tempDiv.querySelectorAll("p, h1, h2, h3, h4, h5, h6");
+                elements.forEach((element) => {
+                  const textAlign =
+                    element.style.textAlign ||
+                    element.getAttribute("data-text-align") ||
+                    (element.classList.contains("is-style-text-align-center")
+                      ? "center"
+                      : "");
 
-          // 查找所有段落和标题元素
-          const elements = tempDiv.querySelectorAll(
-            "p, h1, h2, h3, h4, h5, h6"
-          );
+                  if (textAlign === "center") {
+                    element.style.textAlign = "center";
+                    element.setAttribute("data-text-align", "center");
+                    element.classList.add("is-style-text-align-center");
+                  }
+                });
 
-          // 检查每个元素的样式
-          elements.forEach((element) => {
-            const style = window.getComputedStyle(element);
-            const textAlign =
-              element.style.textAlign ||
-              element.getAttribute("data-text-align") ||
-              (element.classList.contains("is-style-text-align-center")
-                ? "center"
-                : "");
-
-            if (textAlign === "center") {
-              element.style.textAlign = "center";
-              element.setAttribute("data-text-align", "center");
-              element.classList.add("is-style-text-align-center");
+                // 设置内容并立即定位光标到开头
+                editor.setContent(tempDiv.innerHTML);
+                requestAnimationFrame(() => {
+                  // 将所有可能的滚动容器都滚动到顶部
+                  const editorElement = editor.innerEditor.view.dom;
+                  const scrollContainers = [
+                    editorElement.parentElement,
+                    document.querySelector('.aie-container-panel'),
+                    document.querySelector('.aie-container-main'),
+                    document.querySelector('.aie-editor')
+                  ];
+                  
+                  scrollContainers.forEach(container => {
+                    if (container) {
+                      container.scrollTop = 0;
+                    }
+                  });
+                  
+                  editor.focusStart();
+                  updateOutLine(editor);
+                });
+              }
+            } catch (error) {
+              console.error('Fetch document error:', error);
             }
-          });
-
-          // 重新设置内容
-          setTimeout(() => {
-            editor.setContent(tempDiv.innerHTML);
-
-            // 将光标移动到末尾
-            editor.focusEnd();
-          }, 100);
-        },
-        onChange: (editor) => {
-          updateOutLine(editor);
-          // 清除之前的定时器
-          if (autoSaveTimerRef.current) {
-            clearTimeout(autoSaveTimerRef.current);
+          } else {
+            updateOutLine(editor);
           }
+          
+          // 添加快捷键监听
+          const handleKeyDown = async (event) => {
+            if (event.code === 'KeyU' && event.altKey) {
+                event.preventDefault();
+                event.stopPropagation();
 
-          // 获取编辑器内容
-          const content = editor.getHtml();
+                // 创建一个新的 input 元素
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.style.display = 'none';
+                input.multiple = true;
 
-          // 设置新的定时器
-          autoSaveTimerRef.current = setTimeout(() => {
-            saveContent(content);
-          }, AUTOSAVE_DELAY);
+                // 设置允许的文件类型
+                const acceptedTypes = Object.entries(ALLOWED_FILE_TYPES)
+                    .map(([mimeType, config]) => {
+                        const exts = Array.isArray(config.ext) ? config.ext : [config.ext];
+                        return [
+                            mimeType,  // MIME 类型
+                            ...exts.map(ext => `.${ext}`)  // 文件扩展名
+                        ];
+                    })
+                    .flat()
+                    .join(',');
+                input.accept = acceptedTypes;
 
-          // 更新标题
-          setHeadings(parseHeadings(content));
+                // 处理文件选择
+                input.onchange = async (e) => {
+                    const files = Array.from(e.target.files || []);
+                    
+                    // 验证文件
+                    const validation = validateFiles(files);
+                    
+                    // 如果有错误，显示错误信息并提供重试选项
+                    if (validation.errors.length > 0) {
+                        setErrorMessage(validation.errors.join('\n'));
+                        setShowErrorDialog(true);
+                        setPendingInput(input);  // 保存当前的 input 元素以供重用
+                        return;
+                    }
+
+                    // 上传有效文件
+                    for (const file of validation.files) {
+                        try {
+                            const formData = new FormData();
+                            formData.append('files', file);
+
+                            // 显示上传进度
+                            const currentContent = editor.getHtml();
+                            editor.setContent(currentContent + `<p>正在上传: ${file.name}...</p>`);
+
+                            // 上传文件
+                            const response = await fetch(`${API_BASE_URL}/api/v1/upload`, {
+                                method: 'POST',
+                                body: formData
+                            });
+
+                            if (!response.ok) {
+                                throw new Error('Upload failed');
+                            }
+
+                            const data = await response.json();
+                            
+                            // 替换上传进度为文件链接
+                            const content = editor.getHtml();
+                            const newContent = content.replace(
+                                `<p>正在上传: ${file.name}...</p>`,
+                                `<p><a href="${data.url}" target="_blank">${file.name}</a></p>`
+                            );
+                            editor.setContent(newContent);
+                        } catch (error) {
+                            console.error('Upload error:', error);
+                            const content = editor.getHtml();
+                            const newContent = content.replace(
+                                `<p>正在上传: ${file.name}...</p>`,
+                                `<p style="color: red;">上传失败: ${file.name}</p>`
+                            );
+                            editor.setContent(newContent);
+                        }
+                    }
+
+                    document.body.removeChild(input);
+                };
+
+                document.body.appendChild(input);
+                input.click();
+            }
+          };
+
+          // 将事件监听器添加到编辑器容器元素
+          divRef.current.addEventListener('keydown', handleKeyDown);
+
+          // 保存清理函数
+          editor._cleanupKeyDown = () => {
+            divRef.current?.removeEventListener('keydown', handleKeyDown);
+          };
+        },
+        onChange: async (editor) => {
+          // 更新大纲
+          updateOutLine(editor);
+          setHeadings(parseHeadings(editor.getHtml()));
+          
+          // 只有当内容是由用户编辑触发时才保存
+          if (!editor._isSettingContent) {
+            const content = editor.getHtml();
+            debouncedSave(content);
+          }
         },
         ai: {
           bubblePanelMenus:[
@@ -262,7 +423,7 @@ function App() {
             },
             {
                 prompt: `<content>{content}</content>\n这句话的内容较长，帮我简化一下这个内容，并直接返回简化后的内容结果。\n注意：你应该先判断一下这句话是中文还是英文，如果是中文，请给我返回中文的内容，如果是英文，请给我返回英文内容，只需要返回内容即可，不需要告知我是中文还是英文。`,
-                icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 6.75736L19 8.75736V4H10V9H5V20H19V17.2426L21 15.2426V21.0082C21 21.556 20.5551 22 20.0066 22H3.9934C3.44476 22 3 21.5501 3 20.9932V8L9.00319 2H19.9978C20.5513 2 21 2.45531 21 2.9918V6.75736ZM21.7782 8.80761L23.1924 10.2218L15.4142 18L13.9979 17.9979L14 16.5858L21.7782 8.80761Z"></path></svg>`,
+                icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 6.75736L19 8.75736V4H10V9H5V20H19V17.242L21 15.242V21.0082C21 21.556 20.5551 22 20.0066 22H3.9934C3.44476 22 3 21.5501 3 20.9932V8L9.00319 2H19.9978C20.5513 2 21 2.45531 21 2.9918V6.75736ZM21.7782 8.80761L23.1924 10.2218L15.4142 18L13.9979 17.9979L14 16.5858L21.7782 8.80761Z"></path></svg>`,
                 title: '简化内容',
             },
             {
@@ -290,17 +451,20 @@ function App() {
           },
         },
       });
-      editorRef.current = aiEditor;
 
-      // 添加离线存储事件监听
-      const handleBeforeUnload = () => {
-        if (editorRef.current) {
-          const content = editorRef.current.getHtml();
-          saveContent(content);
-        }
+      // 先保存对原始 setContent 方法的引用
+      const originalSetContent = aiEditor.setContent.bind(aiEditor);
+      
+      // 然后再扩展 setContent 方法
+      aiEditor.setContent = function(content) {
+        this._isSettingContent = true;
+        originalSetContent(content);
+        requestAnimationFrame(() => {
+          this._isSettingContent = false;
+        });
       };
 
-      window.addEventListener("beforeunload", handleBeforeUnload);
+      editorRef.current = aiEditor;
 
       // 添加在线状态监听
       const handleOnline = () => {
@@ -308,11 +472,7 @@ function App() {
       };
 
       const handleOffline = () => {
-        if (editorRef.current) {
-          const content = editorRef.current.getHtml();
-          saveContent(content);
-        }
-        console.log("网络已断开，内容已保存");
+        console.log("网络已断开");
       };
 
       window.addEventListener("online", handleOnline);
@@ -320,123 +480,459 @@ function App() {
 
       return () => {
         aiEditor.destroy();
-        window.removeEventListener("beforeunload", handleBeforeUnload);
         window.removeEventListener("online", handleOnline);
         window.removeEventListener("offline", handleOffline);
-        if (autoSaveTimerRef.current) {
-          clearTimeout(autoSaveTimerRef.current);
-        }
       };
     }
-  }, []);
+  }, [currentDocId, isAuthenticated]);
 
-  // 点击目录项时滚动到对应位置
-  const scrollToHeading = (id) => {
-    if (editorRef.current) {
-      const element = editorRef.current.getElement().querySelector(`#${id}`);
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth" });
+  // 创建防抖的保存函数
+  const debouncedSave = useCallback(
+    debounce(async (content) => {
+      if (!currentDocId) return;
+      
+      try {
+        const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents/` + currentDocId, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ content }),
+        });
+        
+        if (response && response.ok) {
+          setLastSavedTime(new Date());
+        }
+      } catch (error) {
+        console.error('Save error:', error);
+      }
+    }, 1000), // 1秒的延迟
+    [currentDocId]
+  );
+
+  // 修改初始化用户文档的函数
+  const initializeUserDocuments = async () => {
+    try {
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents`);
+      if (response && response.ok) {
+        const result = await response.json();
+        setDocuments(result.data);
+        
+        if (result.data.length === 0) {
+          // 如果没有文档，创建一个新文档
+          const createResponse = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              title: '新建文档',
+              content: ''
+            }),
+          });
+          
+          if (createResponse && createResponse.ok) {
+            const createResult = await createResponse.json();
+            setCurrentDocId(createResult.data.id);
+            loadDocuments();
+            
+            setTimeout(() => {
+              if (editorRef.current) {
+                editorRef.current.setContent('');
+                editorRef.current.focusStart();
+              }
+            }, 100);
+          }
+        } else {
+          // 如果有文档，设置最近的文档为当前文档
+          const mostRecentDoc = result.data[0]; // 因为文档列表已按更新时间降序排序
+          setCurrentDocId(mostRecentDoc.id);
+          
+          // 等待编辑器初始化完成后加载文档内容
+          setTimeout(() => {
+            if (editorRef.current) {
+              editorRef.current.focusStart();
+            }
+          }, 100);
+        }
+      }
+    } catch (error) {
+      console.error('Initialize documents error:', error);
+    }
+  };
+
+  // 修改登录和注册处理函数
+  const handleLogin = async (token) => {
+    localStorage.setItem('token', token);
+    setIsAuthenticated(true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await initializeUserDocuments();
+  };
+
+  const handleRegister = async (token) => {
+    localStorage.setItem('token', token);
+    setIsAuthenticated(true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await initializeUserDocuments();
+  };
+
+  // 添加登出处理函数
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setIsAuthenticated(false);
+    setCurrentDocId(null);
+  };
+
+  // 修改 fetch 请求，添加认证头
+  const fetchWithAuth = async (url, options = {}) => {
+    const token = localStorage.getItem('token');
+    const headers = {
+      ...options.headers,
+      'Authorization': `Bearer ${token}`,
+    };
+
+    const response = await fetch(url, { ...options, headers });
+    if (response.status === 401) {
+      // 如果认证失败，清除 token 并重定向到登录页
+      localStorage.removeItem('token');
+      setIsAuthenticated(false);
+      return null;
+    }
+    return response;
+  };
+
+  // 修改 loadDocuments 函数
+  const loadDocuments = async () => {
+    try {
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents`);
+      if (response && response.ok) {
+        const result = await response.json();
+        setDocuments(result.data);
+        
+        // 如果没有当前选中的文档，但有文档列表，则选择最近的文档
+        if (!currentDocId && result.data.length > 0) {
+          const mostRecentDoc = result.data[0];
+          setCurrentDocId(mostRecentDoc.id);
+        } else if (currentDocId) {
+          // 验证当前文档是否存在于列表中
+          const docExists = result.data.some(doc => doc.id === parseInt(currentDocId));
+          if (!docExists && result.data.length > 0) {
+            // 如果当前文档不存在，选择最近的文档
+            setCurrentDocId(result.data[0].id);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Load documents error:', error);
+    }
+  };
+
+  // 修改组件加载时的 useEffect
+  useEffect(() => {
+    // 只在已认证状态下加载文档
+    if (isAuthenticated) {
+      loadDocuments();
+    }
+  }, [isAuthenticated]); // 添加 isAuthenticated 到依赖数组
+
+  // 修改重命名函数
+  const handleRename = async (docId, currentTitle) => {
+    const newTitle = prompt('请输入新的文档名称:', currentTitle);
+    if (newTitle && newTitle.trim() && newTitle !== currentTitle) {
+      try {
+        const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents/` + docId, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: newTitle.trim() }),
+        });
+        
+        if (response && response.ok) {
+          loadDocuments();
+        }
+      } catch (error) {
+        console.error('Rename document error:', error);
+        alert('重命名失败');
       }
     }
   };
 
-  // 修改导出功能
+  // 修改删除函数
+  const handleDelete = async (docId) => {
+    if (window.confirm('确定要删除这个文档吗？')) {
+      try {
+        const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents/` + docId, {
+          method: 'DELETE',
+        });
+        
+        if (response && response.ok) {
+          if (currentDocId === docId) {
+            setCurrentDocId(null);
+          }
+          loadDocuments();
+        }
+      } catch (error) {
+        console.error('Delete document error:', error);
+        alert('删除失败');
+      }
+    }
+  };
+
+  // 修改文档列表渲染函数
+  const renderDocumentList = () => {
+    return (
+        <div className="document-list">
+            {documents.map(doc => {
+                const isActive = currentDocId && Number(currentDocId) === doc.id;
+                return (
+                    <div 
+                        key={doc.id} 
+                        className={`document-item ${isActive ? 'active' : ''}`}
+                        onClick={() => setCurrentDocId(doc.id.toString())}
+                    >
+                        <span className="doc-title">
+                            {doc.title}
+                        </span>
+                        <div className="doc-info">
+                            <span className="doc-time">{doc.updated_at}</span>
+                            <div className="doc-actions">
+                                <button 
+                                    className="doc-action-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRename(doc.id, doc.title);
+                                    }}
+                                >
+                                    重命名
+                                </button>
+                                <button 
+                                    className="doc-action-btn delete"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDelete(doc.id);
+                                    }}
+                                >
+                                    删除
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+  };
+
+  // 修改新建文档函数
+  const handleNewDocument = async () => {
+    if (!newDocTitle.trim()) {
+        alert('请输入文档标题');
+        return;
+    }
+
+    try {
+        const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                title: newDocTitle,
+                content: ''
+            }),
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            // 清理对话框状态
+            setShowNewDocDialog(false);
+            setNewDocTitle('');
+            
+            try {
+                // 更新文档列表
+                const docsResponse = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents`);
+                if (docsResponse.ok) {
+                    const docsResult = await docsResponse.json();
+                    
+                    // 更新文档列表
+                    setDocuments(docsResult.data);
+                    
+                    // 找到新创建的文档（根据标题匹配）
+                    if (docsResult.data) {
+                        const newDoc = docsResult.data.find(doc => doc.title === newDocTitle.trim());
+                        if (newDoc) {
+                            setCurrentDocId(newDoc.id.toString());
+                        }
+                    }
+                }
+                
+                // 确保编辑器被清空并获得焦点
+                if (editorRef.current) {
+                    editorRef.current.setContent('');
+                    editorRef.current.focusStart();
+                }
+            } catch (error) {
+                console.error('Failed to fetch documents:', error);
+            }
+        } else {
+            throw new Error(result.message || '创建文档失败');
+        }
+    } catch (error) {
+        console.error('Create document error:', error);
+        alert(error.message || '创建文档失败，请稍后重试');
+    }
+  };
+
+  // 添加导出功能
   const handleExport = async (format) => {
     if (!editorRef.current) return;
 
     try {
       if (format === "pdf") {
         saveAsPdf();
-        // 使用浏览器的打印功能
-        /*
-                window.print();
-                */
       } else if (format === "docx") {
         const content = editorRef.current.getHtml();
         saveAsDocx(content);
-        /*
-                // 获取编辑器内容
-                const content = editorRef.current.getHtml();
-                
-                // 创建一个完整的 HTML 文档
-                const htmlContent = `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="utf-8">
-                        <title>售前方案写作助手</title>
-                        <style>
-                            body { font-family: Arial, sans-serif; }
-                            img { max-width: 100%; }
-                        </style>
-                    </head>
-                    <body>
-                        ${content}
-                    </body>
-                    </html>
-                `;
-                
-                // 创建 Blob 对象
-                const blob = new Blob([htmlContent], { type: 'application/msword' });
-                const url = window.URL.createObjectURL(blob);
-                
-                // 创建下载链接
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = '售前方案写作助手.doc';  // 使用 .doc 扩展名
-                document.body.appendChild(a);
-                a.click();
-                
-                // 清理
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                */
       }
     } catch (error) {
       console.error("Export error:", error);
       alert("导出失败，请稍后重试");
     }
   };
+
+  // 监听 currentDocId 变化，保存到 localStorage
+  useEffect(() => {
+    if (currentDocId) {
+      localStorage.setItem(CURRENT_DOC_KEY, currentDocId);
+    } else {
+      localStorage.removeItem(CURRENT_DOC_KEY);
+    }
+  }, [currentDocId]);
+
   return (
     <div style={{ padding: 0, margin: 0, background: "#f3f4f6" }}>
-      <div className="page-header">
-        <h1>售前方案写作助手</h1>
-        {lastSavedTime && (
-          <span
-            style={{
-              marginLeft: "12px",
-              fontSize: "12px",
-              color: "#999",
-            }}
-          >
-            {`最后保存: ${lastSavedTime.toLocaleTimeString()}`}
-          </span>
-        )}
-        <ExportBtnGroup handleExport={handleExport}></ExportBtnGroup>
-      </div>
-
-      <div ref={divRef} style={{ padding: 0, margin: 0 }}>
-        <div className="aie-container" style={{ backgroundColor: "#f3f4f6" }}>
-          <div className="aie-header-panel">
-            <div
-              className="aie-container-header"
-              style={{ background: "#fff" }}
-            ></div>
-          </div>
-          <div className="aie-main">
-            <div className="aie-directory-content">
-              <div className="aie-directory">
-                <h5>文档目录</h5>
-                <div id="outline"></div>
+      {!isAuthenticated ? (
+        showRegister ? (
+          <RegisterForm 
+            onRegister={handleRegister}
+            onSwitchToLogin={() => setShowRegister(false)}
+          />
+        ) : (
+          <LoginForm 
+            onLogin={handleLogin}
+            onSwitchToRegister={() => setShowRegister(true)}
+          />
+        )
+      ) : (
+        <>
+          <div className="page-header">
+            <h1>售前方案写作助手</h1>
+            <div className="header-buttons">
+              <button 
+                onClick={() => setShowNewDocDialog(true)}
+                className="new-doc-btn"
+              >
+                新建文档
+              </button>
+              <ExportBtnGroup handleExport={handleExport} />
+              {currentDocId && (
+                <button 
+                  className="history-btn"
+                  onClick={() => setShowVersionHistory(true)}
+                >
+                  版本历史
+                </button>
+              )}
+              
+              <div className="user-buttons">
+                <button 
+                  className="profile-btn"
+                  onClick={() => setShowProfile(true)}
+                >
+                  个人信息
+                </button>
+                <button 
+                  onClick={handleLogout}
+                  className="logout-btn"
+                >
+                  退出登录
+                </button>
               </div>
             </div>
-            <div className="aie-container-panel">
-              <div className="aie-container-main"></div>
+          </div>
+
+          {/* 添加个人信息对话框 */}
+          {showProfile && (
+            <UserProfile onClose={() => setShowProfile(false)} />
+          )}
+
+          {/* 新建文档对话框 */}
+          {showNewDocDialog && (
+            <div className="dialog-overlay">
+              <div className="dialog">
+                <h2>新建文档</h2>
+                <input
+                  type="text"
+                  value={newDocTitle}
+                  onChange={(e) => setNewDocTitle(e.target.value)}
+                  placeholder="请输入文档标题"
+                />
+                <div className="dialog-buttons">
+                  <button onClick={handleNewDocument}>确定</button>
+                  <button onClick={() => setShowNewDocDialog(false)}>取消</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showVersionHistory && currentDocId && (
+            <VersionHistory
+              docId={currentDocId}
+              onClose={() => setShowVersionHistory(false)}
+              onRollback={async () => {
+                loadDocuments();
+                if (editorRef.current) {
+                  try {
+                    const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents/` + currentDocId);
+                    if (response && response.ok) {
+                      const result = await response.json();
+                      editorRef.current.setContent(result.data.content || '');
+                    }
+                  } catch (error) {
+                    console.error('Load document content error:', error);
+                  }
+                }
+              }}
+            />
+          )}
+
+          <div ref={divRef} style={{ padding: 0, margin: 0 }}>
+            <div className="aie-container" style={{ backgroundColor: "#f3f4f6" }}>
+              <div className="aie-header-panel">
+                <div className="aie-container-header" style={{ background: "#fff" }}></div>
+              </div>
+              <div className="aie-main">
+                <div className="aie-directory-content">
+                  <div className="aie-directory">
+                    <h5>我的文档</h5>
+                    {renderDocumentList()}
+                  </div>
+                </div>
+                <div className="aie-container-panel">
+                  <div className="aie-container-main"></div>
+                </div>
+                <div className="aie-outline">
+                  <h5>文档目录</h5>
+                  <div id="outline"></div>
+                </div>
+              </div>
+              <div className="aie-container-footer"></div>
             </div>
           </div>
-          <div className="aie-container-footer"></div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
