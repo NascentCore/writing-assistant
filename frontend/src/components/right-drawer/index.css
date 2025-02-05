@@ -1,0 +1,78 @@
+.drawer {
+  position: fixed;
+  top: 0;
+  right: -300px;
+  width: 300px;
+  height: 100%;
+  background-color: white; 
+  transition: right 0.3s ease;
+  z-index: 9999;
+  overflow-y: auto;
+}
+
+.drawer.open {
+  right: 0;
+}
+
+.drawer-content {
+  padding: 20px;
+}
+
+.close-button {
+  width: 25px;
+  height: 25px;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #999;
+}
+
+.tip-text {
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 5px;
+}
+
+/* 下拉选择组件样式 */
+.drawer-content select {
+  width: 100%;
+  padding: 5px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 16px;
+}
+
+/* 一键生成按钮样式 */
+.drawer-content .nomal-button {
+  width: 100%;
+  padding: 5px 10px;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  cursor: pointer;
+  margin-bottom: 10px;
+  transition: background-color 0.3s ease;
+}
+
+.drawer-content .nomal-button:hover {
+  background-color: #0056b3;
+}
+
+/* 生成后内容显示区域样式 */
+.generated-content {
+  padding: 10px;
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+  color: #333;
+  margin-bottom: 10px;
+  font-size: 14px;
+}

@@ -476,3 +476,10 @@
 .history-btn:hover {
   background-color: #9e6ef2;
 }
+
+.aie-ai-panel-body{
+  display: none !important;
+}
+.aie-ai-panel-footer.aie-ai-panel-actions{
+  display: none !important;
+}
