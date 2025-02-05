@@ -586,19 +586,30 @@ function App() {
   // 修改 fetch 请求，添加认证头
   const fetchWithAuth = async (url, options = {}) => {
     const token = localStorage.getItem('token');
-    const headers = {
-      ...options.headers,
-      'Authorization': `Bearer ${token}`,
-    };
-
-    const response = await fetch(url, { ...options, headers });
-    if (response.status === 401) {
-      // 如果认证失败，清除 token 并重定向到登录页
-      localStorage.removeItem('token');
+    if (!token) {
+      console.error('No token found');
       setIsAuthenticated(false);
       return null;
     }
-    return response;
+
+    const headers = {
+      ...options.headers,
+      'Authorization': token,  // token 已经包含了 "Bearer " 前缀
+    };
+
+    try {
+      const response = await fetch(url, { ...options, headers });
+      if (response.status === 401) {
+        console.error('Authentication failed');
+        localStorage.removeItem('token');
+        setIsAuthenticated(false);
+        return null;
+      }
+      return response;
+    } catch (error) {
+      console.error('Fetch error:', error);
+      return null;
+    }
   };
 
   // 修改 loadDocuments 函数
@@ -811,20 +822,54 @@ function App() {
     }
   }, [currentDocId]);
 
+  // 添加自动登录的 useEffect
+  useEffect(() => {
+    const autoLogin = async () => {
+      console.log('Attempting auto login...'); 
+      if (!isAuthenticated) {
+        console.log('Not authenticated, proceeding with login...'); 
+        try {
+          const formData = new URLSearchParams();
+          formData.append('username', 'admin');
+          formData.append('password', '123456');
+          formData.append('grant_type', 'password');
+
+          const response = await fetch(`${API_BASE_URL}/api/v1/token`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            // 修改这里，确保存储完整的 token 格式
+            const token = `${data.token_type} ${data.access_token}`;
+            localStorage.setItem('token', token);
+            setIsAuthenticated(true);
+            await initializeUserDocuments();
+          } else {
+            console.error('Login failed:', await response.text());
+          }
+        } catch (error) {
+          console.error('Auto login failed:', error);
+        }
+      }
+    };
+
+    autoLogin();
+  }, []); // 仅在组件首次加载时执行
+
   return (
     <div style={{ padding: 0, margin: 0, background: "#f3f4f6" }}>
       {!isAuthenticated ? (
-        showRegister ? (
-          <RegisterForm 
-            onRegister={handleRegister}
-            onSwitchToLogin={() => setShowRegister(false)}
-          />
-        ) : (
+        <div style={{ display: 'none' }}>
           <LoginForm 
             onLogin={handleLogin}
-            onSwitchToRegister={() => setShowRegister(true)}
+            onSwitchToRegister={() => setShowRegister(false)}
           />
-        )
+        </div>
       ) : (
         <>
           <div className="page-header">
@@ -846,7 +891,7 @@ function App() {
                 </button>
               )}
               
-              <div className="user-buttons">
+              {/* <div className="user-buttons">
                 <button 
                   className="profile-btn"
                   onClick={() => setShowProfile(true)}
@@ -859,7 +904,7 @@ function App() {
                 >
                   退出登录
                 </button>
-              </div>
+              </div> */}
             </div>
           </div>
 
