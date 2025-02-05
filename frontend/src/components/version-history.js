@@ -15,8 +15,12 @@ const VersionHistory = ({ docId, onClose, onRollback }) => {
 
   const loadVersions = async () => {
     try {
+      const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}/versions`, {
         // ... 其他配置
+        headers: {
+            'Authorization': token
+        }
       });
       if (response && response.ok) {
         const result = await response.json();
@@ -37,6 +41,11 @@ const VersionHistory = ({ docId, onClose, onRollback }) => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}/rollback/${versionId}`, {
           // ... 其他配置
+          method: 'PUT',
+          headers: {
+            'Authorization': `${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json',
+          },
         });
         if (response && response.ok) {
           onRollback();
