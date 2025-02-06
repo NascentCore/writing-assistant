@@ -32,3 +32,13 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)
 cd app
 uvicorn main:app --reload
 ```
+
+## 构建镜像
+```shell
+cd frontend
+yarn build
+cd ../backend
+mv ../frontend/build ./app/
+docker buildx build --platform linux/amd64 -t sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app:latest .
+docker push sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app:latest
+```
