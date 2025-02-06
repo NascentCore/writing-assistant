@@ -51,10 +51,18 @@ const Index = ({ editorRef }) => {
     }
   };
 
-  const handleUseGeneratedContent = () => {
-    // 使用生成的内容
-    console.log("使用生成的内容");
-    copyToClipboardLegacy(selectText);
+  const handleUseGeneratedContent = (isAppend = false) => {
+    if (!editorRef.current) return;
+  
+    const editor = editorRef.current;
+    const selectedText = editor.getSelectedText(); // 获取选中的纯文本内容
+  
+    if (!selectedText) return;
+  
+    const newText = isAppend ? selectedText + generatedContent : generatedContent;
+  
+    editor.focus(); // 确保编辑器获得焦点
+    editor.insert(newText); // 插入新内容
   };
 
   useEffect(() => {
@@ -98,8 +106,11 @@ const Index = ({ editorRef }) => {
         {/* 生成后内容显示区域 */}
         <div className="tip-text">生成的内容</div>
         <div className="generated-content">{generatedContent}</div>
-        <button className="nomal-button" onClick={handleUseGeneratedContent}>
-          复制
+        <button className="small-button" onClick={() => handleUseGeneratedContent(false)}>
+          替换
+        </button>
+        <button className="small-button" onClick={() => handleUseGeneratedContent(true)}>
+          追加
         </button>
       </RightDrawer>
     </div>

@@ -1,8 +1,8 @@
 .drawer {
   position: fixed;
   top: 0;
-  right: -300px;
-  width: 300px;
+  right: -340px;
+  width: 340px;
   height: 100%;
   background-color: white; 
   transition: right 0.3s ease;
@@ -75,4 +75,18 @@
   color: #333;
   margin-bottom: 10px;
   font-size: 14px;
+}
+
+.drawer-content .small-button {
+  width: 30%;
+  padding: 5px 10px;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  cursor: pointer;
+  margin-bottom: 10px;
+  transition: background-color 0.3s ease;
+  margin-left: 40px;
 }
