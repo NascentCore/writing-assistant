@@ -23,6 +23,7 @@ var/
 .venv
 venv/
 ENV/
+.python-version
 
 # 前端相关
 node_modules/

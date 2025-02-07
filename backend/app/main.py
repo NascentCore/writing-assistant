@@ -61,9 +61,9 @@ app.add_middleware(
 )
 
 # 修改静态文件挂载
-app.mount("/static", StaticFiles(directory="build/static"), name="static")
-app.mount("/assets", StaticFiles(directory="build"), name="assets")
-templates = Jinja2Templates(directory="build")
+# app.mount("/static", StaticFiles(directory="build/static"), name="static")
+# app.mount("/assets", StaticFiles(directory="build"), name="assets")
+# templates = Jinja2Templates(directory="build")
 
 # 注册路由
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])

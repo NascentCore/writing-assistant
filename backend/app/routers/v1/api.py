@@ -5,11 +5,11 @@ from fastapi.responses import StreamingResponse
 from app.config import settings
 import openai
 import json
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 from app.database import get_db
 from app.models.upload_file import UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.parser import PDFParser, DocxParser, get_parser, get_file_format
@@ -18,6 +18,7 @@ from sqlalchemy.sql import func
 from sqlalchemy import desc
 from app.auth import get_current_user
 from app.models.user import User
+from app.models.system_config import SystemConfig
 
 router = APIRouter()
 
@@ -36,6 +37,7 @@ class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
 
+
 @router.get("/config")
 async def get_config():
     """获取大模型配置信息"""
@@ -49,16 +51,102 @@ async def get_config():
         }
     }
 
-@router.post("/completions")
-async def completions(request: Request, db: Session = Depends(get_db)):
-    """OpenAI 兼容的 completions 接口"""
-    body = await request.json()
-    stream = body.get("stream", False)
-    
-    # 检查必需参数
-    if "messages" not in body:
-        raise ValueError("Missing required parameter: messages")
+class Message(BaseModel):
+    role: str = Field(..., description="消息角色", example="user")
+    content: str = Field(..., description="消息内容", example="你好，请问有什么可以帮助你的？")
 
+class CompletionRequest(BaseModel):
+    messages: List[Message] = Field(..., description="对话消息列表")
+    stream: bool = Field(False, description="是否使用流式响应")
+    temperature: Optional[float] = Field(0.7, description="温度参数，控制随机性，范围0-2", ge=0, le=2)
+    top_p: Optional[float] = Field(1, description="核采样参数，控制输出的多样性", ge=0, le=1)
+    max_tokens: Optional[int] = Field(None, description="生成的最大token数量", ge=1)
+    
+    file_ids: Optional[List[str]] = Field(None, description="引用的文件ID列表")
+    doc_id: Optional[str] = Field(None, description="引用的文档ID，及当前编辑的文档ID")
+    selected_content: Optional[str] = Field(None, description="划选的文本内容")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "请总结一下这份文档的主要内容"
+                    }
+                ],
+                "file_ids": ["abc123"],
+                "doc_id": "abc123",
+                "selected_content": "这是一段划选的文本内容",
+                "stream": True,
+                "temperature": 0.7,
+                "max_tokens": 2000
+            }
+        }
+
+@router.post("/completions")
+async def completions(
+    request: CompletionRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    OpenAI 兼容的 completions 接口
+    
+    Args:\n
+        messages: 对话消息列表，包含role和content\n
+        stream: 是否使用流式响应\n
+        temperature: 温度参数，控制随机性\n
+        top_p: 核采样参数\n
+        max_tokens: 生成的最大token数量
+        file_ids: 引用的文件ID列表，这些文件的内容会作为上下文\n
+        doc_id: 引用的文档ID，及当前编辑的文档ID\n
+        selected_content: 划选的文本内容
+
+    Returns:\n
+        stream=False时返回完整的补全结果\n
+        stream=True时返回SSE流式响应
+    """
+    body = request.model_dump(exclude_none=True)
+    stream = body.get("stream", False)
+
+    # 处理划选的文本内容
+    if "selected_content" in body:
+        selected_content = body["selected_content"]
+        del body["selected_content"]
+        if selected_content:
+            # 构建划选的文本内容
+            selected_content_message = f"# 划选 的文本内容\n{selected_content}"
+
+            # 将划选的文本内容添加到原始消息中
+            original_message = body["messages"][0]["content"] if body["messages"] else ""
+            body["messages"] = [
+                {
+                    "role": "user",
+                    "content": f"{original_message}\n{selected_content_message}"
+                }
+            ]
+
+    # 处理文档引用
+    if "doc_id" in body:
+        doc_id = body["doc_id"]
+        del body["doc_id"]
+        if isinstance(doc_id, str):
+            # 获取文档内容
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+
+            # 构建参考文档内容
+            reference_content = "# 当前编辑的文档\n"
+            reference_content += f"## {doc.title}\n{doc.content}\n\n"
+            
+            # 将原始消息和参考文档组合
+            original_message = body["messages"][0]["content"] if body["messages"] else ""
+            body["messages"] = [
+                {
+                    "role": "user",
+                    "content": f"{original_message}\n{reference_content}"
+                }
+            ]
+    
     # 处理文件引用
     if "file_ids" in body:
         file_ids = body["file_ids"]
@@ -486,3 +574,87 @@ async def delete_document(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+@router.get("/prompts")
+async def get_prompt_templates(db: Session = Depends(get_db)):
+    """获取提示词模板列表"""
+    templates = db.query(SystemConfig).filter(
+        SystemConfig.key.like("prompt.%")
+    ).all()
+    
+    return {
+        "message": "获取成功",
+        "data": [
+            {
+                "key": template.key,
+                "prompt": template.value,
+                "description": template.description
+            }
+            for template in templates
+        ]
+    }
+
+class PromptTemplateUpdate(BaseModel):
+    prompt: str = Field(..., description="提示词模板内容")
+    description: Optional[str] = Field(None, description="模板描述")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "prompt": "请根据下面的文本，自动为其补全内容",
+                "description": "自动补全模板"
+            }
+        }
+
+@router.put("/prompts/{key}")
+async def update_prompt_template(
+    key: str,
+    prompt: PromptTemplateUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    更新提示词模板
+    
+    Args:\n
+        key: 提示词模板的键名，如 prompt.completion\n
+        prompt: 提示词模板内容, 支持的变量\n
+        description: 模板描述
+        
+    Returns:\n
+        prompt: 更新后的模板内容\n
+        description: 更新后的模板描述\n
+    """
+    # 验证key格式
+    if not key.startswith("prompt."):
+        raise HTTPException(
+            status_code=400, 
+            detail="无效的提示词键名，必须以 'prompt.' 开头"
+        )
+    
+    db_template = db.query(SystemConfig).filter(
+        SystemConfig.key == key
+    ).first()
+    
+    if not db_template:
+        db_template = SystemConfig(
+            key=key,
+            value=prompt.prompt,
+            description=prompt.description or "默认提示词模板"
+        )
+        db.add(db_template)
+    else:
+        db_template.value = prompt.prompt
+        if prompt.description:
+            db_template.description = prompt.description
+    
+    db.commit()
+    db.refresh(db_template)
+    
+    return {
+        "message": "更新成功",
+        "data": {
+            "key": db_template.key,
+            "prompt": db_template.value,
+            "description": db_template.description
+        }
+    }
