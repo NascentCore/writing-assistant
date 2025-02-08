@@ -51,6 +51,6 @@ jobs:
             export KUBECONFIG=/home/cairong/.kube/config
             kubectl get nodes
             kubectl get pods -n default
-            kubectl set image deployment/aieditor-frontend aieditor-frontend=${{ env.IMAGE_NAME }} -n default
+            kubectl set image deployment/aieditor-frontend aieditor-frontend-container=${{ env.IMAGE_NAME }} -n default
             kubectl rollout status deployment/aieditor-frontend -n default || kubectl rollout undo deployment/aieditor-frontend -n default
           EOF
