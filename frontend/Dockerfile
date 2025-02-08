@@ -20,7 +20,7 @@ RUN rm -rf /etc/nginx/conf.d/*
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # 复制构建好的前端代码到 nginx 目录
-COPY --from=builder /app/build /usr/share/nginx/html
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 # 暴露端口
 EXPOSE 80
