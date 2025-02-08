@@ -3,7 +3,7 @@ FROM node:18 AS builder
 WORKDIR /app
 
 # 复制 package.json 和 yarn.lock 并安装依赖
-COPY package.json yarn.lock ./
+COPY package.json ./
 RUN yarn install --frozen-lockfile
 
 # 复制项目代码并构建
