@@ -1,0 +1,54 @@
+name: Deploy backend to dev
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_REGISTRY: sxwl-registry.cn-beijing.cr.aliyuncs.com
+      NAMESPACE: sxwl-ai
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract and Build Images
+        id: extract_and_build
+        run: |
+          cd backend
+          COMMIT_ID=$(git rev-parse --short HEAD)
+          IMAGE_NAME=$DOCKER_REGISTRY/$NAMESPACE/aieditor-app-backend:$COMMIT_ID
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p60022 -t rsa dev.llm.sxwl.ai >> ~/.ssh/known_hosts
+      - name: Deploy to Hosting Service
+        run: |
+          ssh -p60022 cairong@dev.llm.sxwl.ai << EOF
+            export KUBECONFIG=/home/cairong/.kube/config
+            kubectl get nodes
+            kubectl get pods -n default
+            kubectl set image deployment/aieditor-backend aieditor-backend-container=${{ env.IMAGE_NAME }} -n default
+            kubectl rollout status deployment/aieditor-backend -n default || kubectl rollout undo deployment/aieditor-backend -n default
+          EOF
