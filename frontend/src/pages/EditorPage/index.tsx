@@ -8,7 +8,6 @@ import type { DataNode } from 'antd/es/tree';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import DocumentList from './components/DocumentList';
 import ExportBtnGroup from './components/ExportBtn';
-import NewDoc from './components/NewDoc';
 import OutLine from './components/OutLine';
 import UserProfile from './components/UserProfile';
 import VersionHistory from './components/VersionHistory';
@@ -31,7 +30,6 @@ function App() {
     return localStorage.getItem(CURRENT_DOC_KEY) || null;
   });
 
-  const [showNewDocDialog, setShowNewDocDialog] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [outlineData, setOutlineData] = useState<OutlineNode[]>([]);
@@ -194,7 +192,6 @@ function App() {
         <div className="page-header">
           <h1>售前方案写作助手</h1>
           <div className="header-buttons">
-            <Button onClick={() => setShowNewDocDialog(true)}>新建文档</Button>
             <ExportBtnGroup editorRef={editorRef} />
             {currentDocId && (
               <Button onClick={() => setShowVersionHistory(true)}>
@@ -211,16 +208,6 @@ function App() {
 
         {/* 添加个人信息对话框 */}
         {showProfile && <UserProfile onClose={() => setShowProfile(false)} />}
-
-        {/* 新建文档对话框 */}
-        <NewDoc
-          visible={showNewDocDialog}
-          onClose={() => setShowNewDocDialog(false)}
-          onSuccess={() => {
-            // 重新加载文档列表
-          }}
-        />
-
         {showVersionHistory && currentDocId && (
           <VersionHistory
             docId={currentDocId}
@@ -254,7 +241,6 @@ function App() {
                   <div
                     style={{ background: '#fff', padding: 20, marginTop: 18 }}
                   >
-                    <h5>我的文档</h5>
                     <DocumentList
                       currentDocId={currentDocId}
                       onDocumentSelect={(docId) => {

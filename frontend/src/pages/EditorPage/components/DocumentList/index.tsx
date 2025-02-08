@@ -1,7 +1,12 @@
 import { API_BASE_URL } from '@/config';
 import { fetchWithAuth } from '@/utils/fetch';
-import { EllipsisOutlined, FileTextOutlined } from '@ant-design/icons';
 import {
+  EllipsisOutlined,
+  FileTextOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
+import {
+  Button,
   Dropdown,
   Input,
   List,
@@ -26,11 +31,14 @@ const DocumentList: React.FC<DocumentListProps> = ({
   const [documents, setDocuments] = useState<any[]>([]);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [newDocModalVisible, setNewDocModalVisible] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<{
     id: string;
     title: string;
   } | null>(null);
   const [newTitle, setNewTitle] = useState('');
+  const [newDocTitle, setNewDocTitle] = useState('');
+  const [loading, setLoading] = useState(false);
 
   // 加载文档列表
   const loadDocuments = async () => {
@@ -139,6 +147,48 @@ const DocumentList: React.FC<DocumentListProps> = ({
     }
   };
 
+  // 新建文档函数
+  const handleNewDocument = async () => {
+    if (!newDocTitle.trim()) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/documents`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: newDocTitle,
+          content: '',
+        }),
+      });
+
+      if (response?.ok) {
+        // const result = await response.json();
+        setNewDocTitle('');
+        loadDocuments();
+        onDocumentsChange();
+        setNewDocModalVisible(false);
+        // 选中新创建的文档（创建成功的时候把 id 返回给父组件）
+        // onDocumentSelect(result.data.id.toString());
+      } else {
+        const result = await response?.json();
+        throw new Error(result.message || '创建文档失败');
+      }
+    } catch (error) {
+      console.error('Create document error:', error);
+      Modal.error({
+        title: '创建失败',
+        content: (error as Error).message || '创建文档失败，请稍后重试',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadDocuments();
   }, []);
@@ -163,6 +213,26 @@ const DocumentList: React.FC<DocumentListProps> = ({
 
   return (
     <>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '16px',
+        }}
+      >
+        <Typography.Text strong style={{ fontSize: '16px' }}>
+          我的文档
+        </Typography.Text>
+        <Button
+          type="primary"
+          size="small"
+          icon={<PlusOutlined />}
+          onClick={() => setNewDocModalVisible(true)}
+        >
+          新建文档
+        </Button>
+      </div>
       <List
         className="document-list"
         dataSource={documents}
@@ -264,6 +334,33 @@ const DocumentList: React.FC<DocumentListProps> = ({
         <p>
           确定要删除文档 &quot;{selectedDoc?.title}&quot; 吗？此操作不可恢复。
         </p>
+      </Modal>
+
+      {/* 新建文档对话框 */}
+      <Modal
+        title="新建文档"
+        open={newDocModalVisible}
+        onCancel={() => setNewDocModalVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setNewDocModalVisible(false)}>
+            取消
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            loading={loading}
+            onClick={handleNewDocument}
+          >
+            确定
+          </Button>,
+        ]}
+      >
+        <Input
+          value={newDocTitle}
+          onChange={(e) => setNewDocTitle(e.target.value)}
+          placeholder="请输入文档标题"
+          onPressEnter={handleNewDocument}
+        />
       </Modal>
     </>
   );
