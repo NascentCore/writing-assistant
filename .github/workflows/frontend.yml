@@ -43,7 +43,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -t rsa dev.llm.sxwl.ai >> ~/.ssh/known_hosts
+          ssh-keyscan -p60022 -t rsa dev.llm.sxwl.ai >> ~/.ssh/known_hosts
 
       - name: Deploy to Hosting Service
         run: |
