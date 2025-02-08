@@ -444,7 +444,7 @@ function App() {
         ],
           models: {
             openai: {
-              customUrl: "http://localhost:8000/api/v1/completions",
+              customUrl: `${API_BASE_URL}/api/v1/completions`,
               model: "",
               apiKey: "",
             },
