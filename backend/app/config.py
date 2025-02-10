@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://localhost:8001/v1")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "chatglm3")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "EMPTY")
+    LLM_SYSTEM_PROMPT: str = os.getenv("LLM_SYSTEM_PROMPT", "你是一个售前方案写作助手，请根据用户的问题给出回答。")
     
     # API文档配置
     API_DOCS_TITLE: str = "AI Editor API Documentation"
