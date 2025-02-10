@@ -45,8 +45,7 @@ async def get_config():
         "message": "success",
         "data": {
             "llm": {
-                "base_url": settings.LLM_BASE_URL,
-                "model": settings.LLM_MODEL
+                "models": [model["readable_model_name"] for model in settings.LLM_MODELS]
             }
         }
     }
@@ -56,6 +55,7 @@ class Message(BaseModel):
     content: str = Field(..., description="消息内容", example="你好，请问有什么可以帮助你的？")
 
 class CompletionRequest(BaseModel):
+    model_name: str = Field(..., description="模型名称")
     messages: List[Message] = Field(..., description="对话消息列表")
     stream: bool = Field(False, description="是否使用流式响应")
     temperature: Optional[float] = Field(0.7, description="温度参数，控制随机性，范围0-2", ge=0, le=2)
@@ -93,6 +93,7 @@ async def completions(
     OpenAI 兼容的 completions 接口
     
     Args:\n
+        model_name: 模型名称\n
         messages: 对话消息列表，包含role和content\n
         stream: 是否使用流式响应\n
         temperature: 温度参数，控制随机性\n
@@ -108,6 +109,27 @@ async def completions(
     """
     body = request.model_dump(exclude_none=True)
     stream = body.get("stream", False)
+    # 获取模型名称并校验
+    model_name = body.get("model_name")
+    llm_config = None
+    
+    # 从配置中获取LLM模型列表
+    llm_models = settings.LLM_MODELS
+    
+    # 如果未指定模型或模型不在配置列表中,使用第一个模型作为默认值
+    if not model_name or not any(m["readable_model_name"] == model_name for m in llm_models):
+        llm_config = llm_models[0]
+    else:
+        # 获取指定模型的配置
+        for m in llm_models:
+            if m["readable_model_name"] == model_name:
+                llm_config = m
+                break
+    
+    # 更新body中的模型信息
+    base_url = llm_config["base_url"]
+    model = llm_config["model"] 
+    api_key = llm_config["api_key"]
 
     # 处理划选的文本内容
     if "selected_content" in body:
@@ -171,20 +193,26 @@ async def completions(
             }]
     
     # model
-    body["model"] = settings.LLM_MODEL
+    body["model"] = model
     
     # 配置 OpenAI 客户端
     client = openai.AsyncOpenAI(
-        base_url=settings.LLM_BASE_URL,
-        api_key=settings.LLM_API_KEY
+        base_url=base_url,
+        api_key=api_key
+    )
+    
+    # 调用 OpenAI API
+    completion = await client.chat.completions.create(
+        model=model,
+        messages=body.get("messages", []),
+        temperature=body.get("temperature", 0.7),
+        stream=stream,
+        max_tokens=body.get("max_tokens", None)
     )
     
     if stream:
         # 流式响应
         async def generate_stream():
-            completion = await client.chat.completions.create(
-                **body
-            )
             async for chunk in completion:
                 yield f"data: {json.dumps(chunk.model_dump())}\n\n"
                 
@@ -194,9 +222,6 @@ async def completions(
         )
     else:
         # 非流式响应
-        completion = await client.chat.completions.create(
-            **body
-        )
         return completion.model_dump()
 
 @router.post("/upload")
@@ -656,5 +681,23 @@ async def update_prompt_template(
             "key": db_template.key,
             "prompt": db_template.value,
             "description": db_template.description
+        }
+    }
+
+
+@router.get("/models")
+async def get_models():
+    """获取支持的模型列表"""
+    return {
+        "message": "success",
+        "data": {
+            "models": [
+                {
+                    "id": model["model"],
+                    "name": model["readable_model_name"],
+                    "description": model["system_prompt"]
+                }
+                for model in settings.LLM_MODELS
+            ]
         }
     }

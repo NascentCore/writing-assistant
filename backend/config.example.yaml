@@ -1,0 +1,25 @@
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+
+# 数据库配置
+mysql:
+  host: "localhost"
+  port: 3306
+  user: "root"
+  password: "your_password"
+  database: "aieditor"
+
+# 上传文件配置
+upload:
+  dir: "uploads"
+
+# LLM配置
+llm_models:
+  - base_url: "http://localhost:8001/v1"
+    model: "chatglm3"
+    api_key: "your_api_key_here"
+    readable_model_name: "chatglm3-6b-8192"
+    system_prompt: "你是一个专业的写作助手,擅长帮助用户改进文章的结构、内容和表达。"
