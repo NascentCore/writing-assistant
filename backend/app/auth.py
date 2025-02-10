@@ -13,7 +13,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # 配置 JWT
 SECRET_KEY = "your-secret-key"  # 请更换为安全的密钥
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 600
+ACCESS_TOKEN_EXPIRE_MINUTES = 7 * 24 * 60
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
