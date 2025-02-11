@@ -34,7 +34,7 @@ function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [outlineData, setOutlineData] = useState<OutlineNode[]>([]);
-  const [showAIChat, setShowAIChat] = useState(true);
+  const [showAIChat, setShowAIChat] = useState(false);
 
   // 保存文档内容的函数
   const saveDocument = async (content: string) => {
