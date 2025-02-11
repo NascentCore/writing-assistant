@@ -60,20 +60,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 修改静态文件挂载
-# app.mount("/static", StaticFiles(directory="build/static"), name="static")
-# app.mount("/assets", StaticFiles(directory="build"), name="assets")
-# templates = Jinja2Templates(directory="build")
-
 # 注册路由
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(api.router, prefix="/api/v1", tags=["api"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])  # 修改用户路由前缀
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def root():
-    return templates.TemplateResponse("index.html", {"request": {}})
-
+    return {
+        "status": "ok",
+        "message": "API is running",
+        "version": settings.VERSION
+    }
 
 # 启动服务器的入口点
 if __name__ == "__main__":

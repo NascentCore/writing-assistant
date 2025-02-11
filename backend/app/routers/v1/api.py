@@ -54,7 +54,7 @@ class Message(BaseModel):
     content: str = Field(..., description="消息内容", example="你好，请问有什么可以帮助你的？")
 
 class CompletionRequest(BaseModel):
-    model_name: str = Field(..., description="模型名称")
+    model_name: Optional[str] = Field(None, description="模型名称")
     messages: List[Message] = Field(..., description="对话消息列表")
     stream: bool = Field(False, description="是否使用流式响应")
     temperature: Optional[float] = Field(0.7, description="温度参数，控制随机性，范围0-2", ge=0, le=2)
