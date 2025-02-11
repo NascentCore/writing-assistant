@@ -17,12 +17,10 @@ class UploadFile(Base):
     file_path = Column(String(255), comment="文件存储路径")
     status = Column(Integer, default=0, comment="状态: 0未解析, 1解析中, 2解析成功, 3解析失败")
     content = Column(Text, comment="解析出的文本内容")
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(100), comment="用户ID")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     is_deleted = Column(Boolean, default=False)
-    
-    user = relationship("User", back_populates="upload_files")
     
     # 添加索引
     __table_args__ = (
