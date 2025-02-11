@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from app.routers.v1 import api, auth, users
+from app.routers.v1 import api, auth, users, conversation
 from app.config import settings
 from app.database import engine, Base
 from app.models import document, upload_file, user  # 添加 user 模型
@@ -69,6 +69,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(api.router, prefix="/api/v1", tags=["api"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])  # 修改用户路由前缀
+app.include_router(conversation.router, prefix="/api/v1/conversation", tags=["conversation"])  # 会话
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
