@@ -1,3 +1,4 @@
+import shortuuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -41,7 +42,8 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     db_user = User(
         username=user.username,
         email=user.email,
-        hashed_password=hashed_password
+        hashed_password=hashed_password,
+        user_id=f"user-{shortuuid.uuid()}"
     )
     db.add(db_user)
     db.commit()
@@ -50,7 +52,7 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     # 创建访问令牌
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
+        data={"sub": user.username, "user_id": db_user.user_id}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -67,6 +69,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
+        data={"sub": user.username, "user_id": user.user_id}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"} 

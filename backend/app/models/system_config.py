@@ -10,5 +10,6 @@ class SystemConfig(Base):
     key = Column(String(100), unique=True, index=True, comment="配置键")
     value = Column(Text, comment="配置值")
     description = Column(String(200), comment="配置描述")
+    user_id = Column(String(100), comment="用户ID")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now()) 

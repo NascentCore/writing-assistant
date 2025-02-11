@@ -1,7 +1,6 @@
-import os
-import uuid
 from fastapi import APIRouter, Request, UploadFile as FastAPIUploadFile, File, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+import shortuuid
 from app.config import settings
 import openai
 import json
@@ -232,10 +231,8 @@ async def upload_files(
     
     result = []
     for file in files:
-        # 使用uuid4的前8位
-        file_id = str(uuid.uuid4()).split('-')[0]  # 8位字符
-        # 获取原始文件扩展名
-        file_ext = Path(file.filename).suffix
+        # 使用uuid
+        file_id = shortuuid.uuid()
         # 使用 file_id 作为文件名
         file_location = upload_dir / f"{file_id}_{file.filename}"
         
@@ -325,7 +322,7 @@ async def create_document(
     document = Document(
         title=doc.title,
         content=doc.content,
-        user_id=current_user.id
+        user_id=current_user.user_id
     )
     db.add(document)
     db.commit()
@@ -353,7 +350,7 @@ async def update_document(
     """更新文档内容"""
     document = db.query(Document).filter(
         Document.id == doc_id,
-        Document.user_id == current_user.id
+        Document.user_id == current_user.user_id
     ).first()
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权访问")
@@ -405,7 +402,7 @@ async def get_document_versions(
     # 检查文档所有权
     document = db.query(Document).filter(
         Document.id == doc_id,
-        Document.user_id == current_user.id
+        Document.user_id == current_user.user_id
     ).first()
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权访问")
@@ -438,7 +435,7 @@ async def create_document_version(
     # 检查文档所有权
     document = db.query(Document).filter(
         Document.id == doc_id,
-        Document.user_id == current_user.id
+        Document.user_id == current_user.user_id
     ).first()
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权访问")
@@ -474,7 +471,7 @@ async def rollback_document(
     # 检查文档所有权
     document = db.query(Document).filter(
         Document.id == doc_id,
-        Document.user_id == current_user.id
+        Document.user_id == current_user.user_id
     ).first()
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权访问")
@@ -515,7 +512,7 @@ async def get_documents(
 ):
     """获取当前用户的所有文档"""
     documents = db.query(Document).filter(
-        Document.user_id == current_user.id
+        Document.user_id == current_user.user_id
     ).order_by(desc(Document.updated_at)).all()
     return {
         "message": "获取成功",
@@ -538,7 +535,7 @@ async def get_document(
     """获取单个文档"""
     document = db.query(Document).filter(
         Document.id == doc_id,
-        Document.user_id == current_user.id
+        Document.user_id == current_user.user_id
     ).first()
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权访问")
@@ -562,7 +559,7 @@ async def delete_document(
     """删除文档"""
     document = db.query(Document).filter(
         Document.id == doc_id,
-        Document.user_id == current_user.id
+        Document.user_id == current_user.user_id
     ).first()
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权访问")

@@ -10,11 +10,11 @@ class Document(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(100))
     content = Column(Text)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(String(100), comment="用户ID")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    user = relationship("User", back_populates="documents")
+    # user = relationship("User", back_populates="documents")
     versions = relationship("DocumentVersion", back_populates="document", cascade="all, delete-orphan")
 
 class DocumentVersion(Base):
