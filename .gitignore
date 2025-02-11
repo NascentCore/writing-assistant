@@ -64,3 +64,4 @@ uploads/
 .coverage
 htmlcov/
 .pytest_cache/
+config.yaml
