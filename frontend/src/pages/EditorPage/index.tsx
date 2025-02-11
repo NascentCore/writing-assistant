@@ -6,6 +6,7 @@ import 'aieditor/dist/style.css';
 import { Button } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import AIChat from './components/AIChat';
 import DocumentList from './components/DocumentList';
 import ExportBtnGroup from './components/ExportBtn';
 import OutLine from './components/OutLine';
@@ -33,6 +34,7 @@ function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [outlineData, setOutlineData] = useState<OutlineNode[]>([]);
+  const [showAIChat, setShowAIChat] = useState(true);
 
   // 保存文档内容的函数
   const saveDocument = async (content: string) => {
@@ -145,6 +147,25 @@ function App() {
     if (divRef.current) {
       const aiEditor = new AiEditor({
         ...getEditorConfig(divRef.current),
+        textSelectionBubbleMenu: {
+          enable: true,
+          items: [
+            'ai',
+            'Bold',
+            'Italic',
+            'Underline',
+            {
+              id: 'visit',
+              title: '插入到对话',
+              icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6V8H5V19H16V14H18V20C18 20.5523 17.5523 21 17 21H4C3.44772 21 3 20.5523 3 20V7C3 6.44772 3.44772 6 4 6H10ZM21 3V11H19L18.9999 6.413L11.2071 14.2071L9.79289 12.7929L17.5849 5H13V3H21Z"></path></svg>',
+              onClick: (editor) => {
+                const content = editor.getSelectedText();
+                console.log('🚀 ~ useEffect ~ content:', content);
+                // window.open('https://aieditor.dev', '_blank');
+              },
+            },
+          ],
+        },
         onCreated: async (editor) => {
           // 在编辑器创建完成后，如果有当前文档ID，就加载文档内容
           if (currentDocId) {
@@ -186,12 +207,32 @@ function App() {
     }
   }, [currentDocId]);
 
+  // 添加键盘事件监听
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      // 检查是否按下 Ctrl + K
+      if (event.ctrlKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault(); // 阻止默认行为
+        setShowAIChat((prev) => !prev);
+      }
+    };
+
+    // 添加事件监听
+    window.addEventListener('keydown', handleKeyPress);
+
+    // 清理函数
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, []);
+
   return (
     <div style={{ padding: 0, margin: 0, background: '#f3f4f6' }}>
       <>
         <div className="page-header">
           <h1>售前方案写作助手</h1>
           <div className="header-buttons">
+            <Button onClick={() => setShowAIChat(!showAIChat)}>AI对话</Button>
             <ExportBtnGroup editorRef={editorRef} />
             {currentDocId && (
               <Button onClick={() => setShowVersionHistory(true)}>
@@ -231,7 +272,10 @@ function App() {
         )}
 
         <div ref={divRef} style={{ padding: 0, margin: 0 }}>
-          <div className="aie-container" style={{ backgroundColor: '#f3f4f6' }}>
+          <div
+            className={`aie-container ${showAIChat ? 'with-ai-chat' : ''}`}
+            style={{ backgroundColor: '#f3f4f6' }}
+          >
             <div className="aie-header-panel">
               <div className="aie-container-header"></div>
             </div>
@@ -263,6 +307,11 @@ function App() {
             </div>
             <div className="aie-container-footer"></div>
           </div>
+          {showAIChat && (
+            <div className="ai-chat-panel">
+              <AIChat />
+            </div>
+          )}
         </div>
       </>
     </div>

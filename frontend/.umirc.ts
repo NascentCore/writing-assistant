@@ -9,7 +9,8 @@ export default defineConfig({
   // layout: {
   //   title: '@umijs/max',
   // },
-  mako: {},
+  // mako: {},
+  mfsu: {},
   locale: {
     default: 'zh-CN', // 默认语言
     antd: true, // 启用 antd 国际化
