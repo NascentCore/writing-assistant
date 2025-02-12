@@ -3,12 +3,13 @@ import { fetchWithAuth } from '@/utils/fetch';
 import { useDebounceFn } from 'ahooks';
 import { AiEditor } from 'aieditor';
 import 'aieditor/dist/style.css';
-import { Button } from 'antd';
+import { Button, Modal } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AIChat from './components/AIChat';
 import DocumentList from './components/DocumentList';
 import ExportBtnGroup from './components/ExportBtn';
+import FileUpload from './components/FileUpload';
 import OutLine from './components/OutLine';
 import UserProfile from './components/UserProfile';
 import VersionHistory from './components/VersionHistory';
@@ -35,6 +36,7 @@ function App() {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [outlineData, setOutlineData] = useState<OutlineNode[]>([]);
   const [showAIChat, setShowAIChat] = useState(false);
+  const [showFileModal, setShowFileModal] = useState(false);
 
   // 保存文档内容的函数
   const saveDocument = async (content: string) => {
@@ -149,22 +151,7 @@ function App() {
         ...getEditorConfig(divRef.current),
         textSelectionBubbleMenu: {
           enable: true,
-          items: [
-            'ai',
-            'Bold',
-            'Italic',
-            'Underline',
-            {
-              id: 'visit',
-              title: '插入到对话',
-              icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6V8H5V19H16V14H18V20C18 20.5523 17.5523 21 17 21H4C3.44772 21 3 20.5523 3 20V7C3 6.44772 3.44772 6 4 6H10ZM21 3V11H19L18.9999 6.413L11.2071 14.2071L9.79289 12.7929L17.5849 5H13V3H21Z"></path></svg>',
-              onClick: (editor) => {
-                const content = editor.getSelectedText();
-                console.log('🚀 ~ useEffect ~ content:', content);
-                // window.open('https://aieditor.dev', '_blank');
-              },
-            },
-          ],
+          items: ['ai'],
         },
         onCreated: async (editor) => {
           // 在编辑器创建完成后，如果有当前文档ID，就加载文档内容
@@ -172,6 +159,21 @@ function App() {
             await loadDocumentContent(editor, currentDocId);
           } else {
             updateOutLine(editor);
+          }
+        },
+        onSelectionUpdate: () => {
+          // 获取选中的文本
+          const selectedText = editorRef.current?.getSelectedText();
+          if (selectedText && selectedText.trim()) {
+            // 查找AI按钮并触发点击
+            setTimeout(() => {
+              const aiButton = document.querySelector(
+                '.aie-bubble-menu-item[id="ai"]',
+              ) as HTMLElement;
+              if (aiButton) {
+                aiButton.click();
+              }
+            }, 100);
           }
         },
         onChange: async (editor) => {
@@ -211,7 +213,7 @@ function App() {
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
       // 检查是否按下 Ctrl + K
-      if (event.ctrlKey && event.key.toLowerCase() === 'k') {
+      if (event.metaKey && event.key.toLowerCase() === 'l') {
         event.preventDefault(); // 阻止默认行为
         setShowAIChat((prev) => !prev);
       }
@@ -232,6 +234,7 @@ function App() {
         <div className="page-header">
           <h1>售前方案写作助手</h1>
           <div className="header-buttons">
+            <Button onClick={() => setShowFileModal(true)}> 文件管理</Button>
             <Button onClick={() => setShowAIChat(!showAIChat)}>AI对话</Button>
             <ExportBtnGroup editorRef={editorRef} />
             {currentDocId && (
@@ -246,6 +249,17 @@ function App() {
             </div>
           </div>
         </div>
+
+        {/* 文件管理对话框 */}
+        <Modal
+          title="文件管理"
+          open={showFileModal}
+          onCancel={() => setShowFileModal(false)}
+          footer={null}
+          width={800}
+        >
+          <FileUpload />
+        </Modal>
 
         {/* 添加个人信息对话框 */}
         {showProfile && <UserProfile onClose={() => setShowProfile(false)} />}
@@ -309,7 +323,7 @@ function App() {
           </div>
           {showAIChat && (
             <div className="ai-chat-panel">
-              <AIChat />
+              <AIChat setShowAIChat={setShowAIChat} />
             </div>
           )}
         </div>

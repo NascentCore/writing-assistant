@@ -117,10 +117,6 @@ export interface EditorConfig {
   toolbarKeys: string[];
   toolbarSize: 'medium' | 'small' | 'large';
   ai: typeof aiConfig;
-  // textSelectionBubbleMenu: {
-  //   enable: boolean;
-  //   items: any[];
-  // };
 }
 
 export function getEditorConfig(element: HTMLElement): EditorConfig {

@@ -2,13 +2,13 @@ FROM node:18 AS builder
 
 WORKDIR /app
 
-# 复制 package.json 和 yarn.lock 并安装依赖
+# 复制 package.json 和 pnpm-lock.yaml 并安装依赖
 COPY package.json ./
-RUN yarn install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # 复制项目代码并构建
 COPY . ./
-RUN yarn build
+RUN pnpm build
 
 # 使用 nginx 作为 Web 服务器
 FROM nginx:1.25-alpine

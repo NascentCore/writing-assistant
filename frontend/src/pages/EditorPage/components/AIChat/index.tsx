@@ -1,10 +1,28 @@
-import { DeleteOutlined, UserOutlined } from '@ant-design/icons';
+import { fetchWithAuthNew } from '@/utils/fetch';
+import {
+  CloseCircleOutlined,
+  DeleteOutlined,
+  PlusCircleOutlined,
+  SwapOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { Bubble, Sender, XProvider } from '@ant-design/x';
-import { Button, Flex } from 'antd';
+import { Button, Dropdown, Flex, MenuProps, Select } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './index.module.less';
 
 const STORAGE_KEY = 'ai_chat_messages';
+const MODEL_STORAGE_KEY = 'ai_chat_model';
+
+// 定义模型接口类型
+interface Model {
+  id: string;
+  name: string;
+  description: string;
+}
+
+// 定义可用的模型类型
+type ModelType = string;
 
 interface ChatMessage {
   key: string;
@@ -27,9 +45,19 @@ const getAvatarIcon = () => {
 
 const DEFAULT_MESSAGE = createMessage('你好，我是你的AI助手', false);
 
-const AIChat: React.FC = () => {
+interface AIChatProps {
+  setShowAIChat: (show: boolean) => void;
+}
+
+const AIChat: React.FC<AIChatProps> = ({ setShowAIChat }) => {
   const [value, setValue] = useState('');
   const [resetKey, setResetKey] = useState(0); // 添加重置键
+  const [models, setModels] = useState<Model[]>([]);
+  const [open, setOpen] = React.useState(false);
+  const [selectedModel, setSelectedModel] = useState<ModelType>(() => {
+    const savedModel = localStorage.getItem(MODEL_STORAGE_KEY);
+    return savedModel || '';
+  });
   const [messages, setMessages] = useState(() => {
     const savedMessages = localStorage.getItem(STORAGE_KEY);
     if (savedMessages) {
@@ -51,6 +79,24 @@ const AIChat: React.FC = () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
     }
   }, [messages]);
+
+  // 获取模型列表
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const response = await fetchWithAuthNew('/api/v1/models');
+        setModels(response.models);
+        // 如果没有选中的模型，默认选择第一个
+        if (!selectedModel && response.models.length > 0) {
+          setSelectedModel(response.models[0].id);
+          localStorage.setItem(MODEL_STORAGE_KEY, response.models[0].id);
+        }
+      } catch (error) {
+        console.error('获取模型列表失败:', error);
+      }
+    };
+    fetchModels();
+  }, []);
 
   // 添加一个函数来检查是否在底部附近
   const isNearBottom = () => {
@@ -109,6 +155,12 @@ const AIChat: React.FC = () => {
     avatar: getAvatarIcon(),
   }));
 
+  // 处理模型变更
+  const handleModelChange = (value: ModelType) => {
+    setSelectedModel(value);
+    localStorage.setItem(MODEL_STORAGE_KEY, value);
+  };
+
   // 可以用于滚动的懒加载
   // useEffect(() => {
   //   // 添加滚动事件处理
@@ -146,7 +198,54 @@ const AIChat: React.FC = () => {
   //     }
   //   };
   // }, []);
-
+  const headerNode = (
+    <Sender.Header
+      title="附件"
+      open={open}
+      onOpenChange={setOpen}
+      closable={false}
+    >
+      <div>1111</div>
+    </Sender.Header>
+  );
+  const items: MenuProps['items'] = [
+    {
+      key: '1',
+      label: (
+        <a
+          target="_blank"
+          rel="noopener noreferrer"
+          href="https://www.antgroup.com"
+        >
+          1st menu item
+        </a>
+      ),
+    },
+    {
+      key: '2',
+      label: (
+        <a
+          target="_blank"
+          rel="noopener noreferrer"
+          href="https://www.aliyun.com"
+        >
+          2nd menu item
+        </a>
+      ),
+    },
+    {
+      key: '3',
+      label: (
+        <a
+          target="_blank"
+          rel="noopener noreferrer"
+          href="https://www.luohanacademy.com"
+        >
+          3rd menu item
+        </a>
+      ),
+    },
+  ];
   return (
     <div key={resetKey}>
       <XProvider>
@@ -174,26 +273,72 @@ const AIChat: React.FC = () => {
               marginBottom: 12,
             }}
           >
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 500 }}>
-              AI助手
-            </h3>
-            <Button
-              icon={<DeleteOutlined />}
-              type="text"
-              onClick={handleClearChat}
-              title="清除聊天记录"
-            />
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  fontSize: '16px',
+                  fontWeight: 500,
+                  marginRight: 20,
+                  marginTop: -7,
+                }}
+              >
+                AI助手
+              </div>
+              <Select
+                size="small"
+                value={selectedModel}
+                onChange={handleModelChange}
+                prefix={<SwapOutlined />}
+                style={{ width: 120, marginBottom: 8 }}
+              >
+                {models.map((model) => (
+                  <Select.Option
+                    key={model.id}
+                    value={model.id}
+                    title={model.description}
+                  >
+                    {model.name}
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Button
+                icon={<DeleteOutlined />}
+                type="text"
+                onClick={handleClearChat}
+              />
+              <Button
+                icon={<CloseCircleOutlined />}
+                type="text"
+                onClick={() => setShowAIChat(false)}
+              />
+            </div>
           </Flex>
           <div className={styles.scrollContainer} ref={scrollContainerRef}>
             <Bubble.List items={displayMessages} />
           </div>
-          <Sender
-            value={value}
-            onChange={(nextVal: string) => {
-              setValue(nextVal);
-            }}
-            onSubmit={handleSubmit}
-          />
+          <div>
+            <Sender
+              header={headerNode}
+              value={value}
+              prefix={
+                <Dropdown menu={{ items }} trigger={['click']} placement="top">
+                  <Button
+                    type="text"
+                    icon={<PlusCircleOutlined style={{ fontSize: 18 }} />}
+                    // onClick={() => {
+                    //   setOpen(!open);
+                    // }}
+                  />
+                </Dropdown>
+              }
+              onChange={(nextVal: string) => {
+                setValue(nextVal);
+              }}
+              onSubmit={handleSubmit}
+            />
+          </div>
         </Flex>
       </XProvider>
     </div>
