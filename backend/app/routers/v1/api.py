@@ -18,6 +18,7 @@ from sqlalchemy import desc
 from app.auth import get_current_user
 from app.models.user import User
 from app.models.system_config import SystemConfig
+from urllib.parse import quote  # 添加这个导入
 
 router = APIRouter()
 
@@ -63,7 +64,7 @@ class CompletionRequest(BaseModel):
     
     file_ids: Optional[List[str]] = Field(None, description="引用的文件ID列表")
     doc_id: Optional[str] = Field(None, description="引用的文档ID，及当前编辑的文档ID")
-    selected_content: Optional[str] = Field(None, description="划选的文本内容")
+    selected_contents: Optional[List[str]] = Field(None, description="划选的文本内容列表")
 
     class Config:
         json_schema_extra = {
@@ -76,7 +77,7 @@ class CompletionRequest(BaseModel):
                 ],
                 "file_ids": ["abc123"],
                 "doc_id": "abc123",
-                "selected_content": "这是一段划选的文本内容",
+                "selected_contents": ["这是第一段划选的文本", "这是第二段划选的文本"],
                 "stream": True,
                 "temperature": 0.7,
                 "max_tokens": 2000
@@ -97,10 +98,10 @@ async def completions(
         stream: 是否使用流式响应\n
         temperature: 温度参数，控制随机性\n
         top_p: 核采样参数\n
-        max_tokens: 生成的最大token数量
+        max_tokens: 生成的最大token数量\n
         file_ids: 引用的文件ID列表，这些文件的内容会作为上下文\n
         doc_id: 引用的文档ID，及当前编辑的文档ID\n
-        selected_content: 划选的文本内容
+        selected_contents: 划选的文本内容列表
 
     Returns:\n
         stream=False时返回完整的补全结果\n
@@ -131,12 +132,14 @@ async def completions(
     api_key = llm_config["api_key"]
 
     # 处理划选的文本内容
-    if "selected_content" in body:
-        selected_content = body["selected_content"]
-        del body["selected_content"]
-        if selected_content:
+    if "selected_contents" in body:
+        selected_contents = body["selected_contents"]
+        del body["selected_contents"]
+        if selected_contents and len(selected_contents) > 0:
             # 构建划选的文本内容
-            selected_content_message = f"# 划选 的文本内容\n{selected_content}"
+            selected_content_message = "# 划选的文本内容\n"
+            for i, content in enumerate(selected_contents, 1):
+                selected_content_message += f"## 划选 {i}\n{content}\n\n"
 
             # 将划选的文本内容添加到原始消息中
             original_message = body["messages"][0]["content"] if body["messages"] else ""
@@ -359,6 +362,52 @@ async def get_files(
             "pages": pages
         }
     }
+
+@router.get("/files/{file_id}/download")
+async def download_file(
+    file_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    下载指定的文件
+    
+    Args:
+        file_id: 文件ID
+        
+    Returns:
+        文件的二进制流
+    """
+    # 查询文件信息
+    file = db.query(UploadFile).filter(
+        UploadFile.file_id == file_id,
+        UploadFile.user_id == current_user.user_id
+    ).first()
+    
+    if not file:
+        raise HTTPException(status_code=404, detail="文件不存在或无权访问")
+    
+    file_path = Path(file.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    # 创建文件流
+    def iterfile():
+        with open(file_path, "rb") as f:
+            yield from f
+    
+    # 对文件名进行 URL 编码        
+    encoded_filename = quote(file.file_name)
+            
+    # 返回文件流响应
+    return StreamingResponse(
+        iterfile(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=utf-8\'\'{encoded_filename}'
+        }
+    )
+
 
 @router.post("/documents")
 async def create_document(
