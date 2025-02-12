@@ -24,51 +24,91 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-@router.post("/register", response_model=Token)
+@router.post("/register")
 async def register(user: UserCreate, db: Session = Depends(get_db)):
     """注册新用户"""
-    # 检查用户名是否已存在
-    db_user = db.query(User).filter(User.username == user.username).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="用户名已被注册")
-    
-    # 检查邮箱是否已存在
-    db_user = db.query(User).filter(User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="邮箱已被注册")
-    
-    # 创建新用户
-    hashed_password = get_password_hash(user.password)
-    db_user = User(
-        username=user.username,
-        email=user.email,
-        hashed_password=hashed_password,
-        user_id=f"user-{shortuuid.uuid()}"
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
-    # 创建访问令牌
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username, "user_id": db_user.user_id}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    try:
+        # 检查用户名是否已存在
+        db_user = db.query(User).filter(User.username == user.username).first()
+        if db_user:
+            return {
+                "code": 400,
+                "message": "用户名已被注册",
+                "data": None
+            }
+        
+        # 检查邮箱是否已存在
+        db_user = db.query(User).filter(User.email == user.email).first()
+        if db_user:
+            return {
+                "code": 400,
+                "message": "邮箱已被注册",
+                "data": None
+            }
+        
+        # 创建新用户
+        hashed_password = get_password_hash(user.password)
+        db_user = User(
+            username=user.username,
+            email=user.email,
+            hashed_password=hashed_password,
+            user_id=f"user-{shortuuid.uuid()}"
+        )
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        
+        # 创建访问令牌
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username, "user_id": db_user.user_id}, 
+            expires_delta=access_token_expires
+        )
+        
+        return {
+            "code": 200,
+            "message": "注册成功",
+            "data": {
+                "access_token": access_token,
+                "token_type": "bearer"
+            }
+        }
+    except Exception as e:
+        return {
+            "code": 400,
+            "message": f"注册失败: {str(e)}",
+            "data": None
+        }
 
-@router.post("/token", response_model=Token)
+@router.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """用户登录"""
-    user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        user = db.query(User).filter(User.username == form_data.username).first()
+        if not user or not verify_password(form_data.password, user.hashed_password):
+            return {
+                "code": 400,
+                "message": "用户名或密码错误",
+                "data": None
+            }
+        
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username, "user_id": user.user_id}, 
+            expires_delta=access_token_expires
         )
-    
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username, "user_id": user.user_id}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"} 
+        
+        return {
+            "code": 200,
+            "message": "登录成功",
+            "data": {
+                "access_token": access_token,
+                "token_type": "bearer"
+            }
+        }
+    except Exception as e:
+        return {
+            "code": 400,
+            "message": f"登录失败: {str(e)}",
+            "data": None
+        } 
