@@ -8,6 +8,7 @@ class Document(Base):
     __tablename__ = "documents"
     
     id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(String(100), unique=True, index=True, comment="文档ID")
     title = Column(String(100))
     content = Column(Text)
     user_id = Column(String(100), comment="用户ID")
@@ -22,7 +23,7 @@ class DocumentVersion(Base):
     __tablename__ = "document_versions"
     
     id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"))
+    doc_id = Column(String(100), ForeignKey("documents.doc_id", ondelete="CASCADE"), comment="文档ID")
     content = Column(Text)
     version = Column(Integer)
     comment = Column(String(200), nullable=True)

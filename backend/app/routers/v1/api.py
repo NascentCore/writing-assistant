@@ -158,15 +158,12 @@ async def completions(
             del body["doc_id"]
             if isinstance(doc_id, str):
                 # 获取文档内容
-                doc = db.query(Document).filter(Document.id == doc_id).first()
+                doc = db.query(Document).filter(Document.doc_id == doc_id).first()
                 
                 if not doc:
                     return {
-                        "code": 404,
+                        "code": 400,
                         "message": "引用的文档不存在",
-                        "type": "document_not_found",
-                        "param": "doc_id",
-                        "code": "document_not_found"
                     }
 
                 # 构建参考文档内容
@@ -200,7 +197,7 @@ async def completions(
                 
                 if missing_file_ids:
                     return {
-                        "code": 404,
+                        "code": 400,
                         "message": f"以下文件不存在: {', '.join(missing_file_ids)}",
                         "data": None
                     }
@@ -473,7 +470,8 @@ async def create_document(
         document = Document(
             title=doc.title,
             content=doc.content,
-            user_id=current_user.user_id
+            user_id=current_user.user_id,
+            doc_id=f"doc-{shortuuid.uuid()}"
         )
         db.add(document)
         db.commit()
@@ -481,7 +479,7 @@ async def create_document(
 
         # 创建第一个版本
         initial_version = DocumentVersion(
-            document_id=document.id,
+            doc_id=document.doc_id,
             content=doc.content,
             version=1,
             comment="初始版本"
@@ -493,7 +491,7 @@ async def create_document(
             "code": 200,
             "message": "创建成功",
             "data": {
-                "id": document.id,
+                "doc_id": document.doc_id,
                 "title": document.title,
                 "content": document.content,
                 "created_at": document.created_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -508,14 +506,14 @@ async def create_document(
 
 @router.put("/documents/{doc_id}")
 async def update_document(
-    doc_id: int,
+    doc_id: str,
     doc: DocumentUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """更新文档内容"""
     document = db.query(Document).filter(
-        Document.id == doc_id,
+        Document.doc_id == doc_id,
         Document.user_id == current_user.user_id
     ).first()
     if not document:
@@ -525,14 +523,14 @@ async def update_document(
     if doc.content is not None and doc.content != document.content:
         # 获取最新版本号
         latest_version = db.query(DocumentVersion).filter(
-            DocumentVersion.document_id == doc_id
+            DocumentVersion.doc_id == doc_id
         ).order_by(desc(DocumentVersion.version)).first()
         
         new_version_number = 1 if not latest_version else latest_version.version + 1
         
         # 创建新版本
         new_version = DocumentVersion(
-            document_id=doc_id,
+            doc_id=doc_id,
             content=document.content,  # 保存更新前的内容
             version=new_version_number,
             comment=f"自动保存 - 版本 {new_version_number}"
@@ -553,7 +551,7 @@ async def update_document(
         "code": 200,
         "message": "更新成功",
         "data": {
-            "id": document.id,
+            "doc_id": document.doc_id,
             "title": document.title,
             "updated_at": document.updated_at.strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -561,21 +559,21 @@ async def update_document(
 
 @router.get("/documents/{doc_id}/versions")
 async def get_document_versions(
-    doc_id: int,
+    doc_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取文档的所有版本"""
     # 检查文档所有权
     document = db.query(Document).filter(
-        Document.id == doc_id,
+        Document.doc_id == doc_id,
         Document.user_id == current_user.user_id
     ).first()
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权访问")
     
     versions = db.query(DocumentVersion).filter(
-        DocumentVersion.document_id == doc_id
+        DocumentVersion.doc_id == doc_id
     ).order_by(desc(DocumentVersion.version)).all()
     
     return {
@@ -594,7 +592,7 @@ async def get_document_versions(
 
 @router.post("/documents/{doc_id}/versions")
 async def create_document_version(
-    doc_id: int,
+    doc_id: str,
     version: DocumentVersionCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -602,14 +600,14 @@ async def create_document_version(
     """创建新版本"""
     # 检查文档所有权
     document = db.query(Document).filter(
-        Document.id == doc_id,
+        Document.doc_id == doc_id,
         Document.user_id == current_user.user_id
     ).first()
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权访问")
     
     new_version = DocumentVersion(
-        document_id=doc_id,
+        doc_id=doc_id,
         content=version.content,
         version=version.version,
         comment=version.comment
@@ -631,7 +629,7 @@ async def create_document_version(
 
 @router.put("/documents/{doc_id}/rollback/{version}")
 async def rollback_document(
-    doc_id: int,
+    doc_id: str,
     version: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -639,7 +637,7 @@ async def rollback_document(
     """回滚到指定版本"""
     # 检查文档所有权
     document = db.query(Document).filter(
-        Document.id == doc_id,
+        Document.doc_id == doc_id,
         Document.user_id == current_user.user_id
     ).first()
     if not document:
@@ -647,7 +645,7 @@ async def rollback_document(
     
     # 获取指定版本
     target_version = db.query(DocumentVersion).filter(
-        DocumentVersion.document_id == doc_id,
+        DocumentVersion.doc_id == doc_id,
         DocumentVersion.version == version
     ).first()
     if not target_version:
@@ -659,11 +657,11 @@ async def rollback_document(
     
     # 创建新版本记录
     latest_version = db.query(DocumentVersion).filter(
-        DocumentVersion.document_id == doc_id
+        DocumentVersion.doc_id == doc_id
     ).order_by(desc(DocumentVersion.version)).first()
     
     new_version = DocumentVersion(
-        document_id=doc_id,
+        doc_id=doc_id,
         content=target_version.content,
         version=latest_version.version + 1,
         comment=f"回滚至版本 {version}"
@@ -691,7 +689,7 @@ async def get_documents(
         "message": "获取成功",
         "data": [
             {
-                "id": doc.id,
+                "doc_id": doc.doc_id,
                 "title": doc.title,
                 "updated_at": (doc.updated_at or doc.created_at).strftime("%Y-%m-%d %H:%M:%S")
             }
@@ -701,13 +699,13 @@ async def get_documents(
 
 @router.get("/documents/{doc_id}")
 async def get_document(
-    doc_id: int,
+    doc_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取单个文档"""
     document = db.query(Document).filter(
-        Document.id == doc_id,
+        Document.doc_id == doc_id,
         Document.user_id == current_user.user_id
     ).first()
     if not document:
@@ -717,7 +715,7 @@ async def get_document(
         "code": 200,
         "message": "获取成功",
         "data": {
-            "id": document.id,
+            "doc_id": document.doc_id,
             "title": document.title,
             "content": document.content,
             "updated_at": (document.updated_at or document.created_at).strftime("%Y-%m-%d %H:%M:%S")
@@ -726,13 +724,13 @@ async def get_document(
 
 @router.delete("/documents/{doc_id}")
 async def delete_document(
-    doc_id: int,
+    doc_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """删除文档"""
     document = db.query(Document).filter(
-        Document.id == doc_id,
+        Document.doc_id == doc_id,
         Document.user_id == current_user.user_id
     ).first()
     if not document:
