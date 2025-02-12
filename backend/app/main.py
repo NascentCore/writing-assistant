@@ -11,6 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 import os
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
 
 # 创建所有表
 def create_tables():
@@ -38,16 +40,30 @@ async def lifespan(app: FastAPI):
 # 创建FastAPI应用实例
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="AI编辑器后端服务",
+    description="""
+    AI编辑器后端服务
+    
+    ## 认证
+    所有需要认证的接口都需要在请求头中携带 JWT Token:
+    - 先调用token接口获取your_token
+    - 在 Swagger UI 右上角点击 "Authorize" 按钮
+    - 输入第一步获取的your_token
+    """,
     version=settings.VERSION,
     lifespan=lifespan,
-    # 添加以下配置来启用和自定义 Swagger UI
-    docs_url="/docs",  # Swagger UI 的访问路径 (默认就是 /docs)
-    redoc_url="/redoc",  # ReDoc 文档的访问路径 (默认就是 /redoc)
-    openapi_url="/openapi.json",  # OpenAPI schema 的访问路径
+    # OpenAPI/Swagger配置
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
     swagger_ui_parameters={
-        "persistAuthorization": True,  # 保持授权信息
-        "displayRequestDuration": True,  # 显示请求持续时间
+        "persistAuthorization": True,
+        "displayRequestDuration": True,
+        # 添加以下配置
+        "syntaxHighlight.theme": "obsidian",
+        "tryItOutEnabled": True,  # 默认展开 "Try it out" 按钮
+        "requestSnippetsEnabled": True,  # 显示请求示例
+        "defaultModelsExpandDepth": 3,
+        "defaultModelExpandDepth": 3,
     }
 )
 
@@ -60,20 +76,59 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 修改静态文件挂载
-# app.mount("/static", StaticFiles(directory="build/static"), name="static")
-# app.mount("/assets", StaticFiles(directory="build"), name="assets")
-# templates = Jinja2Templates(directory="build")
-
 # 注册路由
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(api.router, prefix="/api/v1", tags=["api"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])  # 修改用户路由前缀
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def root():
-    return templates.TemplateResponse("index.html", {"request": {}})
+    return {
+        "status": "ok",
+        "message": "API is running",
+        "version": settings.VERSION
+    }
 
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title=settings.PROJECT_NAME,
+        version=settings.VERSION,
+        description=app.description,
+        routes=app.routes,
+    )
+    
+    # 添加安全定义
+    openapi_schema["components"]["securitySchemes"] = {
+        "Bearer": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": """
+            输入格式为: your_token
+            注意: 不需要Bearer前缀
+            """
+        }
+    }
+    
+    # 为所有路由添加安全要求，除了 /token 和 /register
+    if "paths" in openapi_schema:
+        for path in openapi_schema["paths"]:
+            # 跳过认证相关的路由
+            if path.endswith("/token") or path.endswith("/register"):
+                continue
+                
+            # 为路径下的所有操作添加安全要求
+            for method in openapi_schema["paths"][path]:
+                if method.lower() in ("get", "post", "put", "delete", "patch"):
+                    openapi_schema["paths"][path][method]["security"] = [{"Bearer": []}]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 # 启动服务器的入口点
 if __name__ == "__main__":

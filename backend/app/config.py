@@ -10,7 +10,7 @@ load_dotenv()
 
 # 加载yaml配置文件
 def load_yaml_config():
-    config_path = Path("config.yaml")
+    config_path = Path(os.getenv("CONFIG_PATH", "config.yaml"))
     if config_path.exists():
         with open(config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)

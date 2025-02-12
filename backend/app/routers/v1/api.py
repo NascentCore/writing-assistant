@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, UploadFile as FastAPIUploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, Request, UploadFile as FastAPIUploadFile, File, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import shortuuid
 from app.config import settings
@@ -54,7 +54,7 @@ class Message(BaseModel):
     content: str = Field(..., description="消息内容", example="你好，请问有什么可以帮助你的？")
 
 class CompletionRequest(BaseModel):
-    model_name: str = Field(..., description="模型名称")
+    model_name: Optional[str] = Field(None, description="模型名称")
     messages: List[Message] = Field(..., description="对话消息列表")
     stream: bool = Field(False, description="是否使用流式响应")
     temperature: Optional[float] = Field(0.7, description="温度参数，控制随机性，范围0-2", ge=0, le=2)
@@ -223,32 +223,25 @@ async def completions(
         # 非流式响应
         return completion.model_dump()
 
-@router.post("/upload")
+@router.post("/files")
 async def upload_files(
     files: List[FastAPIUploadFile] = File(
         ...,
         description="要上传的文件列表，支持PDF和DOCX格式"
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    文件上传接口
+    上传文件
     
-    Parameters:
-    - files: 支持上传多个文件，目前支持PDF和DOCX格式
-    
+    Args:
+        files: 支持上传多个文件，目前支持PDF和DOCX格式
+        
     Returns:
-    - message: 处理结果信息
-    - success: 是否成功
-    - data: 上传文件的详细信息列表
-        - file_id: 文件唯一标识
-        - filename: 文件名
-        - size: 文件大小(字节)
-        - content_type: 文件类型
-        - path: 文件存储路径
-    
-    Raises:
-    - HTTPException: 当文件上传失败时抛出异常
+        message: 处理结果信息
+        success: 是否成功
+        data: 上传文件的详细信息列表
     """
     upload_dir = Path(settings.UPLOAD_DIR)
     # 确保上传目录存在
@@ -257,7 +250,7 @@ async def upload_files(
     result = []
     for file in files:
         # 使用uuid
-        file_id = shortuuid.uuid()
+        file_id = f"file-{shortuuid.uuid()}"
         # 使用 file_id 作为文件名
         file_location = upload_dir / f"{file_id}_{file.filename}"
         
@@ -295,6 +288,7 @@ async def upload_files(
             file_path=str(file_location),
             status=1,
             content=file_content,
+            user_id=current_user.user_id,
         )
     
         db.add(db_file)
@@ -307,34 +301,63 @@ async def upload_files(
         "data": result
     }
 
-@router.get("/uploaded_files")
-async def get_uploaded_files(db: Session = Depends(get_db)):
-    """获取上传的文件列表"""
-    upload_files = db.query(
-        UploadFile.file_id,
-        UploadFile.file_name,
-        UploadFile.file_size,
-        UploadFile.file_type,
-        UploadFile.status,
-        UploadFile.created_at
-    ).all()
+@router.get("/files")
+async def get_files(
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取当前用户的文件列表
     
-    # 转换为字典列表，并格式化日期
-    result = [
-        {
-            "file_id": file.file_id,
-            "file_name": file.file_name,
-            "file_size": file.file_size,
-            "file_type": file.file_type,
-            "status": file.status,
-            "created_at": file.created_at.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        for file in upload_files
-    ]
+    Args:\n
+        page: 页码，从1开始\n
+        page_size: 每页显示的数量，默认10，最大100\n
+        
+    Returns:\n
+        total: 总记录数\n
+        items: 文件列表\n
+        page: 当前页码\n
+        page_size: 每页数量\n
+        pages: 总页数
+    """
+    # 构建基础查询
+    query = db.query(UploadFile).filter(
+        UploadFile.user_id == current_user.user_id
+    )
+    
+    # 获取总记录数
+    total = query.count()
+    
+    # 计算总页数
+    pages = (total + page_size - 1) // page_size
+    
+    # 获取分页数据
+    files = query.order_by(desc(UploadFile.created_at))\
+        .offset((page - 1) * page_size)\
+        .limit(page_size)\
+        .all()
     
     return {
         "message": "获取成功",
-        "data": result
+        "data": {
+            "total": total,
+            "items": [
+                {
+                    "file_id": file.file_id,
+                    "name": file.file_name,
+                    "size": file.file_size,
+                    "type": file.file_type,
+                    "status": file.status,
+                    "created_at": file.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                for file in files
+            ],
+            "page": page,
+            "page_size": page_size,
+            "pages": pages
+        }
     }
 
 @router.post("/documents")
