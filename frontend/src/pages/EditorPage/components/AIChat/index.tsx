@@ -446,7 +446,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                 {models.map((model) => (
                   <Select.Option
                     key={model.id}
-                    value={model.id}
+                    value={model.name}
                     title={model.description}
                   >
                     {model.name}
