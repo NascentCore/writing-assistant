@@ -24,7 +24,11 @@ export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
       : `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
 
   const response = await fetch(fullUrl, { ...options, headers });
-
+  const clone = response.clone();
+  const data = await clone.json();
+  if (data.code !== 200) {
+    message.error(data.message);
+  }
   if (response.status === 401) {
     // 如果认证失败，清除 token
     localStorage.removeItem('token');
