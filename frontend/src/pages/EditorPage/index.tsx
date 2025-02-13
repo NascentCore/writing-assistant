@@ -329,8 +329,8 @@ function App() {
                     <DocumentList
                       currentDocId={currentDocId}
                       onDocumentSelect={(docId) => {
-                        // 切换文档的时候先保存
-                        // saveDocument(editorRef.current?.getHtml() || '');
+                        // 切换文档的时候先保存;
+                        saveDocument(editorRef.current?.getHtml() || '');
                         setCurrentDocId(docId);
                         setChangeAction(true);
                       }}

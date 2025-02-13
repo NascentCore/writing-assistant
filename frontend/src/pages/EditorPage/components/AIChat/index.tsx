@@ -174,16 +174,12 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
 
     const userMessage = createMessage(value, true);
     setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
-    setValue('');
-    setSelectedFiles([]);
-    setOpen(false);
-
     // 准备请求数据
     const requestData = {
       model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
       doc_id: localStorage.getItem('current_document_id') || '',
       file_ids: selectedFiles
-        .filter((file) => file.type === 'file')
+        .filter((file) => file.type === 'docx' || file.type === 'pdf')
         .map((file) => file.file_id),
       max_tokens: 2000,
       messages: [
@@ -196,9 +192,12 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
         .filter((file) => file.type === 'text')
         .map((file) => file.name),
       stream: true,
+      action: 'chat',
       temperature: 0.7,
     };
-
+    setValue('');
+    setSelectedFiles([]);
+    setOpen(false);
     try {
       const response = await fetchWithAuthStream(
         '/api/v1/completions',
@@ -225,7 +224,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
         readableStream: response.body,
       })) {
         try {
-          console.log('Raw chunk:', chunk);
           // 如果 chunk.data 是字符串，需要解析它
           let data;
           if (typeof chunk.data === 'string') {
@@ -233,11 +231,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
           } else {
             data = chunk.data;
           }
-          console.log('Parsed data:', data);
 
           if (data.choices?.[0]?.delta?.content) {
             const content = data.choices[0].delta.content;
-            console.log('Content to append:', content);
             // 更新最后一条消息的内容
             setMessages((prev: ChatMessage[]) => {
               const newMessages = [...prev];
@@ -358,7 +354,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
       </div>
     </div>
   );
-  console.log('selectedFiles', selectedFiles);
 
   const headerNode = (
     <Sender.Header
