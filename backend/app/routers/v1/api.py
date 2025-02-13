@@ -229,7 +229,8 @@ async def completions(
             messages=body.get("messages", []),
             temperature=body.get("temperature", 0.7),
             stream=stream,
-            max_tokens=body.get("max_tokens", None)
+            max_tokens=body.get("max_tokens", None),
+            timeout=llm_config.get("request_timeout")
         )
         
         if stream:
