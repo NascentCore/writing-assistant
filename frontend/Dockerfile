@@ -3,8 +3,8 @@ FROM node:18 AS builder
 WORKDIR /app
 
 # 复制 package.json 和 pnpm-lock.yaml 并安装依赖
-COPY package.json ./
-RUN pnpm install
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install
 
 # 复制项目代码并构建
 COPY . ./

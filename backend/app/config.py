@@ -50,8 +50,9 @@ class Settings(BaseSettings):
         "model": os.getenv("LLM_MODEL", "chatglm3"),
         "api_key": os.getenv("LLM_API_KEY", "EMPTY"),
         "readable_model_name": os.getenv("LLM_READABLE_MODEL_NAME", "chatglm3-6b-8192"),
-        "system_prompt": os.getenv("LLM_SYSTEM_PROMPT", "你是一个专业的写作助手,擅长帮助用户改进文章的结构、内容和表达。")
+        "system_prompt": os.getenv("LLM_SYSTEM_PROMPT", "你是一个专业的写作助手,擅长帮助用户改进文章的结构、内容和表达。"),
     }]
+    LLM_REQUEST_TIMEOUT: float = yaml_config.get("request_timeout", 300.0)
     # 向后兼容的默认模型配置
     LLM_BASE_URL: str = LLM_MODELS[0]["base_url"]
     LLM_MODEL: str = LLM_MODELS[0]["model"]
