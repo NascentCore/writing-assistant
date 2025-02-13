@@ -454,7 +454,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                 value={selectedModel}
                 onChange={handleModelChange}
                 prefix={<SwapOutlined />}
-                style={{ width: 120, marginBottom: 8 }}
+                style={{ marginBottom: 8 }}
               >
                 {models.map((model) => (
                   <Select.Option
