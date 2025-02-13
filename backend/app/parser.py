@@ -6,6 +6,10 @@ class DocumentParser:
     def parse(self, file_path: str) -> str:
         raise NotImplementedError
     
+class PDFEncryptedError(Exception):
+    """当 PDF 文件加密且无法解析时抛出的异常"""
+    pass
+
 class PDFParser(DocumentParser):
     """PDF文档解析器"""
     def parse(self, file_path: str) -> str:
@@ -13,6 +17,20 @@ class PDFParser(DocumentParser):
             # 创建PDF reader对象
             pdf_reader = PyPDF2.PdfReader(file_path)
             
+            # 检查是否加密
+            if pdf_reader.is_encrypted:
+                try:
+                    # 尝试用空密码解密（对于只有权限密码的PDF通常可行）
+                    pdf_reader.decrypt('')
+                    
+                    # 尝试提取文本
+                    text_content = []
+                    for page in pdf_reader.pages:
+                        text_content.append(page.extract_text())
+                    return "\n".join(text_content)
+                except:
+                    raise PDFEncryptedError("无法解析加密的PDF文件，请先解除文件加密后再上传")
+                
             # 提取所有页面的文本
             text_content = []
             for page in pdf_reader.pages:
@@ -20,7 +38,12 @@ class PDFParser(DocumentParser):
                 
             return "\n".join(text_content)
         except Exception as e:
-            raise Exception(f"PDF解析错误: {str(e)}")
+            if "PyCryptodome is required for AES algorithm" in str(e):
+                raise PDFEncryptedError("无法解析加密的PDF文件，请先解除文件加密后再上传")
+            elif "File has not been decrypted" in str(e):
+                raise PDFEncryptedError("无法解析加密的PDF文件，请先解除文件加密后再上传")
+            else:
+                raise Exception(f"PDF解析错误: {str(e)}")
 
 class DocxParser(DocumentParser):
     """Word文档解析器"""

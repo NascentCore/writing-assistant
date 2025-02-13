@@ -16,11 +16,11 @@ class UploadFile(Base):
     file_type = Column(String(50), comment="文件格式")
     file_path = Column(String(255), comment="文件存储路径")
     status = Column(Integer, default=0, comment="状态: 0未解析, 1解析中, 2解析成功, 3解析失败")
-    content = Column(Text, comment="解析出的文本内容")
+    content = Column(Text(length=4294967295), comment="解析出的文本内容")
     user_id = Column(String(100), comment="用户ID")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    is_deleted = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")
+    is_deleted = Column(Boolean, default=False, comment="是否删除")
     
     # 添加索引
     __table_args__ = (
