@@ -173,7 +173,24 @@ function App() {
                 icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6V8H5V19H16V14H18V20C18 20.5523 17.5523 21 17 21H4C3.44772 21 3 20.5523 3 20V7C3 6.44772 3.44772 6 4 6H10ZM21 3V11H19L18.9999 6.413L11.2071 14.2071L9.79289 12.7929L17.5849 5H13V3H21Z"></path></svg>',
                 onClick: (editor) => {
                   const content = editor.getSelectedText();
-                  if (content && aiChatRef.current) {
+                  if (!showAIChat) {
+                    setShowAIChat(true);
+                    setTimeout(() => {
+                      if (content && aiChatRef.current) {
+                        const newFile = {
+                          file_id: generateFileId(),
+                          name:
+                            content.slice(0, 20) +
+                            (content.length > 20 ? '...' : ''),
+                          size: new Blob([content]).size,
+                          type: 'text',
+                          status: 1,
+                          created_at: new Date().toISOString(),
+                        };
+                        aiChatRef.current.addSelectedFile(newFile);
+                      }
+                    }, 0);
+                  } else if (content && aiChatRef.current) {
                     const newFile = {
                       file_id: generateFileId(),
                       name:
@@ -258,7 +275,16 @@ function App() {
   return (
     <div style={{ padding: 0, margin: 0, background: '#f3f4f6' }}>
       <>
-        <div className="page-header">
+        <div
+          className="page-header"
+          style={{
+            ...(showAIChat
+              ? {
+                  right: 500,
+                }
+              : {}),
+          }}
+        >
           <h1>售前方案写作助手</h1>
           <div className="header-buttons">
             <Button onClick={() => setShowFileModal(true)}> 文件上传</Button>
@@ -312,12 +338,32 @@ function App() {
           />
         )}
 
-        <div ref={divRef} style={{ padding: 0, margin: 0 }}>
+        <div
+          ref={divRef}
+          style={{
+            padding: 0,
+            margin: 0,
+            ...(showAIChat
+              ? {
+                  width: 'calc(100% - 500px)',
+                }
+              : {}),
+          }}
+        >
           <div
-            className={`aie-container ${showAIChat ? 'with-ai-chat' : ''}`}
+            className={`aie-container`}
             style={{ backgroundColor: '#f3f4f6' }}
           >
-            <div className="aie-header-panel">
+            <div
+              className="aie-header-panel"
+              style={{
+                ...(showAIChat
+                  ? {
+                      right: 500,
+                    }
+                  : {}),
+              }}
+            >
               <div className="aie-container-header"></div>
             </div>
             <div className="aie-main">
