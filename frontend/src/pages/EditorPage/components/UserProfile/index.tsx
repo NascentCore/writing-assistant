@@ -30,10 +30,10 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
       });
       if (response.ok) {
         const data = await response.json();
-        setUser(data);
+        setUser(data.data);
         form.setFieldsValue({
-          username: data.username,
-          email: data.email,
+          username: data.data.username,
+          email: data.data.email,
         });
       }
     } catch (error) {
