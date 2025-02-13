@@ -51,15 +51,14 @@ class Settings(BaseSettings):
         "api_key": os.getenv("LLM_API_KEY", "EMPTY"),
         "readable_model_name": os.getenv("LLM_READABLE_MODEL_NAME", "chatglm3-6b-8192"),
         "system_prompt": os.getenv("LLM_SYSTEM_PROMPT", "你是一个专业的写作助手,擅长帮助用户改进文章的结构、内容和表达。"),
-        "request_timeout": float(os.getenv("LLM_REQUEST_TIMEOUT", "300.0"))
     }]
+    LLM_REQUEST_TIMEOUT: float = yaml_config.get("request_timeout", 300.0)
     # 向后兼容的默认模型配置
     LLM_BASE_URL: str = LLM_MODELS[0]["base_url"]
     LLM_MODEL: str = LLM_MODELS[0]["model"]
     LLM_API_KEY: str = LLM_MODELS[0]["api_key"]
     LLM_READABLE_MODEL_NAME: str = LLM_MODELS[0]["readable_model_name"]
     LLM_SYSTEM_PROMPT: str = LLM_MODELS[0]["system_prompt"]
-    LLM_REQUEST_TIMEOUT: float = LLM_MODELS[0]["request_timeout"]
     # API文档配置
     API_DOCS_TITLE: str = "AI Editor API Documentation"
     API_DOCS_DESCRIPTION: str = """
