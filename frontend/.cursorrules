@@ -8,3 +8,4 @@ globs:
 - The current project is built with umi Max, so when it comes to styles, the new styles should follow the cssModule specification, do not directly use the simple className, the existing content can continue to remain the original way
 - 新的接口请求都用src/utils/fetch.ts中fetchWithAuthNew发起
 - localStorage存在 token（用户的登录信息），current_document_id（当前编辑的文档id），ai_chat_model（当前使用的ai模型）
+- 当前包管理工具用的是 pnpm 

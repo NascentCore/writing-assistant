@@ -7,9 +7,11 @@ import {
   SwapOutlined,
   UserOutlined,
 } from '@ant-design/icons';
+import type { BubbleProps } from '@ant-design/x';
 import { Bubble, Sender, XProvider, XStream } from '@ant-design/x';
-import { Button, Checkbox, Flex, Popover, Select } from 'antd';
+import { Button, Checkbox, Flex, Popover, Select, Typography } from 'antd';
 import type { CheckboxChangeEvent } from 'antd/es/checkbox';
+import markdownit from 'markdown-it';
 import React, {
   forwardRef,
   useEffect,
@@ -18,6 +20,16 @@ import React, {
   useState,
 } from 'react';
 import styles from './index.module.less';
+
+const md = markdownit({ html: true, breaks: true });
+
+// 定义 markdown 渲染函数
+const renderMarkdown: BubbleProps['messageRender'] = (content) => (
+  <Typography>
+    {/* biome-ignore lint/security/noDangerouslySetInnerHtml: used for markdown rendering */}
+    <div dangerouslySetInnerHTML={{ __html: md.render(content) }} />
+  </Typography>
+);
 
 const STORAGE_KEY = 'ai_chat_messages';
 const MODEL_STORAGE_KEY = 'ai_chat_model';
@@ -266,10 +278,11 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
     setResetKey((prev) => prev + 1); // 强制重置组件状态
   };
 
-  // 处理消息显示，添加avatar组件
+  // 处理消息显示，添加avatar组件和markdown渲染
   const displayMessages = messages.map((msg: ChatMessage) => ({
     ...msg,
     avatar: getAvatarIcon(),
+    messageRender: renderMarkdown,
   }));
 
   // 处理模型变更
