@@ -25,7 +25,7 @@ const LoginPage: React.FC = () => {
 
       if (response.ok) {
         const data = await response.json();
-        localStorage.setItem('token', data.access_token);
+        localStorage.setItem('token', data.data.access_token);
         // 登录成功后跳转到编辑器主页
         window.location.href = '/';
       } else {

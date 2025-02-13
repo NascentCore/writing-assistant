@@ -19,14 +19,12 @@ import { useEffect, useState } from 'react';
 
 interface DocumentListProps {
   currentDocId: string | null;
-  onDocumentSelect: (docId: string) => void;
-  onDocumentsChange: () => void;
+  onDocumentSelect: (docId: string | null) => void;
 }
 
 const DocumentList: React.FC<DocumentListProps> = ({
   currentDocId,
   onDocumentSelect,
-  onDocumentsChange,
 }) => {
   const [documents, setDocuments] = useState<any[]>([]);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
@@ -47,21 +45,15 @@ const DocumentList: React.FC<DocumentListProps> = ({
       if (!response) return;
       if (response.ok) {
         const result = await response.json();
+        result.data.forEach((doc: any) => {
+          doc.id = doc.doc_id;
+        });
         setDocuments(result.data);
 
-        // 如果没有当前选中的文档，但有文档列表，则选择最近的文档
+        // 只在没有当前选中文档时，才自动选择第一个文档
         if (!currentDocId && result.data.length > 0) {
           const mostRecentDoc = result.data[0];
           onDocumentSelect(mostRecentDoc.id);
-        } else if (currentDocId) {
-          // 验证当前文档是否存在于列表中
-          const docExists = result.data.some(
-            (doc: { id: number }) => doc.id === parseInt(currentDocId, 10),
-          );
-          if (!docExists && result.data.length > 0) {
-            // 如果当前文档不存在，选择最近的文档
-            onDocumentSelect(result.data[0].id);
-          }
         }
       }
     } catch (error) {
@@ -97,7 +89,6 @@ const DocumentList: React.FC<DocumentListProps> = ({
 
       if (response && response.ok) {
         loadDocuments();
-        onDocumentsChange();
         setRenameModalVisible(false);
       }
     } catch (error) {
@@ -131,11 +122,24 @@ const DocumentList: React.FC<DocumentListProps> = ({
       );
 
       if (response && response.ok) {
+        // 如果删除的是当前选中的文档
         if (currentDocId === selectedDoc.id) {
-          onDocumentSelect('');
+          localStorage.removeItem('currentDocId');
+          // 找到当前文档在列表中的索引
+          const currentIndex = documents.findIndex(
+            (doc) => doc.id === selectedDoc.id,
+          );
+          // 如果还有其他文档，选中上一个文档
+          if (documents.length > 1) {
+            // 如果删除的是第一个文档，选中新的第一个文档
+            // 否则选中上一个文档
+            const newIndex = currentIndex === 0 ? 1 : currentIndex - 1;
+            onDocumentSelect(documents[newIndex].id);
+          } else {
+            onDocumentSelect(null);
+          }
         }
         loadDocuments();
-        onDocumentsChange();
         setDeleteModalVisible(false);
       }
     } catch (error) {
@@ -149,7 +153,7 @@ const DocumentList: React.FC<DocumentListProps> = ({
 
   // 新建文档函数
   const handleNewDocument = async () => {
-    if (!newDocTitle.trim()) {
+    if (!newDocTitle.trim() || loading) {
       return;
     }
 
@@ -167,13 +171,12 @@ const DocumentList: React.FC<DocumentListProps> = ({
       });
 
       if (response?.ok) {
-        // const result = await response.json();
+        const result = await response.json();
         setNewDocTitle('');
         loadDocuments();
-        onDocumentsChange();
         setNewDocModalVisible(false);
         // 选中新创建的文档（创建成功的时候把 id 返回给父组件）
-        // onDocumentSelect(result.data.id.toString());
+        onDocumentSelect(result.data.doc_id);
       } else {
         const result = await response?.json();
         throw new Error(result.message || '创建文档失败');
@@ -189,6 +192,13 @@ const DocumentList: React.FC<DocumentListProps> = ({
     }
   };
 
+  // 处理新建文档弹窗的关闭
+  const handleNewDocModalClose = () => {
+    setNewDocModalVisible(false);
+    setNewDocTitle(''); // 清空输入框
+    setLoading(false); // 重置loading状态
+  };
+
   useEffect(() => {
     loadDocuments();
   }, []);
@@ -197,7 +207,8 @@ const DocumentList: React.FC<DocumentListProps> = ({
     {
       key: 'rename',
       label: '重命名',
-      onClick: () => {
+      onClick: (e) => {
+        e.domEvent.stopPropagation();
         handleRename(doc.id, doc.title);
       },
     },
@@ -205,7 +216,8 @@ const DocumentList: React.FC<DocumentListProps> = ({
       key: 'delete',
       label: '删除',
       danger: true,
-      onClick: () => {
+      onClick: (e) => {
+        e.domEvent.stopPropagation();
         handleDelete(doc.id, doc.title);
       },
     },
@@ -237,7 +249,7 @@ const DocumentList: React.FC<DocumentListProps> = ({
         className="document-list"
         dataSource={documents}
         renderItem={(doc) => {
-          const isActive = currentDocId && Number(currentDocId) === doc.id;
+          const isActive = currentDocId && currentDocId === doc.id;
           return (
             <List.Item
               key={doc.id}
@@ -340,9 +352,9 @@ const DocumentList: React.FC<DocumentListProps> = ({
       <Modal
         title="新建文档"
         open={newDocModalVisible}
-        onCancel={() => setNewDocModalVisible(false)}
+        onCancel={handleNewDocModalClose}
         footer={[
-          <Button key="cancel" onClick={() => setNewDocModalVisible(false)}>
+          <Button key="cancel" onClick={handleNewDocModalClose}>
             取消
           </Button>,
           <Button
@@ -359,7 +371,8 @@ const DocumentList: React.FC<DocumentListProps> = ({
           value={newDocTitle}
           onChange={(e) => setNewDocTitle(e.target.value)}
           placeholder="请输入文档标题"
-          onPressEnter={handleNewDocument}
+          onPressEnter={() => !loading && handleNewDocument()}
+          disabled={loading}
         />
       </Modal>
     </>

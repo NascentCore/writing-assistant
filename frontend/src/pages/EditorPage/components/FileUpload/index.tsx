@@ -56,9 +56,7 @@ const FileUpload: React.FC = () => {
           <InboxOutlined />
         </p>
         <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-        <p className="ant-upload-hint">
-          支持单个或批量上传，严禁上传公司数据或其他违禁文件
-        </p>
+        <p className="ant-upload-hint">支持单个或批量上传</p>
       </Dragger>
     </div>
   );
