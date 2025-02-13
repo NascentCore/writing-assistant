@@ -23,3 +23,4 @@ llm_models:
     api_key: "your_api_key_here"
     readable_model_name: "chatglm3-6b-8192"
     system_prompt: "你是一个专业的写作助手,擅长帮助用户改进文章的结构、内容和表达。"
+    request_timeout: 300
