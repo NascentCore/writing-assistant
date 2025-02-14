@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Request, UploadFile as FastAPIUploadFile, File, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from jinja2 import Environment, FileSystemLoader, Template
 import shortuuid
 from app.config import settings
 import openai
 import json
-from typing import List, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any
 from pathlib import Path
 from app.database import get_db
 from app.models.upload_file import UploadFile
@@ -21,6 +22,10 @@ from app.models.system_config import SystemConfig
 from urllib.parse import quote  # 添加这个导入
 
 router = APIRouter()
+
+# 初始化Jinja2环境
+template_dir = Path(__file__).parent.parent.parent / "templates"
+env = Environment(loader=FileSystemLoader(template_dir))
 
 # 添加版本相关的模型
 class DocumentVersionCreate(BaseModel):
@@ -66,10 +71,12 @@ class CompletionRequest(BaseModel):
     file_ids: Optional[List[str]] = Field(None, description="引用的文件ID列表")
     doc_id: Optional[str] = Field(None, description="引用的文档ID，及当前编辑的文档ID")
     selected_contents: Optional[List[str]] = Field(None, description="划选的文本内容列表")
+    action: Optional[Literal["extension", "abridge", "continuation", "rewrite", "overall", "chat"]] = Field("chat", description="操作类型")
 
     class Config:
         json_schema_extra = {
             "example": {
+                "model_name": "doubao",
                 "messages": [
                     {
                         "role": "user",
@@ -133,87 +140,43 @@ async def completions(
         model = llm_config["model"] 
         api_key = llm_config["api_key"]
 
-        # 处理划选的文本内容
-        if "selected_contents" in body:
-            selected_contents = body["selected_contents"]
-            del body["selected_contents"]
-            if selected_contents and len(selected_contents) > 0:
-                # 构建划选的文本内容
-                selected_content_message = "# 划选的文本内容\n"
-                for i, content in enumerate(selected_contents, 1):
-                    selected_content_message += f"## 划选 {i}\n{content}\n\n"
-
-                # 将划选的文本内容添加到原始消息中
-                original_message = body["messages"][0]["content"] if body["messages"] else ""
-                body["messages"] = [
-                    {
-                        "role": "user",
-                        "content": f"{original_message}\n{selected_content_message}"
-                    }
-                ]
-
-        # 处理文档引用
-        if "doc_id" in body:
-            doc_id = body["doc_id"]
-            del body["doc_id"]
-            if isinstance(doc_id, str):
-                # 获取文档内容
+        # 根据action加载对应模板，并生成提示词
+        action = body.get('action')
+        template = env.get_template(f"prompts/{action}.jinja2")
+        if action == "chat":
+            if "doc_id" in body:
+                doc_id = body["doc_id"]
+                del body["doc_id"]
                 doc = db.query(Document).filter(Document.doc_id == doc_id).first()
-                
                 if not doc:
                     return {
                         "code": 400,
                         "message": "引用的文档不存在",
                     }
 
-                # 构建参考文档内容
-                reference_content = "# 当前编辑的文档\n"
-                reference_content += f"## {doc.title}\n{doc.content}\n\n"
-                
-                # 将原始消息和参考文档组合
-                original_message = body["messages"][0]["content"] if body["messages"] else ""
-                body["messages"] = [
-                    {
-                        "role": "user",
-                        "content": f"{original_message}\n{reference_content}"
-                    }
-                ]
-        
-        # 处理文件引用
-        if "file_ids" in body:
-            file_ids = body["file_ids"]
-            del body["file_ids"]
-            if isinstance(file_ids, list):
-                # 获取所有引用文件的内容
-                files = db.query(
-                    UploadFile.file_id,  # 添加 file_id 字段
-                    UploadFile.file_name,
-                    UploadFile.content
-                ).filter(UploadFile.file_id.in_(file_ids)).all()
-                
-                # 检查是否所有请求的文件都存在
-                found_file_ids = {file.file_id for file in files}
-                missing_file_ids = set(file_ids) - found_file_ids
-                
-                if missing_file_ids:
-                    return {
-                        "code": 400,
-                        "message": f"以下文件不存在: {', '.join(missing_file_ids)}",
-                        "data": None
-                    }
-                
-                # 构建参考文档内容
-                reference_content = "# 参考文件\n"
-                for file in files:
-                    reference_content += f"## {file.file_name}\n{file.content}\n\n"
-                
-                # 将原始消息和参考文档组合
-                original_message = body["messages"][0]["content"] if body["messages"] else ""
-                body["messages"] = [{
-                    "role": "user",
-                    "content": f"{original_message}\n{reference_content}"
-                }]
-        
+            if "file_ids" in body:
+                file_ids = body["file_ids"]
+                del body["file_ids"]
+                files = db.query(UploadFile).filter(UploadFile.file_id.in_(file_ids)).all()
+                reference_files = [file.file_name for file in files]
+
+            prompt = template.render(
+                question=body["messages"][0]["content"],
+                content=doc.content if doc else "",
+                selected_contents=body.get("selected_contents", []),
+                reference_files=reference_files
+            )
+        else:
+            prompt = template.render(
+                content=body.get("selected_contents", [])
+            )
+
+        # 打印prompt调试信息
+        print("=== Debug Prompt Info ===")
+        print(f"Action: {action}")
+        print(f"Prompt Template:\n{prompt}")
+        print("=====================")
+
         # model
         body["model"] = model
         
@@ -222,11 +185,12 @@ async def completions(
             base_url=base_url,
             api_key=api_key
         )
+
         
         # 调用 OpenAI API
         completion = await client.chat.completions.create(
             model=model,
-            messages=body.get("messages", []),
+            messages=[{"role": "user", "content": prompt}],
             temperature=body.get("temperature", 0.7),
             stream=stream,
             max_tokens=body.get("max_tokens", None),
