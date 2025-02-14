@@ -29,12 +29,6 @@ async def lifespan(app: FastAPI):
     """应用生命周期事件处理"""
     # 启动时创建数据库表
     create_tables()
-    # try:
-    #     # 运行迁移
-    #     run_all_migrations()
-    # except Exception as e:
-    #     print(f"Migration failed: {str(e)}")
-    #     print("Continuing despite migration failure...")
     yield
 
 # 创建FastAPI应用实例
