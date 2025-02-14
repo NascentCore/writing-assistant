@@ -121,7 +121,22 @@ async def completions(
     try:
         body = request.model_dump(exclude_none=True)
         action = request.action
-        template = env.get_template(f"prompts/{action}.jinja2")
+        
+        # 从数据库读取提示词模板
+        template_key = f"prompt.{action}"
+        template_config = db.query(SystemConfig).filter(
+            SystemConfig.key == template_key
+        ).first()
+        
+        if not template_config:
+            return {
+                "code": 400,
+                "message": f"提示词模板 {template_key} 不存在",
+                "data": None
+            }
+            
+        # 使用字符串模板替代文件模板
+        template = Template(template_config.value)
         
         # 处理会话ID
         session_id = request.session_id
