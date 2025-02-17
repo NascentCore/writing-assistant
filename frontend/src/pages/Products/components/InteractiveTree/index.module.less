@@ -1,0 +1,106 @@
+.interactiveTree {
+  padding: 16px;
+  :global {
+    .ant-tree.ant-tree-block-node
+      .ant-tree-list-holder-inner
+      .ant-tree-node-content-wrapper {
+      padding: 0;
+    }
+    .ant-tree .ant-tree-switcher {
+      padding-top: 6px;
+      z-index: 2;
+      position: relative;
+    }
+    .ant-tree .ant-tree-treenode-draggable .ant-tree-draggable-icon {
+      padding-top: 6px;
+    }
+    .ant-tree .ant-tree-switcher:before {
+      top: 6px;
+    }
+  }
+  .tree {
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .nodeContent {
+    display: flex;
+    align-items: flex-start;
+    padding: 4px 0;
+    width: 100%;
+    gap: 8px;
+    position: relative;
+    z-index: 1;
+    &:hover {
+      .nodeActions {
+        opacity: 1;
+        visibility: visible;
+        margin-right: 20px;
+      }
+      :global {
+        .ant-input {
+          background: #f5f5f5;
+        }
+      }
+    }
+
+    .inputWrapper {
+      flex: 1;
+
+      :global {
+        .ant-input {
+          margin-bottom: 0px;
+          border: 1px solid transparent;
+          box-shadow: none;
+          // padding: 0px;
+          resize: none;
+
+          &:focus {
+            box-shadow: none;
+          }
+        }
+
+        .ant-input-textarea {
+          width: 100%;
+
+          .ant-input {
+            margin-bottom: 8px;
+            border: 1px solid transparent;
+            box-shadow: none;
+            // padding: 0;
+            resize: none;
+
+            &:focus {
+              box-shadow: none;
+            }
+          }
+        }
+      }
+    }
+
+    .nodeActions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-top: 8px;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.3s ease;
+      .actionIcon {
+        cursor: pointer;
+        padding: 4px;
+        color: rgba(0, 0, 0, 0.45);
+
+        &:hover {
+          color: #1890ff;
+        }
+      }
+    }
+  }
+
+  .addChapterButton {
+    margin-top: 16px;
+    width: 100%;
+  }
+}

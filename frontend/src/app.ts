@@ -6,7 +6,6 @@ const originalFetch = window.fetch;
 // 重写fetch方法
 window.fetch = async function (...args) {
   let [resource, config = {}] = args;
-  console.log('🚀 ~ args:', args);
   if (
     typeof resource === 'string' &&
     resource.includes('/api/v1/completions') &&
