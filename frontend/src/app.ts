@@ -1,28 +1,100 @@
 // 运行时配置
 
+// 定义消息接口
+interface ChatMessage {
+  content?: string;
+  role?: string;
+}
+
+// 定义请求体接口
+interface ChatRequestBody {
+  messages?: ChatMessage[];
+  action?: 'abridge' | 'rewrite' | 'extension';
+  temperature?: number | null;
+  model_name?: string;
+}
+
 // 保存原始的fetch方法
 const originalFetch = window.fetch;
 
 // 重写fetch方法
 window.fetch = async function (...args) {
-  let [resource, config = {}] = args;
+  let [resource, config = {} as RequestInit] = args;
   if (
     typeof resource === 'string' &&
     resource.includes('/api/v1/completions') &&
-    config.method?.toLowerCase() === 'post'
+    config.method?.toLowerCase() === 'post' &&
+    (typeof config.body === 'string'
+      ? JSON.parse(config.body).temperature === null
+      : config.body &&
+        'temperature' in config.body &&
+        config.body.temperature === null)
   ) {
     const modelName = localStorage.getItem('ai_chat_model');
+    const token = localStorage.getItem('token');
+
+    // 如果有token，添加到请求头
+    if (token) {
+      config.headers = {
+        ...config.headers,
+        Authorization: `Bearer ${token}`,
+      };
+    }
+
     if (modelName) {
       // 处理请求体
-      let body = {};
+      let body: ChatRequestBody = {};
       try {
         if (typeof config.body === 'string') {
-          body = JSON.parse(config.body);
+          body = JSON.parse(config.body) as ChatRequestBody;
         } else if (config.body instanceof FormData) {
           console.warn('FormData 不支持修改 model_name');
           return originalFetch(resource, config);
         } else {
-          body = config.body || {};
+          body = (config.body as ChatRequestBody) || {};
+        }
+
+        // 检查并处理 messages 中的 content
+        if (body.messages && Array.isArray(body.messages)) {
+          const needsAbridge = body.messages.some((msg: ChatMessage) =>
+            msg.content?.includes(
+              '</content>\n这句话的内容较长，帮我简化一下这个内容',
+            ),
+          );
+          const needsRewrite = body.messages.some((msg: ChatMessage) =>
+            msg.content?.includes(
+              '</content>\n请帮我优化一下这段内容，并直接返回优化后的结果',
+            ),
+          );
+          const needsExtension = body.messages.some((msg: ChatMessage) =>
+            msg.content?.includes(
+              '</content>\n这句话的内容较简短，帮我简单的优化和丰富一下内容',
+            ),
+          );
+
+          if (needsAbridge || needsRewrite || needsExtension) {
+            // 设置对应的 action
+            if (needsAbridge) {
+              body.action = 'abridge';
+            } else if (needsRewrite) {
+              body.action = 'rewrite';
+            } else if (needsExtension) {
+              body.action = 'extension';
+            }
+
+            // 处理 messages content
+            body.messages = body.messages.map((msg: ChatMessage) => {
+              if (msg.content) {
+                const contentMatch = msg.content.match(
+                  /<content>(.*?)<\/content>/,
+                );
+                if (contentMatch) {
+                  msg.content = contentMatch[1];
+                }
+              }
+              return msg;
+            });
+          }
         }
 
         config.body = JSON.stringify({
@@ -38,6 +110,23 @@ window.fetch = async function (...args) {
   // 发起请求
   try {
     const response = await originalFetch(resource, config);
+    // if (
+    //   typeof resource === 'string' &&
+    //   resource.includes('/api/v1/completions') &&
+    //   config.method?.toLowerCase() === 'post' &&
+    //   (typeof config.body === 'string'
+    //     ? JSON.parse(config.body).temperature === null
+    //     : config.body &&
+    //       'temperature' in config.body &&
+    //       config.body.temperature === null) &&
+    //   !response.headers.get('transfer-encoding')
+    // ) {
+    //   const clone = response.clone();
+    //   const data = await clone.json();
+    //   if (data.code !== 200) {
+    //     message.error(data.message);
+    //   }
+    // }
     return response;
   } catch (error) {
     console.error('请求错误:', error);
