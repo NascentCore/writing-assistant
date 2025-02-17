@@ -4,7 +4,7 @@ import shortuuid
 from app.config import settings
 import openai
 import json
-from typing import List, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any
 from pathlib import Path
 from app.database import get_db
 from app.models.upload_file import UploadFile
@@ -18,9 +18,32 @@ from sqlalchemy import desc
 from app.auth import get_current_user
 from app.models.user import User
 from app.models.system_config import SystemConfig
-from urllib.parse import quote  # 添加这个导入
+from app.models.chat import ChatSession, ChatMessage
+from urllib.parse import quote
+from jinja2 import Environment, FileSystemLoader, Template
+import logging
+
 
 router = APIRouter()
+
+# 配置日志
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# 创建控制台处理器
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+
+# 设置日志格式
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+
+# 添加处理器到logger
+logger.addHandler(console_handler)
+
+# 初始化Jinja2环境
+template_dir = Path(__file__).parent.parent.parent.parent / "templates"
+env = Environment(loader=FileSystemLoader(template_dir))
 
 # 添加版本相关的模型
 class DocumentVersionCreate(BaseModel):
@@ -57,13 +80,15 @@ class Message(BaseModel):
 
 class CompletionRequest(BaseModel):
     model_name: Optional[str] = Field(None, description="模型名称")
+    session_id: Optional[str] = Field(None, description="会话ID，如果不传则自动创建")
     messages: List[Message] = Field(..., description="对话消息列表")
+    action: Optional[Literal["extension", "abridge", "continuation", "rewrite", "overall", "chat"]] = Field("chat", description="操作类型")
     stream: bool = Field(False, description="是否使用流式响应")
     temperature: Optional[float] = Field(0.7, description="温度参数，控制随机性，范围0-2", ge=0, le=2)
     top_p: Optional[float] = Field(1, description="核采样参数，控制输出的多样性", ge=0, le=1)
-    max_tokens: Optional[int] = Field(None, description="生成的最大token数量", ge=1)
+    max_tokens: Optional[int] = Field(200, description="生成的最大token数量", ge=1)
     
-    file_ids: Optional[List[str]] = Field(None, description="引用的文件ID列表")
+    file_ids: Optional[List[str]] = Field([], description="引用的文件ID列表")
     doc_id: Optional[str] = Field(None, description="引用的文档ID，及当前编辑的文档ID")
     selected_contents: Optional[List[str]] = Field(None, description="划选的文本内容列表")
 
@@ -76,6 +101,8 @@ class CompletionRequest(BaseModel):
                         "content": "请总结一下这份文档的主要内容"
                     }
                 ],
+                "model_name": "doubao",
+                "session_id": "abc123",
                 "file_ids": ["abc123"],
                 "doc_id": "abc123",
                 "selected_contents": ["这是第一段划选的文本", "这是第二段划选的文本"],
@@ -88,98 +115,97 @@ class CompletionRequest(BaseModel):
 @router.post("/completions")
 async def completions(
     request: CompletionRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """
-    OpenAI 兼容的 completions 接口
-    
-    Args:\n
-        model_name: 模型名称\n
-        messages: 对话消息列表，包含role和content\n
-        stream: 是否使用流式响应\n
-        temperature: 温度参数，控制随机性\n
-        top_p: 核采样参数\n
-        max_tokens: 生成的最大token数量\n
-        file_ids: 引用的文件ID列表，这些文件的内容会作为上下文\n
-        doc_id: 引用的文档ID，及当前编辑的文档ID\n
-        selected_contents: 划选的文本内容列表
-
-    Returns:\n
-        stream=False时返回完整的补全结果\n
-        stream=True时返回SSE流式响应
-    """
     try:
         body = request.model_dump(exclude_none=True)
-        stream = body.get("stream", False)
-        # 获取模型名称并校验
-        model_name = body.get("model_name")
-        llm_config = None
+        action = request.action
         
-        # 从配置中获取LLM模型列表
-        llm_models = settings.LLM_MODELS
+        # 从数据库读取提示词模板
+        template_key = f"prompt.{action}"
+        template_config = db.query(SystemConfig).filter(
+            SystemConfig.key == template_key
+        ).first()
         
-        # 如果未指定模型或模型不在配置列表中,使用第一个模型作为默认值
-        if not model_name or not any(m["readable_model_name"] == model_name for m in llm_models):
-            llm_config = llm_models[0]
+        if not template_config:
+            return {
+                "code": 400,
+                "message": f"提示词模板 {template_key} 不存在",
+                "data": None
+            }
+            
+        # 使用字符串模板替代文件模板
+        template = Template(template_config.value)
+        
+        # 处理会话ID
+        session_id = request.session_id
+        if not session_id:
+            session_id = f"chat-{shortuuid.uuid()}"
+            # 创建新会话
+            chat_session = ChatSession(
+                session_id=session_id,
+                user_id=current_user.user_id,
+            )
+            db.add(chat_session)
+            db.commit()
         else:
-            # 获取指定模型的配置
-            for m in llm_models:
-                if m["readable_model_name"] == model_name:
-                    llm_config = m
-                    break
+            # 验证会话是否存在且属于当前用户
+            chat_session = db.query(ChatSession).filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.user_id,
+                ChatSession.is_deleted == False
+            ).first()
+            if not chat_session:
+                return {
+                    "code": 400,
+                    "message": "会话不存在或无权访问",
+                    "data": None
+                }
+
+        # 获取历史消息
+        history_messages = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.is_deleted == False
+        ).order_by(ChatMessage.id).all()
+
+        # 构建完整的消息列表
+        full_messages = []
         
-        # 更新body中的模型信息
-        base_url = llm_config["base_url"]
-        model = llm_config["model"] 
-        api_key = llm_config["api_key"]
+        # 添加系统消息
+        llm_config = next((m for m in settings.LLM_MODELS if m["readable_model_name"] == body.get("model_name", "")), settings.LLM_MODELS[0])
+        if llm_config.get("system_prompt"):
+            full_messages.append({
+                "role": "system",
+                "content": llm_config["system_prompt"]
+            })
 
-        # 处理划选的文本内容
-        if "selected_contents" in body:
-            selected_contents = body["selected_contents"]
-            del body["selected_contents"]
-            if selected_contents and len(selected_contents) > 0:
-                # 构建划选的文本内容
-                selected_content_message = "# 划选的文本内容\n"
-                for i, content in enumerate(selected_contents, 1):
-                    selected_content_message += f"## 划选 {i}\n{content}\n\n"
+        # 添加历史消息
+        for msg in history_messages:
+            full_messages.append({
+                "role": msg.role,
+                "content": msg.content
+            })
 
-                # 将划选的文本内容添加到原始消息中
-                original_message = body["messages"][0]["content"] if body["messages"] else ""
-                body["messages"] = [
-                    {
-                        "role": "user",
-                        "content": f"{original_message}\n{selected_content_message}"
-                    }
-                ]
+        # 处理当前请求的消息
+        original_message = body["messages"][0]["content"]
+        
+        # 流式传输
+        stream = body.get("stream", False)
 
-        # 处理文档引用
-        if "doc_id" in body:
-            doc_id = body["doc_id"]
-            del body["doc_id"]
-            if isinstance(doc_id, str):
-                # 获取文档内容
-                doc = db.query(Document).filter(Document.doc_id == doc_id).first()
-                
-                if not doc:
-                    return {
-                        "code": 400,
-                        "message": "引用的文档不存在",
-                    }
-
-                # 构建参考文档内容
-                reference_content = "# 当前编辑的文档\n"
-                reference_content += f"## {doc.title}\n{doc.content}\n\n"
-                
-                # 将原始消息和参考文档组合
-                original_message = body["messages"][0]["content"] if body["messages"] else ""
-                body["messages"] = [
-                    {
-                        "role": "user",
-                        "content": f"{original_message}\n{reference_content}"
-                    }
-                ]
+        # 只在需要使用doc时再查询数据库
+        doc_content = ""
+        if request.doc_id:
+            doc = db.query(Document).filter(Document.doc_id == request.doc_id).first()
+            if not doc:
+                return {
+                    "code": 400,
+                    "message": "引用的文档不存在",
+                }
+            doc_content = doc.content
         
         # 处理文件引用
+        reference_files = []
         if "file_ids" in body:
             file_ids = body["file_ids"]
             del body["file_ids"]
@@ -203,54 +229,118 @@ async def completions(
                     }
                 
                 # 构建参考文档内容
-                reference_content = "# 参考文件\n"
                 for file in files:
-                    reference_content += f"## {file.file_name}\n{file.content}\n\n"
+                    reference_files.append({
+                        "file_name": file.file_name,
+                        "file_content": file.content
+                    })
                 
-                # 将原始消息和参考文档组合
-                original_message = body["messages"][0]["content"] if body["messages"] else ""
-                body["messages"] = [{
-                    "role": "user",
-                    "content": f"{original_message}\n{reference_content}"
-                }]
+
+        prompt = template.render(
+            question=original_message,
+            content=doc_content,
+            selected_contents=request.selected_contents,
+            reference_files=reference_files
+        )
         
-        # model
-        body["model"] = model
-        
-        # 配置 OpenAI 客户端
+        # 添加当前消息
+        full_messages.append({
+            "role": "user",
+            "content": prompt
+        })
+
+        # max_token
+        max_tokens = request.max_tokens
+        if action == "chat":
+            max_tokens = 200
+
+        # 保存用户消息到数据库
+        user_message = ChatMessage(
+            message_id=f"msg-{shortuuid.uuid()}",
+            session_id=session_id,
+            role="user",
+            content=original_message,
+            full_content=prompt,
+            meta=json.dumps({
+                "temperature": request.temperature,
+                "top_p": request.top_p,
+                "max_tokens": max_tokens,
+                "file_ids": file_ids,
+                "doc_id": request.doc_id,
+                "selected_contents": request.selected_contents
+            })
+        )
+        db.add(user_message)
+        db.commit()
+
+        # 配置OpenAI客户端并调用API
         client = openai.AsyncOpenAI(
-            base_url=base_url,
-            api_key=api_key
+            base_url=llm_config["base_url"],
+            api_key=llm_config["api_key"]
         )
-        
-        # 调用 OpenAI API
+
         completion = await client.chat.completions.create(
-            model=model,
-            messages=body.get("messages", []),
-            temperature=body.get("temperature", 0.7),
-            stream=stream,
-            max_tokens=body.get("max_tokens", None),
-            timeout=llm_config.get("request_timeout")
+            model=llm_config["model"],
+            messages=full_messages,
+            temperature=request.temperature,
+            stream=request.stream,
+            max_tokens=max_tokens,
+            timeout=settings.LLM_REQUEST_TIMEOUT
         )
-        
+
+        # 使用logger替换print
+        logger.info("Chat Completion Request Info:")
+        logger.info(f"Model: {body.get('model_name', '未传model_name')}")
+        logger.info(f"Original Message: {original_message}")
+        logger.info(f"Full Messages: {json.dumps(full_messages, ensure_ascii=False, indent=2)}")
+
         if stream:
             # 流式响应
             async def generate_stream():
+                assistant_content = ""
                 async for chunk in completion:
+                    if chunk.choices[0].delta.content:
+                        assistant_content += chunk.choices[0].delta.content
                     yield f"data: {json.dumps(chunk.model_dump())}\n\n"
-                    
+                
+                # 流式响应结束后保存助手回复
+                assistant_message = ChatMessage(
+                    message_id=f"msg-{shortuuid.uuid()}",
+                    session_id=session_id,
+                    role="assistant",
+                    content=assistant_content
+                )
+                db.add(assistant_message)
+                db.commit()
+
             return StreamingResponse(
                 generate_stream(),
-                media_type="text/event-stream"
+                media_type="text/event-stream",
+                headers={"X-Session-ID": session_id} # 添加会话ID
             )
         else:
-            # 非流式响应
+            # 非流式响应，直接保存助手回复
+            assistant_message = ChatMessage(
+                message_id=f"msg-{shortuuid.uuid()}",
+                session_id=session_id,
+                question_id=user_message.message_id,
+                role="assistant",
+                content=completion.choices[0].message.content,
+                full_content=completion.choices[0].message.content,
+                # TODO 添加meta数据
+            )
+            db.add(assistant_message)
+            db.commit()
+
             return {
                 "code": 200,
                 "message": "请求成功",
-                "data": completion.model_dump()
+                "data": {
+                    **completion.model_dump(),
+                    "session_id": session_id
+                }
             }
-            
+
     except Exception as e:
         return {
             "code": 400,

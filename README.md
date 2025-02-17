@@ -42,3 +42,7 @@ mv ../frontend/build ./app/
 docker buildx build --platform linux/amd64 -t sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app:latest .
 docker push sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app:latest
 ```
+
+## Cursor
+
+`.cursorrules` 0.45 之前的 cursor 使用该文件进行管理，0.45 之后使用 `.cursor/rules` 目录进行管理
