@@ -13,6 +13,7 @@ interface ChatRequestBody {
   temperature?: number | null;
   model_name?: string;
   selected_contents?: string[];
+  doc_id?: string;
 }
 
 // 保存原始的fetch方法
@@ -99,7 +100,6 @@ window.fetch = async function (...args) {
                   msg.content = '';
                 }
                 if (body.action === 'chat') {
-                  debugger;
                   let text = msg.content.split('\n');
                   msg.content = text[1];
                   selectedContents.push(text[0]);
@@ -108,6 +108,7 @@ window.fetch = async function (...args) {
               return msg;
             });
             body.selected_contents = selectedContents;
+            body.doc_id = localStorage.getItem('current_document_id')!;
           }
         }
 
