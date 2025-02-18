@@ -9,6 +9,7 @@ class ChatSession(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="自增主键")
     session_id = Column(String(100), unique=True, comment="会话ID")
     user_id = Column(String(100), index=True, comment="用户ID")
+    doc_id = Column(String(100), index=True, default="", comment="文档ID")
     meta = Column(Text, default="", comment="额外元数据")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="最后更新时间")

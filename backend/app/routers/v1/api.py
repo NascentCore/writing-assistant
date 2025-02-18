@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, UploadFile as FastAPIUploadFile, File, Depends, HTTPException, Query
+from fastapi import APIRouter, UploadFile as FastAPIUploadFile, File, Depends, Query
 from fastapi.responses import StreamingResponse
 import shortuuid
 from app.config import settings
@@ -9,10 +9,9 @@ from pathlib import Path
 from app.database import get_db
 from app.models.upload_file import UploadFile
 from pydantic import BaseModel, Field
-from datetime import datetime
 from sqlalchemy.orm import Session
-from app.parser import PDFParser, DocxParser, get_parser, get_file_format
-from app.models.document import Document, DocumentVersion
+from app.parser import get_parser, get_file_format
+from app.models.document import Document
 from sqlalchemy.sql import func
 from sqlalchemy import desc
 from app.auth import get_current_user
@@ -22,6 +21,7 @@ from app.models.chat import ChatSession, ChatMessage
 from urllib.parse import quote
 from jinja2 import Environment, FileSystemLoader, Template
 import logging
+from app.schemas.response import APIResponse
 
 
 router = APIRouter()
@@ -45,34 +45,17 @@ logger.addHandler(console_handler)
 template_dir = Path(__file__).parent.parent.parent.parent / "templates"
 env = Environment(loader=FileSystemLoader(template_dir))
 
-# 添加版本相关的模型
-class DocumentVersionCreate(BaseModel):
-    content: str
-    version: int
-    comment: Optional[str] = None
-
-# 修改 Document 模型
-class DocumentCreate(BaseModel):
-    title: str
-    content: str = ""
-
-class DocumentUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-
 
 @router.get("/config")
 async def get_config():
     """获取大模型配置信息"""
-    return {
-        "code": 200,
-        "message": "获取成功",
-        "data": {
+    return APIResponse.success(
+        data={
             "llm": {
                 "models": [model["readable_model_name"] for model in settings.LLM_MODELS]
             }
         }
-    }
+    )
 
 class Message(BaseModel):
     role: str = Field(..., description="消息角色", example="user")
@@ -129,11 +112,7 @@ async def completions(
         ).first()
         
         if not template_config:
-            return {
-                "code": 400,
-                "message": f"提示词模板 {template_key} 不存在",
-                "data": None
-            }
+            return APIResponse.error(message=f"提示词模板 {template_key} 不存在")
             
         # 使用字符串模板替代文件模板
         template = Template(template_config.value)
@@ -147,6 +126,9 @@ async def completions(
                 session_id=session_id,
                 user_id=current_user.user_id,
             )
+            if request.doc_id:
+                chat_session.doc_id = request.doc_id
+
             db.add(chat_session)
             db.commit()
         else:
@@ -157,11 +139,7 @@ async def completions(
                 ChatSession.is_deleted == False
             ).first()
             if not chat_session:
-                return {
-                    "code": 400,
-                    "message": "会话不存在或无权访问",
-                    "data": None
-                }
+                return APIResponse.error(message="会话不存在或无权访问")
 
         # 获取历史消息
         history_messages = db.query(ChatMessage).filter(
@@ -198,10 +176,7 @@ async def completions(
         if request.doc_id:
             doc = db.query(Document).filter(Document.doc_id == request.doc_id).first()
             if not doc:
-                return {
-                    "code": 400,
-                    "message": "引用的文档不存在",
-                }
+                return APIResponse.error(message="引用的文档不存在")
             doc_content = doc.content
         
         # 处理文件引用
@@ -222,11 +197,9 @@ async def completions(
                 missing_file_ids = set(file_ids) - found_file_ids
                 
                 if missing_file_ids:
-                    return {
-                        "code": 400,
-                        "message": f"以下文件不存在: {', '.join(missing_file_ids)}",
-                        "data": None
-                    }
+                    return APIResponse.error(
+                        message=f"以下文件不存在: {', '.join(missing_file_ids)}"
+                    )
                 
                 # 构建参考文档内容
                 for file in files:
@@ -332,21 +305,15 @@ async def completions(
             db.add(assistant_message)
             db.commit()
 
-            return {
-                "code": 200,
-                "message": "请求成功",
-                "data": {
+            return APIResponse.success(
+                data={
                     **completion.model_dump(),
                     "session_id": session_id
                 }
-            }
+            )
 
     except Exception as e:
-        return {
-            "code": 400,
-            "message": f"请求失败: {str(e)}",
-            "data": None
-        }
+        return APIResponse.error(message=f"请求失败: {str(e)}")
 
 @router.post("/files")
 async def upload_files(
@@ -397,11 +364,7 @@ async def upload_files(
                     "path": str(file_location)
                 })
             except Exception as e:
-                return {
-                    "code": 400,
-                    "message": f"上传文件 {file.filename} 时发生错误: {str(e)}",
-                    "data": None
-                }
+                return APIResponse.error(message=f"上传文件 {file.filename} 时发生错误: {str(e)}")
             finally:
                 await file.close()
         
@@ -424,18 +387,12 @@ async def upload_files(
             db.add(db_file)
             db.commit() 
 
-
-        return {
-            "code": 200,
-            "message": "文件上传成功",
-            "data": result
-        }
+        return APIResponse.success(
+            message="文件上传成功",
+            data=result
+        )
     except Exception as e:
-        return {
-            "code": 400, 
-            "message": f"上传失败: {str(e)}",
-            "data": None
-        }
+        return APIResponse.error(message=f"上传失败: {str(e)}")
 
 @router.get("/files")
 async def get_files(
@@ -459,27 +416,20 @@ async def get_files(
         pages: 总页数
     """
     try:
-        # 构建基础查询
         query = db.query(UploadFile).filter(
             UploadFile.user_id == current_user.user_id
         )
         
-        # 获取总记录数
         total = query.count()
-        
-        # 计算总页数
         pages = (total + page_size - 1) // page_size
         
-        # 获取分页数据
         files = query.order_by(desc(UploadFile.created_at))\
             .offset((page - 1) * page_size)\
             .limit(page_size)\
             .all()
         
-        return {
-            "code": 200,
-            "message": "获取成功",
-            "data": {
+        return APIResponse.success(
+            data={
                 "total": total,
                 "items": [
                     {
@@ -496,13 +446,9 @@ async def get_files(
                 "page_size": page_size,
                 "pages": pages
             }
-        }
+        )
     except Exception as e:
-        return {
-            "code": 400,
-            "message": f"获取失败: {str(e)}",
-            "data": None
-        }
+        return APIResponse.error(message=f"获取失败: {str(e)}")
 
 @router.get("/files/{file_id}/download")
 async def download_file(
@@ -526,11 +472,11 @@ async def download_file(
     ).first()
     
     if not file:
-        raise HTTPException(status_code=404, detail="文件不存在或无权访问")
+        raise APIResponse.error(message="文件不存在或无权访问")
     
     file_path = Path(file.file_path)
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="文件不存在")
+        raise APIResponse.error(message="文件不存在")
     
     # 创建文件流
     def iterfile():
@@ -549,392 +495,12 @@ async def download_file(
         }
     )
 
-
-@router.post("/documents")
-async def create_document(
-    doc: DocumentCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """创建新文档"""
-    try:
-        document = Document(
-            title=doc.title,
-            content=doc.content,
-            user_id=current_user.user_id,
-            doc_id=f"doc-{shortuuid.uuid()}"
-        )
-        db.add(document)
-        db.commit()
-        db.refresh(document)
-
-        # 创建第一个版本
-        initial_version = DocumentVersion(
-            doc_id=document.doc_id,
-            content=doc.content,
-            version=1,
-            comment="初始版本"
-        )
-        db.add(initial_version)
-        db.commit()
-        
-        return {
-            "code": 200,
-            "message": "创建成功",
-            "data": {
-                "doc_id": document.doc_id,
-                "title": document.title,
-                "content": document.content,
-                "created_at": document.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            }
-        }
-    except Exception as e:
-        return {
-            "code": 400,
-            "message": f"创建失败: {str(e)}",
-            "data": None
-        }
-
-@router.put("/documents/{doc_id}")
-async def update_document(
-    doc_id: str,
-    doc: DocumentUpdate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """更新文档内容"""
-    document = db.query(Document).filter(
-        Document.doc_id == doc_id,
-        Document.user_id == current_user.user_id
-    ).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="文档不存在或无权访问")
-    
-    # 如果内容有更新，创建新版本
-    if doc.content is not None and doc.content != document.content:
-        # 获取最新版本号
-        latest_version = db.query(DocumentVersion).filter(
-            DocumentVersion.doc_id == doc_id
-        ).order_by(desc(DocumentVersion.version)).first()
-        
-        new_version_number = 1 if not latest_version else latest_version.version + 1
-        
-        # 创建新版本
-        new_version = DocumentVersion(
-            doc_id=doc_id,
-            content=document.content,  # 保存更新前的内容
-            version=new_version_number,
-            comment=f"自动保存 - 版本 {new_version_number}"
-        )
-        db.add(new_version)
-    
-    # 更新文档内容
-    if doc.title is not None:
-        document.title = doc.title
-    if doc.content is not None:
-        document.content = doc.content
-    document.updated_at = func.now()
-    
-    db.commit()
-    db.refresh(document)
-    
-    return {
-        "code": 200,
-        "message": "更新成功",
-        "data": {
-            "doc_id": document.doc_id,
-            "title": document.title,
-            "updated_at": document.updated_at.strftime("%Y-%m-%d %H:%M:%S")
-        }
-    }
-
-@router.get("/documents/{doc_id}/versions")
-async def get_document_versions(
-    doc_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """获取文档的所有版本"""
-    # 检查文档所有权
-    document = db.query(Document).filter(
-        Document.doc_id == doc_id,
-        Document.user_id == current_user.user_id
-    ).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="文档不存在或无权访问")
-    
-    versions = db.query(DocumentVersion).filter(
-        DocumentVersion.doc_id == doc_id
-    ).order_by(desc(DocumentVersion.version)).all()
-    
-    return {
-        "code": 200,
-        "message": "获取成功",
-        "data": [
-            {
-                "version": v.version,
-                "content": v.content,
-                "comment": v.comment,
-                "created_at": v.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            }
-            for v in versions
-        ]
-    }
-
-@router.post("/documents/{doc_id}/versions")
-async def create_document_version(
-    doc_id: str,
-    version: DocumentVersionCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """创建新版本"""
-    # 检查文档所有权
-    document = db.query(Document).filter(
-        Document.doc_id == doc_id,
-        Document.user_id == current_user.user_id
-    ).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="文档不存在或无权访问")
-    
-    new_version = DocumentVersion(
-        doc_id=doc_id,
-        content=version.content,
-        version=version.version,
-        comment=version.comment
-    )
-    db.add(new_version)
-    db.commit()
-    db.refresh(new_version)
-    
-    return {
-        "code": 200,
-        "message": "创建成功",
-        "data": {
-            "version": new_version.version,
-            "content": new_version.content,
-            "comment": new_version.comment,
-            "created_at": new_version.created_at.strftime("%Y-%m-%d %H:%M:%S")
-        }
-    }
-
-@router.put("/documents/{doc_id}/rollback/{version}")
-async def rollback_document(
-    doc_id: str,
-    version: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """回滚到指定版本"""
-    # 检查文档所有权
-    document = db.query(Document).filter(
-        Document.doc_id == doc_id,
-        Document.user_id == current_user.user_id
-    ).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="文档不存在或无权访问")
-    
-    # 获取指定版本
-    target_version = db.query(DocumentVersion).filter(
-        DocumentVersion.doc_id == doc_id,
-        DocumentVersion.version == version
-    ).first()
-    if not target_version:
-        raise HTTPException(status_code=404, detail="指定版本不存在")
-    
-    # 更新文档内容
-    document.content = target_version.content
-    document.updated_at = func.now()
-    
-    # 创建新版本记录
-    latest_version = db.query(DocumentVersion).filter(
-        DocumentVersion.doc_id == doc_id
-    ).order_by(desc(DocumentVersion.version)).first()
-    
-    new_version = DocumentVersion(
-        doc_id=doc_id,
-        content=target_version.content,
-        version=latest_version.version + 1,
-        comment=f"回滚至版本 {version}"
-    )
-    
-    db.add(new_version)
-    db.commit()
-    
-    return {
-        "code": 200,
-        "message": "回滚成功"
-    }
-
-@router.get("/documents")
-async def get_documents(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """获取当前用户的所有文档"""
-    documents = db.query(Document).filter(
-        Document.user_id == current_user.user_id
-    ).order_by(desc(Document.updated_at)).all()
-    return {
-        "code": 200,
-        "message": "获取成功",
-        "data": [
-            {
-                "doc_id": doc.doc_id,
-                "title": doc.title,
-                "updated_at": (doc.updated_at or doc.created_at).strftime("%Y-%m-%d %H:%M:%S")
-            }
-            for doc in documents
-        ]
-    }
-
-@router.get("/documents/{doc_id}")
-async def get_document(
-    doc_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """获取单个文档"""
-    document = db.query(Document).filter(
-        Document.doc_id == doc_id,
-        Document.user_id == current_user.user_id
-    ).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="文档不存在或无权访问")
-    
-    return {
-        "code": 200,
-        "message": "获取成功",
-        "data": {
-            "doc_id": document.doc_id,
-            "title": document.title,
-            "content": document.content,
-            "updated_at": (document.updated_at or document.created_at).strftime("%Y-%m-%d %H:%M:%S")
-        }
-    }
-
-@router.delete("/documents/{doc_id}")
-async def delete_document(
-    doc_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """删除文档"""
-    document = db.query(Document).filter(
-        Document.doc_id == doc_id,
-        Document.user_id == current_user.user_id
-    ).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="文档不存在或无权访问")
-    
-    try:
-        db.delete(document)
-        db.commit()
-        return {
-            "code": 200,
-            "message": "删除成功"
-        }
-    except Exception as e:
-        db.rollback()
-        return {
-            "code": 500,
-            "message": f"删除失败: {str(e)}"
-        }
-
-@router.get("/prompts")
-async def get_prompt_templates(db: Session = Depends(get_db)):
-    """获取提示词模板列表"""
-    templates = db.query(SystemConfig).filter(
-        SystemConfig.key.like("prompt.%")
-    ).all()
-    
-    return {
-        "code": 200,
-        "message": "获取成功",
-        "data": [
-            {
-                "key": template.key,
-                "prompt": template.value,
-                "description": template.description
-            }
-            for template in templates
-        ]
-    }
-
-class PromptTemplateUpdate(BaseModel):
-    prompt: str = Field(..., description="提示词模板内容")
-    description: Optional[str] = Field(None, description="模板描述")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "prompt": "请根据下面的文本，自动为其补全内容",
-                "description": "自动补全模板"
-            }
-        }
-
-@router.put("/prompts/{key}")
-async def update_prompt_template(
-    key: str,
-    prompt: PromptTemplateUpdate,
-    db: Session = Depends(get_db)
-):
-    """
-    更新提示词模板
-    
-    Args:\n
-        key: 提示词模板的键名，如 prompt.completion\n
-        prompt: 提示词模板内容, 支持的变量\n
-        description: 模板描述
-        
-    Returns:\n
-        prompt: 更新后的模板内容\n
-        description: 更新后的模板描述\n
-    """
-    # 验证key格式
-    if not key.startswith("prompt."):
-        raise HTTPException(
-            status_code=400, 
-            detail="无效的提示词键名，必须以 'prompt.' 开头"
-        )
-    
-    db_template = db.query(SystemConfig).filter(
-        SystemConfig.key == key
-    ).first()
-    
-    if not db_template:
-        db_template = SystemConfig(
-            key=key,
-            value=prompt.prompt,
-            description=prompt.description or "默认提示词模板"
-        )
-        db.add(db_template)
-    else:
-        db_template.value = prompt.prompt
-        if prompt.description:
-            db_template.description = prompt.description
-    
-    db.commit()
-    db.refresh(db_template)
-    
-    return {
-        "code": 200,
-        "message": "更新成功",
-        "data": {
-            "key": db_template.key,
-            "prompt": db_template.value,
-            "description": db_template.description
-        }
-    }
-
-
 @router.get("/models")
 async def get_models():
     """获取支持的模型列表"""
-    return {
-        "code": 200,
-        "message": "success",
-        "data": {
+    return APIResponse.success(
+        message="success",
+        data={
             "models": [
                 {
                     "id": model["model"],
@@ -944,4 +510,155 @@ async def get_models():
                 for model in settings.LLM_MODELS
             ]
         }
-    }
+    )
+
+@router.get("/sessions")
+async def get_sessions(
+    doc_id: Optional[str] = None,
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取用户的对话会话列表
+    
+    Args:
+        doc_id: 可选的文档ID，如果提供则只返回与该文档相关的会话
+        page: 页码，从1开始
+        page_size: 每页显示的数量，默认10，最大100
+        
+    Returns:
+        total: 总记录数
+        items: 会话列表
+        page: 当前页码
+        page_size: 每页数量
+        pages: 总页数
+    """
+    try:
+        # 构建基础查询
+        query = db.query(ChatSession).filter(
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.is_deleted == False
+        )
+        
+        # 如果提供了doc_id，添加文档过滤条件
+        if doc_id:
+            # 通过消息元数据中的doc_id字段过滤
+            query = query.join(ChatMessage, ChatSession.session_id == ChatMessage.session_id)\
+                .filter(ChatMessage.meta.contains(f'"doc_id": "{doc_id}"'))\
+                .distinct()
+        
+        # 获取总记录数
+        total = query.count()
+        pages = (total + page_size - 1) // page_size
+        
+        # 分页查询会话
+        sessions = query.order_by(desc(ChatSession.updated_at))\
+            .offset((page - 1) * page_size)\
+            .limit(page_size)\
+            .all()
+        
+        # 获取每个会话的最后一条消息
+        session_data = []
+        for session in sessions:
+            last_message = db.query(ChatMessage)\
+                .filter(
+                    ChatMessage.session_id == session.session_id,
+                    ChatMessage.is_deleted == False
+                )\
+                .order_by(desc(ChatMessage.created_at))\
+                .first()
+            
+            session_data.append({
+                "session_id": session.session_id,
+                "last_message": last_message.content if last_message else None,
+                "last_message_time": last_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if last_message else None,
+                "created_at": session.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": session.updated_at.strftime("%Y-%m-%d %H:%M:%S") if session.updated_at else None
+            })
+        
+        return APIResponse.success(
+            data={
+                "total": total,
+                "items": session_data,
+                "page": page,
+                "page_size": page_size,
+                "pages": pages
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"获取会话列表失败: {str(e)}")
+        return APIResponse.error(message=f"获取会话列表失败: {str(e)}")
+
+@router.get("/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: str,
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取指定会话的聊天记录
+    
+    Args:
+        session_id: 会话ID
+        page: 页码，从1开始
+        page_size: 每页显示的数量，默认10，最大100
+        
+    Returns:
+        total: 总记录数
+        items: 消息列表
+        page: 当前页码
+        page_size: 每页数量
+        pages: 总页数
+    """
+    try:
+        # 验证会话是否存在且属于当前用户
+        session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.is_deleted == False
+        ).first()
+        
+        if not session:
+            return APIResponse.error(message="会话不存在或无权访问")
+            
+        # 查询消息
+        query = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.is_deleted == False
+        )
+        
+        total = query.count()
+        pages = (total + page_size - 1) // page_size
+        
+        messages = query.order_by(ChatMessage.id)\
+            .offset((page - 1) * page_size)\
+            .limit(page_size)\
+            .all()
+            
+        return APIResponse.success(
+            data={
+                "total": total,
+                "items": [
+                    {
+                        "message_id": msg.message_id,
+                        "role": msg.role,
+                        "content": msg.content,
+                        "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    for msg in messages
+                ],
+                "page": page,
+                "page_size": page_size,
+                "pages": pages
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"获取聊天记录失败: {str(e)}")
+        return APIResponse.error(message=f"获取聊天记录失败: {str(e)}")
+
