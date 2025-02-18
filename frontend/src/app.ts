@@ -9,9 +9,10 @@ interface ChatMessage {
 // 定义请求体接口
 interface ChatRequestBody {
   messages?: ChatMessage[];
-  action?: 'abridge' | 'rewrite' | 'extension';
+  action?: 'abridge' | 'rewrite' | 'extension' | 'chat';
   temperature?: number | null;
   model_name?: string;
+  selected_contents?: string[];
 }
 
 // 保存原始的fetch方法
@@ -71,8 +72,10 @@ window.fetch = async function (...args) {
               '</content>\n这句话的内容较简短，帮我简单的优化和丰富一下内容',
             ),
           );
-
-          if (needsAbridge || needsRewrite || needsExtension) {
+          const needsChat = body.messages.some((msg: ChatMessage) =>
+            msg.content?.match(/^[^\n]*\n[^\n]*$/),
+          );
+          if (needsAbridge || needsRewrite || needsExtension || needsChat) {
             // 设置对应的 action
             if (needsAbridge) {
               body.action = 'abridge';
@@ -80,20 +83,31 @@ window.fetch = async function (...args) {
               body.action = 'rewrite';
             } else if (needsExtension) {
               body.action = 'extension';
+            } else {
+              body.action = 'chat';
             }
 
             // 处理 messages content
+            const selectedContents: string[] = [];
             body.messages = body.messages.map((msg: ChatMessage) => {
               if (msg.content) {
                 const contentMatch = msg.content.match(
                   /<content>(.*?)<\/content>/,
                 );
                 if (contentMatch) {
-                  msg.content = contentMatch[1];
+                  selectedContents.push(contentMatch[1]);
+                  msg.content = '';
+                }
+                if (body.action === 'chat') {
+                  debugger;
+                  let text = msg.content.split('\n');
+                  msg.content = text[1];
+                  selectedContents.push(text[0]);
                 }
               }
               return msg;
             });
+            body.selected_contents = selectedContents;
           }
         }
 
