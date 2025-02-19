@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from app.routers.v1 import api, auth, users, prompt, document
+from app.routers.v1 import api, auth, users, prompt, document, rag
 from app.config import settings
 from app.database import engine, Base
 from fastapi.openapi.utils import get_openapi
@@ -69,6 +69,7 @@ app.include_router(api.router, prefix="/api/v1", tags=["api"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])  # 修改用户路由前缀
 app.include_router(prompt.router, prefix="/api/v1", tags=["prompt"])
 app.include_router(document.router, prefix="/api/v1", tags=["document"])
+app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
 
 @app.get("/")
 async def root():
