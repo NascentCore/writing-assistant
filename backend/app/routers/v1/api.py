@@ -779,7 +779,7 @@ async def get_urls(
             WebPageResponse(
                 webpage_id=webpage.webpage_id,
                 url=webpage.url,
-                title=webpage.title,
+                title=webpage.title if webpage.title else "",
                 created_at=webpage.created_at.strftime("%Y-%m-%d %H:%M:%S")
             ) 
             for webpage in webpages

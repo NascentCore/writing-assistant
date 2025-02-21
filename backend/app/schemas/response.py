@@ -3,9 +3,9 @@ from pydantic import BaseModel
 
 T = TypeVar('T')
 
-class PaginationData(BaseModel):
+class PaginationData(BaseModel, Generic[T]):
     """分页数据结构"""
-    list: List[Any] = []  # 数据列表
+    list: List[T] = []  # 数据列表
     total: int = 0  # 总记录数
     page: int = 1   # 当前页码
     page_size: int = 10  # 每页数量
