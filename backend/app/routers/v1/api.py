@@ -8,7 +8,7 @@ from typing import List, Literal, Optional, Dict, Any
 from pathlib import Path
 from app.database import get_db
 from app.models.upload_file import UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy.orm import Session
 from app.parser import get_parser, get_file_format
 from app.models.document import Document
@@ -21,7 +21,9 @@ from app.models.chat import ChatSession, ChatMessage
 from urllib.parse import quote
 from jinja2 import Environment, FileSystemLoader, Template
 import logging
-from app.schemas.response import APIResponse
+from app.schemas.response import APIResponse, PaginationData, PaginationResponse
+from app.scrape.web import scraper
+from app.models.web_page import WebPage
 
 
 router = APIRouter()
@@ -73,6 +75,7 @@ class CompletionRequest(BaseModel):
     
     file_ids: Optional[List[str]] = Field([], description="引用的文件ID列表")
     doc_id: Optional[str] = Field(None, description="引用的文档ID，及当前编辑的文档ID")
+    webpage_ids: Optional[List[str]] = Field([], description="引用的网页ID列表")
     selected_contents: Optional[List[str]] = Field(None, description="划选的文本内容列表")
 
     class Config:
@@ -207,13 +210,33 @@ async def completions(
                         "file_name": file.file_name,
                         "file_content": file.content
                     })
-                
+        
+        # 处理网页引用
+        reference_webpages = []
+        if "webpage_ids" in body:
+            webpage_ids = body["webpage_ids"]
+            del body["webpage_ids"]
+            # 获取所有引用网页的内容
+            webpages = db.query(WebPage).filter(WebPage.webpage_id.in_(webpage_ids)).all()
+            # 检查是否所有请求的网页都存在
+            found_webpage_ids = {webpage.webpage_id for webpage in webpages}
+            missing_webpage_ids = set(webpage_ids) - found_webpage_ids
+            if missing_webpage_ids:
+                return APIResponse.error(
+                    message=f"以下网页不存在: {', '.join(missing_webpage_ids)}"
+                )
+            for webpage in webpages:
+                reference_webpages.append({
+                    "webpage_id": webpage.webpage_id,
+                    "webpage_content": webpage.content
+                })
 
         prompt = template.render(
             question=original_message,
             content=doc_content,
             selected_contents=request.selected_contents,
-            reference_files=reference_files
+            reference_files=reference_files,
+            reference_webpages=reference_webpages
         )
         
         # 添加当前消息
@@ -661,4 +684,118 @@ async def get_session_messages(
     except Exception as e:
         logger.error(f"获取聊天记录失败: {str(e)}")
         return APIResponse.error(message=f"获取聊天记录失败: {str(e)}")
+
+class UrlUploadRequest(BaseModel):
+    url: HttpUrl = Field(..., description="要爬取的网页URL")
+
+@router.post("/urls", summary="上传URL")
+async def upload_url(
+    request: UrlUploadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        # 检查URL是否已经爬取过
+        existing_page = scraper.get_by_url(str(request.url), db)
+        if existing_page and existing_page.user_id == current_user.user_id:
+            return APIResponse.success(
+                message="URL内容已存在",
+                data={
+                    "webpage_id": existing_page.webpage_id,
+                    "url": existing_page.url,
+                    "title": existing_page.title,
+                }
+            )
+        if existing_page:
+            content = existing_page.__dict__.copy()
+            webpage = scraper.save_to_db(current_user.user_id, content, db)
+            
+            return APIResponse.success(
+                message="URL内容爬取成功",
+                data={
+                    "webpage_id": webpage.webpage_id,
+                    "url": webpage.url,
+                    "title": webpage.title,
+                }
+            )
+        
+        # 爬取新的URL内容
+        webpage = scraper.scrape_and_save(current_user.user_id, str(request.url), db)
+        if not webpage:
+            return APIResponse.error(message="爬取URL内容失败")
+            
+        return APIResponse.success(
+            message="URL内容爬取成功",
+            data={
+                "webpage_id": webpage.webpage_id,
+                "url": str(request.url),
+                "title": webpage.title,
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"上传URL失败: {str(e)}")
+        return APIResponse.error(message=f"上传URL失败: {str(e)}")
+
+class WebPageResponse(BaseModel):
+    webpage_id: str = Field(..., description="网页ID")
+    url: str = Field(..., description="网页URL")
+    title: str = Field(..., description="网页标题")
+    created_at: str = Field(..., description="创建时间")
+    
+    class Config:
+        from_attributes = True
+
+class UrlListResponse(PaginationResponse):
+    data: PaginationData[WebPageResponse]
+
+@router.get("/urls", summary="获取网页列表", response_model=UrlListResponse)
+async def get_urls(
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        # 构建基础查询
+        query = db.query(WebPage).filter(
+            WebPage.user_id == current_user.user_id,
+            WebPage.status == 2,
+            WebPage.is_deleted == False
+        )
+        
+        # 获取总记录数
+        total = query.count()
+        pages = (total + page_size - 1) // page_size
+        
+        # 分页查询网页
+        webpages = query.order_by(desc(WebPage.id))\
+            .offset((page - 1) * page_size)\
+            .limit(page_size)\
+            .all()
+            
+        # 转换为响应模型
+        webpage_responses = [
+            WebPageResponse(
+                webpage_id=webpage.webpage_id,
+                url=webpage.url,
+                title=webpage.title,
+                created_at=webpage.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            ) 
+            for webpage in webpages
+        ]
+        
+        return UrlListResponse(
+            data=PaginationData(
+                list=webpage_responses,
+                total=total,
+                page=page,
+                page_size=page_size,
+                total_pages=pages
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"获取网页列表失败: {str(e)}")
+        return APIResponse.error(message=f"获取网页列表失败: {str(e)}")
 
