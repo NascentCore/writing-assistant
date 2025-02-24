@@ -1,5 +1,6 @@
+from app.schemas.response import APIResponse
 import shortuuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
@@ -31,20 +32,13 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         # 检查用户名是否已存在
         db_user = db.query(User).filter(User.username == user.username).first()
         if db_user:
-            return {
-                "code": 400,
-                "message": "用户名已被注册",
-                "data": None
-            }
+            return APIResponse.error(message="用户名已被注册")
         
         # 检查邮箱是否已存在
         db_user = db.query(User).filter(User.email == user.email).first()
         if db_user:
-            return {
-                "code": 400,
-                "message": "邮箱已被注册",
-                "data": None
-            }
+            return APIResponse.error(message="邮箱已被注册")
+        
         
         # 创建新用户
         hashed_password = get_password_hash(user.password)
@@ -65,20 +59,15 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
             expires_delta=access_token_expires
         )
         
-        return {
-            "code": 200,
-            "message": "注册成功",
-            "data": {
+        return APIResponse.success(
+            message="注册成功",
+            data={
                 "access_token": access_token,
                 "token_type": "bearer"
             }
-        }
+        )
     except Exception as e:
-        return {
-            "code": 400,
-            "message": f"注册失败: {str(e)}",
-            "data": None
-        }
+        return APIResponse.error(message=f"注册失败: {str(e)}")
 
 @router.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -86,11 +75,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
     try:
         user = db.query(User).filter(User.username == form_data.username).first()
         if not user or not verify_password(form_data.password, user.hashed_password):
-            return {
-                "code": 400,
-                "message": "用户名或密码错误",
-                "data": None
-            }
+            return APIResponse.error(message="用户名或密码错误")
         
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
@@ -98,17 +83,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
             expires_delta=access_token_expires
         )
         
-        return {
-            "code": 200,
-            "message": "登录成功",
-            "data": {
+        return APIResponse.success(
+            message="登录成功",
+            data={
                 "access_token": access_token,
                 "token_type": "bearer"
             }
-        }
+        )
     except Exception as e:
-        return {
-            "code": 400,
-            "message": f"登录失败: {str(e)}",
-            "data": None
-        } 
+        return APIResponse.error(message=f"登录失败: {str(e)}")
