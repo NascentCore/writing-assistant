@@ -156,15 +156,15 @@ export async function getInitialState(): Promise<{ name: string }> {
 }
 
 // 配置路由跳转逻辑
-export function onRouteChange({
-  location,
-}: {
-  location: { pathname: string };
-}) {
-  if (location.pathname === '/') {
-    window.location.href = '/EditorPage';
-  }
-}
+// export function onRouteChange({
+//   location,
+// }: {
+//   location: { pathname: string };
+// }) {
+//   if (location.pathname === '/') {
+//     window.location.href = '/EditorPage';
+//   }
+// }
 
 // 需要现在 umi 开启布局
 // export const layout = () => {

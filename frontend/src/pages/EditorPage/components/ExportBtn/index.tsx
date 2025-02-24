@@ -1,4 +1,5 @@
 import { saveAsDocx, saveAsPdf } from '@/utils/utils'; // 引入导出函数
+import { useModel } from '@umijs/max';
 import { AiEditor } from 'aieditor';
 import { Button, Dropdown, Menu } from 'antd';
 import React from 'react';
@@ -8,16 +9,23 @@ interface ExportBtnGroupProps {
 }
 
 const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
+  const { getDocumentTitle } = useModel('EditorPage.model');
+
   // 处理导出逻辑
   const handleExport = async (format: string) => {
     if (!editorRef.current) return;
+
+    const currentDocId = localStorage.getItem('current_document_id');
+    if (!currentDocId) return;
+
+    const docTitle = getDocumentTitle(currentDocId);
 
     try {
       if (format === 'pdf') {
         saveAsPdf();
       } else if (format === 'docx') {
         const content = editorRef.current.getHtml();
-        saveAsDocx(content);
+        saveAsDocx(content, docTitle);
       }
     } catch (error) {
       console.error('Export error:', error);

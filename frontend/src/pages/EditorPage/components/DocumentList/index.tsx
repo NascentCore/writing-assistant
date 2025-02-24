@@ -5,6 +5,7 @@ import {
   FileTextOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
+import { useModel } from '@umijs/max';
 import {
   Button,
   Dropdown,
@@ -26,7 +27,7 @@ const DocumentList: React.FC<DocumentListProps> = ({
   currentDocId,
   onDocumentSelect,
 }) => {
-  const [documents, setDocuments] = useState<any[]>([]);
+  const { documents, setDocuments } = useModel('EditorPage.model');
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [newDocModalVisible, setNewDocModalVisible] = useState(false);

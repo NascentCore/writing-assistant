@@ -95,7 +95,10 @@ const parseMarkdownToDocElements = (markdown: string): Paragraph[] => {
   return elements;
 };
 
-export const saveAsDocx = async (htmlContent: string): Promise<boolean> => {
+export const saveAsDocx = async (
+  htmlContent: string,
+  fileName: string = '售前方案写作助手',
+): Promise<boolean> => {
   try {
     // 1. HTML -> Markdown
     let markdown = turndownService.turndown(htmlContent);
@@ -146,7 +149,7 @@ export const saveAsDocx = async (htmlContent: string): Promise<boolean> => {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = '售前方案写作助手.docx';
+    link.download = `${fileName}.docx`;
     link.click();
     window.URL.revokeObjectURL(url);
 

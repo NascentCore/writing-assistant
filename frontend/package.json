@@ -5,6 +5,7 @@
     "build": "max build",
     "dev": "max dev",
     "format": "prettier --cache --write .",
+    "icon:modify": "node script/iconModify.js",
     "postinstall": "max setup",
     "prepare": "husky",
     "setup": "max setup",
