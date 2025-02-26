@@ -173,3 +173,88 @@ class OutlineGenerator:
             db_session.rollback()
             logger.error(f"保存大纲到数据库时出错: {str(e)}")
             raise 
+
+    def generate_full_content(self, outline_id: str, db_session) -> Dict[str, Any]:
+        """
+        根据大纲生成全文内容
+        
+        Args:
+            outline_id: 大纲ID
+            db_session: 数据库会话
+            
+        Returns:
+            Dict: 生成的全文内容
+        """
+        from app.models.outline import Outline, SubParagraph, CountStyle
+        
+        try:
+            # 查找大纲
+            outline = db_session.query(Outline).filter(Outline.id == outline_id).first()
+            if not outline:
+                raise ValueError(f"未找到ID为{outline_id}的大纲")
+            
+            # 获取所有子段落
+            sub_paragraphs = db_session.query(SubParagraph).filter(SubParagraph.outline_id == outline_id).all()
+            
+            # 准备全文内容
+            full_content = {
+                "title": outline.title,
+                "content": [],
+                "markdown": ""
+            }
+            
+            markdown_content = f"# {outline.title}\n\n"
+            
+            # 为每个子段落生成内容
+            for sub_para in sub_paragraphs:
+                # 根据count_style确定内容长度
+                word_count_range = {
+                    "short": "300-500",
+                    "medium": "800-1200",
+                    "long": "1500-2500"
+                }.get(sub_para.count_style.value, "800-1200")
+                
+                # 构建提示模板
+                template = f"""
+                你是一个专业的写作助手，请根据以下大纲生成高质量的内容。
+                
+                文章标题: {outline.title}
+                当前章节: {sub_para.title}
+                章节描述: {sub_para.description}
+                
+                请生成一个字数在{word_count_range}字之间的内容，内容应该符合章节描述，并且与整体文章主题保持一致。
+                内容应该有逻辑性、连贯性，并且包含足够的细节和例子。
+                
+                请直接返回生成的内容，不需要添加标题。
+                """
+                
+                # 创建提示
+                prompt_template = ChatPromptTemplate.from_template(template)
+                
+                # 创建链
+                chain = prompt_template | self.llm
+                
+                # 执行链
+                result = chain.invoke({})
+                
+                # 提取内容
+                content = result.content if hasattr(result, 'content') else str(result)
+                
+                # 添加到全文内容
+                full_content["content"].append({
+                    "title": sub_para.title,
+                    "content": content,
+                    "count_style": sub_para.count_style.value
+                })
+                
+                # 添加到markdown
+                markdown_content += f"## {sub_para.title}\n\n{content}\n\n"
+            
+            # 设置markdown内容
+            full_content["markdown"] = markdown_content
+            
+            return full_content
+            
+        except Exception as e:
+            logger.error(f"生成全文内容时出错: {str(e)}")
+            raise 

@@ -196,3 +196,39 @@ async def get_outline_detail(
     }
     
     return APIResponse.success(message="获取大纲详情成功", data=response_data)
+
+
+class GenerateFullContentRequest(BaseModel):
+    outline_id: str = Field(..., description="大纲ID")
+
+
+@router.post("/generate_full_content")
+async def generate_full_content(
+    request: GenerateFullContentRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    根据大纲生成全文
+    
+    Args:
+        outline_id: 大纲ID
+        
+    Returns:
+        title: 文章标题
+        content: 文章内容列表，每个元素包含标题和内容
+        markdown: Markdown格式的完整文章
+    """
+    # 初始化大纲生成器
+    outline_generator = OutlineGenerator()
+    
+    try:
+        # 调用生成全文的方法
+        full_content = outline_generator.generate_full_content(request.outline_id, db)
+        
+        return APIResponse.success(message="全文生成成功", data=full_content)
+    except ValueError as e:
+        return APIResponse.error(message=str(e))
+    except Exception as e:
+        return APIResponse.error(message=f"生成全文时出错: {str(e)}")
+
+
