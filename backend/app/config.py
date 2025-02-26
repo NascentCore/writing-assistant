@@ -18,6 +18,14 @@ def load_yaml_config():
 
 yaml_config = load_yaml_config()
 
+# 全局数据库配置 - 只从yaml文件读取
+MYSQL_HOST = yaml_config.get("mysql", {}).get("host", "localhost")
+MYSQL_PORT = int(yaml_config.get("mysql", {}).get("port", 3306))
+MYSQL_USER = yaml_config.get("mysql", {}).get("user", "root")
+MYSQL_PASSWORD = yaml_config.get("mysql", {}).get("password", "")
+MYSQL_DATABASE = yaml_config.get("mysql", {}).get("database", "aieditor")
+DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
+
 class Settings(BaseSettings):
     # 基础配置
     PROJECT_NAME: str = yaml_config.get("project", {}).get("name", "AI编辑器")
@@ -33,16 +41,14 @@ class Settings(BaseSettings):
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
     
     # MySQL数据库配置
-    MYSQL_HOST: str = yaml_config.get("mysql", {}).get("host", os.getenv("MYSQL_HOST", "localhost"))
-    MYSQL_PORT: int = int(yaml_config.get("mysql", {}).get("port", os.getenv("MYSQL_PORT", "3306")))
-    MYSQL_USER: str = yaml_config.get("mysql", {}).get("user", os.getenv("MYSQL_USER", "root"))
-    MYSQL_PASSWORD: str = yaml_config.get("mysql", {}).get("password", os.getenv("MYSQL_PASSWORD", ""))
-    MYSQL_DATABASE: str = yaml_config.get("mysql", {}).get("database", os.getenv("MYSQL_DATABASE", "aieditor"))
+    MYSQL_HOST: str = MYSQL_HOST
+    MYSQL_PORT: int = MYSQL_PORT
+    MYSQL_USER: str = MYSQL_USER
+    MYSQL_PASSWORD: str = MYSQL_PASSWORD
+    MYSQL_DATABASE: str = MYSQL_DATABASE
     
-    # 构建数据库URL
-    @property
-    def DATABASE_URL(self) -> str:
-        return f"mysql+pymysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DATABASE}"
+    # 数据库URL
+    DATABASE_URL: str = DATABASE_URL
     
     # 大模型配置
     LLM_MODELS: list = yaml_config.get("llm_models", []) or [{
