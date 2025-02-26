@@ -2,10 +2,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from app.routers.v1 import api, auth, users, prompt, document, rag
+from app.routers.v1 import api, auth, users, prompt, document, rag,writing
 from app.config import settings
 from app.database import engine, Base
 from fastapi.openapi.utils import get_openapi
+
+
 
 # 创建所有表
 def create_tables():
@@ -70,7 +72,7 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["users"])  # 修�
 app.include_router(prompt.router, prefix="/api/v1", tags=["prompt"])
 app.include_router(document.router, prefix="/api/v1", tags=["document"])
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
-
+app.include_router(writing.router, prefix="/api/v1", tags=["writing"])
 @app.get("/")
 async def root():
     return {
