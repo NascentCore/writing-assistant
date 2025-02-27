@@ -40,12 +40,62 @@ class Outline(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), nullable=False, comment="大纲标题")
-    reference_status = Column(Integer, nullable=False, default=0, comment="引用状态")
+    reference_status = Column(Enum(ReferenceStatus), nullable=False, default=ReferenceStatus.NOT_REFERENCED, comment="引用状态")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # 关联子段落
     sub_paragraphs = relationship("SubParagraph", back_populates="outline", cascade="all, delete-orphan")
+
+    @property
+    def markdown_content(self):
+        """
+        将大纲及其所有子段落拼接成 Markdown 格式的内容
+        
+        Returns:
+            str: Markdown 格式的完整内容
+        """
+        # 开始构建 Markdown 内容，以大纲标题作为一级标题
+        content = f"# {self.title}\n\n"
+        
+        # 获取所有顶级段落（level=1且没有父段落）
+        top_level_paragraphs = [p for p in self.sub_paragraphs if p.level == 1 and p.parent_id is None]
+        
+        # 按照创建时间排序
+        top_level_paragraphs.sort(key=lambda p: p.created_at)
+        
+        # 递归构建 Markdown 内容
+        for paragraph in top_level_paragraphs:
+            content += self._build_paragraph_markdown(paragraph, level=2)
+            
+        return content
+    
+    def _build_paragraph_markdown(self, paragraph, level):
+        """
+        递归构建段落的 Markdown 内容
+        
+        Args:
+            paragraph: 段落对象
+            level: Markdown 标题级别
+            
+        Returns:
+            str: 段落的 Markdown 内容
+        """
+        # 添加标题
+        content = f"{'#' * level} {paragraph.title}\n\n"
+        
+        # 添加描述（如果有）
+        if paragraph.description:
+            content += f"{paragraph.description}\n\n"
+        
+        # 处理子段落
+        if paragraph.children:
+            # 按照创建时间排序
+            children = sorted(paragraph.children, key=lambda p: p.created_at)
+            for child in children:
+                content += self._build_paragraph_markdown(child, level + 1)
+        
+        return content
 
 # 子段落表
 class SubParagraph(Base):
@@ -53,16 +103,37 @@ class SubParagraph(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     outline_id = Column(Integer, ForeignKey("outlines.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("sub_paragraphs.id"), nullable=True, comment="父段落ID")
+    level = Column(Integer, nullable=False, default=1, comment="段落等级，1级为顶级段落")
     title = Column(String(255), nullable=False, comment="子段落标题")
     description = Column(Text, nullable=True, comment="子段落描述")
-    count_style = Column(Enum(CountStyle), nullable=False, comment="篇幅风格")
-    reference_status = Column(Integer, nullable=False, default=0, comment="引用状态")
+    count_style = Column(Enum(CountStyle), nullable=True, comment="篇幅风格，仅1级段落有效")
+    reference_status = Column(Enum(ReferenceStatus), nullable=False, default=ReferenceStatus.NOT_REFERENCED, comment="引用状态")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # 关联
     outline = relationship("Outline", back_populates="sub_paragraphs")
+    parent = relationship("SubParagraph", back_populates="children", remote_side=[id])
+    children = relationship("SubParagraph", back_populates="parent", cascade="all, delete-orphan")
     references = relationship("Reference", back_populates="sub_paragraph", cascade="all, delete-orphan")
+
+    @property
+    def can_have_references(self):
+        """判断是否可以拥有引用，只有1级段落可以"""
+        return self.level == 1
+    
+    @property
+    def can_have_count_style(self):
+        """判断是否可以设置篇幅风格，只有1级段落可以"""
+        return self.level == 1
+
+    def __setattr__(self, key, value):
+        """重写属性设置方法，验证 count_style 只能在 1 级段落设置"""
+        if key == 'count_style' and value is not None:
+            if not hasattr(self, 'level') or self.level != 1:
+                raise ValueError("只有1级段落才能设置篇幅风格")
+        super().__setattr__(key, value)
 
 # 引用资料表
 class Reference(Base):
@@ -78,6 +149,16 @@ class Reference(Base):
     # 关联
     sub_paragraph = relationship("SubParagraph", back_populates="references")
     web_link = relationship("WebLink", back_populates="reference", uselist=False, cascade="all, delete-orphan")
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # 验证只有 1 级段落才能拥有引用
+        from sqlalchemy.orm.session import object_session
+        session = object_session(self)
+        if session:
+            paragraph = session.query(SubParagraph).filter(SubParagraph.id == self.sub_paragraph_id).first()
+            if paragraph and paragraph.level != 1:
+                raise ValueError("只有1级段落才能拥有引用")
 
 # 网页链接表
 class WebLink(Base):
