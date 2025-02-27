@@ -59,19 +59,24 @@ class Reference(ReferenceBase):
 class SubParagraphBase(BaseModel):
     title: str
     description: Optional[str] = None
-    count_style: CountStyle
+    count_style: Optional[CountStyle] = None
+    level: int = 1
     reference_status: int = 0
 
 class SubParagraphCreate(SubParagraphBase):
     outline_id: int
+    parent_id: Optional[int] = None
     references: List[ReferenceCreate] = []
+    children: List["SubParagraphCreate"] = []
 
 class SubParagraph(SubParagraphBase):
     id: int
     outline_id: int
+    parent_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     references: List[Reference] = []
+    children: List["SubParagraph"] = []
 
     class Config:
         from_attributes = True
@@ -116,3 +121,7 @@ class PaginationResponse(BaseModel):
     code: int = 200
     message: str = "success" 
     data: PaginationData
+
+# 解决循环引用问题
+SubParagraphCreate.update_forward_refs()
+SubParagraph.update_forward_refs()
