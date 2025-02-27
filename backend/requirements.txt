@@ -59,3 +59,6 @@ typing_extensions==4.12.2
 urllib3==2.3.0
 uvicorn==0.34.0
 yarl==1.18.3
+langchain==0.1.12
+langchain-openai==0.1.5
+langchain-community==0.0.29
