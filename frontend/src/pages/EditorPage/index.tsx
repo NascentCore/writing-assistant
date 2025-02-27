@@ -11,7 +11,6 @@ import DocumentList from './components/DocumentList';
 import ExportBtnGroup from './components/ExportBtn';
 import FileUpload from './components/FileUpload';
 import OutLine from './components/OutLine';
-import UserProfile from './components/UserProfile';
 import VersionHistory from './components/VersionHistory';
 import { getEditorConfig } from './editorConfig';
 import './index.less';
@@ -32,7 +31,6 @@ function App() {
     return localStorage.getItem(CURRENT_DOC_KEY) || null;
   });
 
-  const [showProfile, setShowProfile] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [outlineData, setOutlineData] = useState<OutlineNode[]>([]);
   const [showAIChat, setShowAIChat] = useState(false);
@@ -232,14 +230,6 @@ function App() {
     };
   }, [currentDocId, loadDocumentContent]);
 
-  // 添加登出处理函数
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    setCurrentDocId(null);
-    // 退出登录后直接跳转到登录界面
-    window.location.href = '/login';
-  };
-
   // 监听 currentDocId 变化，保存到 localStorage
   useEffect(() => {
     if (currentDocId) {
@@ -295,11 +285,6 @@ function App() {
                 版本历史
               </Button>
             )}
-
-            <div className="user-buttons">
-              <Button onClick={() => setShowProfile(true)}>个人信息</Button>
-              <Button onClick={handleLogout}>退出登录</Button>
-            </div>
           </div>
         </div>
 
@@ -314,8 +299,6 @@ function App() {
           <FileUpload />
         </Modal>
 
-        {/* 添加个人信息对话框 */}
-        {showProfile && <UserProfile onClose={() => setShowProfile(false)} />}
         {showVersionHistory && currentDocId && (
           <VersionHistory
             docId={currentDocId}

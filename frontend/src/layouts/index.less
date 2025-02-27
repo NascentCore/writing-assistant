@@ -8,6 +8,65 @@
   background-color: #f1f2f4;
   border-right: 1px solid #f0f0f0;
   padding: 16px 0;
+  transition: width 0.3s;
+
+  &.collapsed {
+    width: 80px;
+  }
+}
+
+.menuHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.userAvatar {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.avatarContainer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .sideMenu.collapsed & {
+    gap: 0;
+  }
+}
+
+.userName {
+  font-size: 16px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+
+  .sideMenu.collapsed & {
+    display: none;
+  }
+}
+
+.collapseButton {
+  cursor: pointer;
+  font-size: 16px;
+  color: rgba(0, 0, 0, 0.65);
+  transition: color 0.3s;
+  z-index: 0;
+  margin-left: 15px;
+  border: 1px solid #f1f2f4;
+  padding: 4px;
+  border-radius: 4px;
+  background-color: #fff;
+  &:hover {
+    color: rgba(0, 0, 0, 0.85);
+  }
 }
 
 .menuItemContainer {
@@ -18,12 +77,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 24px;
+  padding: 12px;
   cursor: pointer;
   transition: all 0.3s;
   color: rgba(0, 0, 0, 0.85);
   margin: 10px;
   border-radius: 12px;
+  margin-right: 20px;
 
   &:hover {
     background: rgba(0, 0, 0, 0.04);
@@ -34,6 +94,11 @@
     background: #fff;
     box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
   }
+
+  .sideMenu.collapsed & {
+    padding: 12px;
+    // justify-content: center;
+  }
 }
 
 .menuItemContent {
@@ -41,6 +106,16 @@
   align-items: center;
   gap: 12px;
   font-size: 14px;
+
+  .sideMenu.collapsed & {
+    justify-content: center;
+  }
+  .menuItemTitle {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
 }
 
 .arrow {
@@ -73,6 +148,10 @@
   margin: 10px;
   margin-top: 0;
   border-radius: 12px;
+  // 加了下面这个属性会闪
+  // text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 
   &:hover {
     background: rgba(0, 0, 0, 0.04);

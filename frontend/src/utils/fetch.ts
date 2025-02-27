@@ -33,7 +33,7 @@ export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
     // 如果认证失败，清除 token
     localStorage.removeItem('token');
     // 重新加载页面以重定向到登录页
-    window.location.href = '/login';
+    window.location.href = '/Login';
     return null;
   }
   return response;
@@ -80,7 +80,7 @@ export const fetchWithAuthNew = async <T = any>(
   } catch (error: any) {
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
-      window.location.href = '/login';
+      window.location.href = '/Login';
       return null;
     }
     message.error(error.message || '请求失败');
@@ -111,7 +111,7 @@ export const fetchWithAuthStream = async (
     // 如果认证失败，清除 token
     localStorage.removeItem('token');
     // 重新加载页面以重定向到登录页
-    window.location.href = '/login';
+    window.location.href = '/Login';
     return null;
   }
   if (response.ok) {

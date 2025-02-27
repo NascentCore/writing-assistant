@@ -1,3 +1,6 @@
+点击PaperClipOutline能否直接让用户选择要上传的文件，上传成功后再打开 Sender.Header@Sender输入框.md @Attachments 输入附件.md 
+
+
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
   CloudUploadOutlined,
@@ -89,6 +92,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
 
   const attachmentsRef = React.useRef<GetRef<typeof Attachments>>(null);
   const senderRef = React.useRef<GetRef<typeof Sender>>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [models, setModels] = useState<Model[]>([]);
   const [selectedModel, setSelectedModel] = useState<ModelType>(() => {
@@ -290,6 +294,20 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     localStorage.setItem(MODEL_STORAGE_KEY, value);
   };
 
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      Array.from(files).forEach((file) => {
+        attachmentsRef.current?.upload(file);
+      });
+      setOpen(true);
+    }
+    // 清空 input 的值，这样同一个文件可以重复选择
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const headerNode = (
     <Sender.Header
       title="附件"
@@ -304,7 +322,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     >
       <Attachments
         accept=".doc,.docx,.pdf"
-        multiple
         ref={attachmentsRef}
         beforeUpload={() => true}
         customRequest={({ file, onSuccess, onError, onProgress }) => {
@@ -360,11 +377,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
             ),
           );
 
-          // 当文件列表为空时，自动关闭 Header
-          if (fileList.length === 0) {
-            setOpen(false);
-          }
-
           // 处理新完成上传的文件
           const completedFiles = fileList
             .filter((file) => {
@@ -394,10 +406,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
               const newFiles = completedFiles.filter(
                 (f) => !existingIds.has(f.file_id),
               );
-              // 如果有新文件上传完成，自动打开 Header
-              if (newFiles.length > 0) {
-                setOpen(true);
-              }
               return [...prev, ...newFiles];
             });
           }
@@ -499,8 +507,17 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
               prefix={
                 <Badge dot={!open && selectedFiles.length > 0}>
                   <Button
+                    type="text"
                     icon={<PaperClipOutlined style={{ fontSize: 18 }} />}
-                    onClick={() => setOpen(!open)}
+                    onClick={() => fileInputRef.current?.click()}
+                  />
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelect}
+                    multiple
+                    accept=".doc,.docx,.pdf"
                   />
                 </Badge>
               }

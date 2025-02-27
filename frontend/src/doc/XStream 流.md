@@ -9,7 +9,7 @@
 
 常见的 `ReadableStream` 实例，如 `await fetch(...).body` 使用示例:
 
-```
+```js
 import { XStream } from '@ant-design/x';
 
 async function request() {
@@ -28,25 +28,36 @@ async function request() {
 
 XStream 默认的 `transformStream` 是用于 SSE 协议的流转换器。`readableStream` 接收一个 `new ReadableStream(...)` 实例，常见的如 `await fetch(...).body`
 
-```
+```tsx
 import { TagsOutlined } from '@ant-design/icons';
-import { Bubble, ThoughtChain, XStream } from '@ant-design/x';
+import { ThoughtChain, XStream } from '@ant-design/x';
 import { Button, Splitter } from 'antd';
 import React from 'react';
 
-const contentChunks = ['He', 'llo', ', w', 'or', 'ld!'];
+const sipHeaders = [
+  'INVITE sip:[email protected] SIP/2.0\n',
+  'Via: SIP/2.0/UDP [host];branch=123456\n',
+  'Content-Type: application/sdp\n\n',
+];
+
+const sdp = [
+  'v=0\n',
+  'o=alice 2890844526 2890844526 IN IP4 [host]\n',
+  's=\n',
+  'c=IN IP4 [host]\n',
+  't=0 0\n',
+  'm=audio 49170 RTP/AVP 0\n',
+  'a=rtpmap:0 PCMU/8000\n',
+  'm=video 51372 RTP/AVP 31\n',
+  'a=rtpmap:31 H261/90000\n',
+  'm=video 53000 RTP/AVP 32\n',
+  'a=rtpmap:32 MPV/90000\n\n',
+];
 
 function mockReadableStream() {
-  const sseChunks: string[] = [];
-
-  for (let i = 0; i < contentChunks.length; i++) {
-    const sseEventPart = `event: message\ndata: {"id":"${i}","content":"${contentChunks[i]}"}\n\n`;
-    sseChunks.push(sseEventPart);
-  }
-
   return new ReadableStream({
     async start(controller) {
-      for (const chunk of sseChunks) {
+      for (const chunk of sipHeaders.concat(sdp)) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         controller.enqueue(new TextEncoder().encode(chunk));
       }
@@ -56,15 +67,18 @@ function mockReadableStream() {
 }
 
 const App = () => {
-  const [lines, setLines] = React.useState<Record<string, string>[]>([]);
-  const content = lines.map((line) => JSON.parse(line.data).content).join('');
+  const [lines, setLines] = React.useState<string[]>([]);
 
   async function readStream() {
     // 🌟 Read the stream
     for await (const chunk of XStream({
       readableStream: mockReadableStream(),
+      transformStream: new TransformStream<string, string>({
+        transform(chunk, controller) {
+          controller.enqueue(chunk);
+        },
+      }),
     })) {
-      console.log(chunk);
       setLines((pre) => [...pre, chunk]);
     }
   }
@@ -72,12 +86,13 @@ const App = () => {
   return (
     <Splitter>
       <Splitter.Panel>
-        {/* -------------- Emit -------------- */}
-        <Button type="primary" onClick={readStream} style={{ marginBottom: 16 }}>
-          Mock Default Protocol - SSE
+        <Button
+          type="primary"
+          onClick={readStream}
+          style={{ marginBottom: 16 }}
+        >
+          Mock Custom Protocol - SIP
         </Button>
-        {/* -------------- Content Concat -------------- */}
-        {content && <Bubble content={content} />}
       </Splitter.Panel>
       {/* -------------- Log -------------- */}
       <Splitter.Panel style={{ marginLeft: 16 }}>
@@ -86,14 +101,12 @@ const App = () => {
             lines.length
               ? [
                   {
-                    title: 'Mock Default Protocol - Log',
+                    title: 'Mock Custom Protocol - Log',
                     status: 'success',
                     icon: <TagsOutlined />,
                     content: (
                       <pre style={{ overflow: 'scroll' }}>
-                        {lines.map((i) => (
-                          <code key={i.data}>{i.data}</code>
-                        ))}
+                        <code>{lines.join('')}</code>
                       </pre>
                     ),
                   },

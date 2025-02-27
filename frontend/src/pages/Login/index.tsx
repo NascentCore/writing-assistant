@@ -1,77 +1,87 @@
-import { API_BASE_URL } from '@/config';
-import React, { useState } from 'react';
+import { fetchWithAuthNew } from '@/utils/fetch';
+import { LockOutlined, UserOutlined } from '@ant-design/icons';
+import { history } from '@umijs/max';
+import { Button, Form, Input, message } from 'antd';
+import React from 'react';
 import './index.less';
 
+interface LoginResponse {
+  access_token: string;
+}
+
 const LoginPage: React.FC = () => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [form] = Form.useForm();
+  const [messageApi, contextHolder] = message.useMessage();
 
-  const handleSubmit = async (
-    e: React.FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
-    e.preventDefault();
-    setError('');
-
+  const handleSubmit = async (values: {
+    username: string;
+    password: string;
+  }): Promise<void> => {
     try {
       const formData = new FormData();
-      formData.append('username', username);
-      formData.append('password', password);
+      formData.append('username', values.username);
+      formData.append('password', values.password);
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/token`, {
+      const response = await fetchWithAuthNew<LoginResponse>('/api/v1/token', {
         method: 'POST',
-        body: formData,
+        data: formData,
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        localStorage.setItem('token', data.data.access_token);
-        // 登录成功后跳转到编辑器主页
+      if (response && 'access_token' in response) {
+        localStorage.setItem('token', response.access_token);
+        localStorage.setItem('username', values.username);
         window.location.href = '/';
-      } else {
-        const errorData = await response.json();
-        setError(errorData.detail || '登录失败');
       }
     } catch (error) {
-      setError('登录失败，请稍后重试');
+      messageApi.error('登录失败，请稍后重试');
     }
   };
 
   return (
     <div className="login-container-forUni">
+      {contextHolder}
       <div className="auth-container">
         <div className="auth-box">
           <h2>登录</h2>
-          {error && <div className="error-message">{error}</div>}
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>用户名</label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
+          <Form
+            form={form}
+            name="login"
+            onFinish={handleSubmit}
+            autoComplete="off"
+          >
+            <Form.Item
+              name="username"
+              rules={[{ required: true, message: '请输入用户名！' }]}
+            >
+              <Input
+                prefix={<UserOutlined />}
+                placeholder="用户名"
+                size="large"
               />
-            </div>
-            <div className="form-group">
-              <label>密码</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
+            </Form.Item>
+
+            <Form.Item
+              name="password"
+              rules={[{ required: true, message: '请输入密码！' }]}
+            >
+              <Input.Password
+                prefix={<LockOutlined />}
+                placeholder="密码"
+                size="large"
               />
-            </div>
-            <button type="submit">登录</button>
-          </form>
+            </Form.Item>
+
+            <Form.Item>
+              <Button type="primary" htmlType="submit" block size="large">
+                登录
+              </Button>
+            </Form.Item>
+          </Form>
           <div className="auth-switch">
             没有账号？
-            <button
-              type="button"
-              onClick={() => (window.location.href = '/register')}
-            >
+            <Button type="link" onClick={() => history.push('/Register')}>
               去注册
-            </button>
+            </Button>
           </div>
         </div>
       </div>

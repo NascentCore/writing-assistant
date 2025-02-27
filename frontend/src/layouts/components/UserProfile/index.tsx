@@ -69,6 +69,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
         message.success('更新成功');
         form.resetFields(['current_password', 'new_password']);
         fetchUserInfo();
+        onClose();
       } else {
         const error = await response.json();
         message.error(error.detail || '更新失败');
@@ -95,7 +96,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
         initialValues={{ username: user?.username, email: user?.email }}
       >
         <Form.Item label="用户名" name="username">
-          <Input disabled />
+          <Input size="large" disabled />
         </Form.Item>
 
         <Form.Item
@@ -106,7 +107,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
             { type: 'email', message: '请输入有效的邮箱地址' },
           ]}
         >
-          <Input />
+          <Input size="large" />
         </Form.Item>
 
         <Form.Item
@@ -123,7 +124,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
             },
           ]}
         >
-          <Input.Password />
+          <Input.Password size="large" />
         </Form.Item>
 
         <Form.Item
@@ -140,7 +141,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
             },
           ]}
         >
-          <Input.Password />
+          <Input.Password size="large" />
         </Form.Item>
       </Form>
     </Modal>

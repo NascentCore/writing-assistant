@@ -9,3 +9,5 @@ globs:
 - 新的接口请求都用src/utils/fetch.ts中fetchWithAuthNew发起
 - localStorage存在 token（用户的登录信息），current_document_id（当前编辑的文档id），ai_chat_model（当前使用的ai模型）
 - 当前包管理工具用的是 pnpm 
+- 开发的时候要充分利用 antd v5 的组件，不要重复造轮子，antd v5 的组件文档地址：https://ant.design/components/overview-cn,
+- 开发的时候也要充分利用 Ant Design X的组件，不要重复造轮子，antdX 的组件文档地址：https://x.ant.design/components/attachments-cn
