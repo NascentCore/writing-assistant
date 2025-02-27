@@ -1,8 +1,20 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum, DateTime, Boolean
+from shortuuid import uuid
+from sqlalchemy import JSON, Column, Integer, String, Text, ForeignKey, Enum, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from app.database import Base
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
+
+# 模板类型枚举
+class WritingTemplateType(str, enum.Enum):
+    ARTICLE = "article"  # 文章
+    MARKETING = "marketing"  # 营销
+    EMAIL = "email"  # 邮件
+    SOCIAL = "social"  # 社交
+    OTHER = "other"  # 其他
+
+def generate_uuid():
+    return str(uuid.uuid4())
 
 # 引用状态枚举
 class ReferenceStatus(enum.Enum):
@@ -85,3 +97,23 @@ class WebLink(Base):
     # 关联
     reference = relationship("Reference", back_populates="web_link")
     
+
+class WritingTemplate(Base):
+    """写作模板表"""
+    __tablename__ = "writing_templates"
+
+    id = Column(String(36, collation='utf8mb4_bin'), primary_key=True, default=generate_uuid, index=True)
+    show_name = Column(String(255), nullable=False, comment="模板显示名称")
+    value = Column(Text, nullable=False, comment="模板内容")
+    is_default = Column(Boolean, default=False, comment="是否默认模板")
+    background_url = Column(String(1024), nullable=True, comment="背景图片URL")
+    template_type = Column(Enum(WritingTemplateType), default=WritingTemplateType.OTHER, comment="模板类型")
+    variables = Column(JSON, nullable=True, comment="模板变量列表")
+    
+    # 使用UTC时间并简化时间戳创建方式
+    created_at = Column(DateTime, default=datetime.now(timezone.utc), comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now(timezone.utc), 
+                        onupdate=datetime.now(timezone.utc), comment="更新时间")
+
+    def __repr__(self):
+        return f"<WritingTemplate(id={self.id}, name={self.show_name}, type={self.template_type})>"

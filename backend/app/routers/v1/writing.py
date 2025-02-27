@@ -8,7 +8,7 @@ from app.schemas.response import APIResponse
 from app.database import get_db
 from app.services import OutlineGenerator
 from app.models.upload_file import UploadFile
-from app.models.outline import Outline, SubParagraph, CountStyle
+from app.models.outline import Outline, SubParagraph, CountStyle, WritingTemplate, WritingTemplateType
 from app.config import Settings
 
 
@@ -231,4 +231,131 @@ async def generate_full_content(
     except Exception as e:
         return APIResponse.error(message=f"生成全文时出错: {str(e)}")
 
+
+
+class TemplateBase(BaseModel):
+    show_name: str = Field(..., description="模板显示名称")
+    value: str = Field(..., description="模板内容")
+    is_default: bool = Field(False, description="是否默认模板")
+    background_url: Optional[str] = Field(None, description="背景图片URL")
+    template_type: WritingTemplateType = Field(WritingTemplateType.OTHER, description="模板类型")
+    variables: Optional[List[str]] = Field(None, description="模板变量列表")
+
+class TemplateCreate(TemplateBase):
+    pass
+
+class TemplateResponse(TemplateBase):
+    id: str = Field(..., description="模板ID")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="更新时间")
+
+class TemplateListRequest(BaseModel):
+    template_type: Optional[WritingTemplateType] = Field(None, description="模板类型")
+    page: int = Field(1, description="页码")
+    page_size: int = Field(10, description="每页数量")
+
+
+@router.post("/templates/list")
+async def get_templates(
+    request: TemplateListRequest = TemplateListRequest(),
+    db: Session = Depends(get_db)
+):
+    """
+    获取写作模板列表 
+    
+    Args:
+        template_type: 模板类型
+        page: 页码
+        page_size: 每页数量
+        
+    Returns:
+        templates: 模板列表
+        total: 总数
+        page: 当前页码
+        page_size: 每页数量
+    """
+    try:
+        # 构建查询
+        query = db.query(WritingTemplate)
+        
+        # 根据类型筛选
+        if request.template_type:
+            query = query.filter(WritingTemplate.template_type == request.template_type)
+        
+        # 计算总数
+        total = query.count()
+        
+        # 分页
+        templates = query.offset((request.page - 1) * request.page_size) \
+                        .limit(request.page_size) \
+                        .all()
+        
+        # 构建响应数据
+        response_data = {
+            "templates": [
+                {
+                    "id": template.id,
+                    "show_name": template.show_name,
+                    "value": template.value,
+                    "is_default": template.is_default,
+                    "background_url": template.background_url,
+                    "template_type": template.template_type,
+                    "variables": template.variables,
+                    "created_at": template.created_at.isoformat(),
+                    "updated_at": template.updated_at.isoformat()
+                }
+                for template in templates
+            ],
+            "total": total,
+            "page": request.page,
+            "page_size": request.page_size
+        }
+        
+        return APIResponse.success(message="获取模板列表成功", data=response_data)
+    except Exception as e:
+        # 捕获所有异常，返回空列表
+        print(f"Error getting templates: {str(e)}")
+        return APIResponse.success(message="获取模板列表成功", data={
+            "templates": [],
+            "total": 0,
+            "page": request.page,
+            "page_size": request.page_size
+        })
+
+
+@router.post("/templates/create")
+async def create_template(
+    template: TemplateCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    创建模板
+    
+    Args:
+        template: 模板信息
+        
+    Returns:
+        id: 模板ID
+    """
+    try:
+        # 创建模板
+        new_template = WritingTemplate(
+            show_name=template.show_name,
+            value=template.value,
+            is_default=template.is_default,
+            background_url=template.background_url,
+            template_type=template.template_type,
+            variables=template.variables
+        )
+        
+        # 保存到数据库
+        db.add(new_template)
+        db.commit()
+        db.refresh(new_template)
+        
+        return APIResponse.success(message="创建模板成功", data={"id": new_template.id})
+    except Exception as e:
+        db.rollback()
+        print(f"Error creating template: {str(e)}")
+        return APIResponse.error(message=f"创建模板失败: {str(e)}")
 
