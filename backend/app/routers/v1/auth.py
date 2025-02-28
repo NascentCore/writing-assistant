@@ -87,7 +87,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
             message="登录成功",
             data={
                 "access_token": access_token,
-                "token_type": "bearer"
+                "token_type": "bearer",
+                "admin": user.admin
             }
         )
     except Exception as e:
