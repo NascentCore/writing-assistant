@@ -111,42 +111,31 @@ class RagAPI:
         if file_id:
             data["file_id"] = file_id
         return self._make_request("POST", endpoint, json=data)
-
-    def get_doc_completed(self, kb_id: str, doc_id: str) -> Dict[str, Any]:
+    
+    def delete_files(
+        self,
+        kb_id: str,
+        file_ids: List[str],
+        user_id: str = "zzp"
+    ) -> Dict[str, Any]:
         """
-        获取文档的完整解析内容
+        从知识库中删除文件
         
         Args:
             kb_id: 知识库ID
-            doc_id: 文档ID
+            file_ids: 要删除的文件ID列表
+            user_id: 用户ID，默认为"zzp"
             
         Returns:
-            Dict: 文档解析内容
+            Dict: 删除操作的响应结果
         """
-        endpoint = "/local_doc_qa/get_doc_completed"
-        params = {
-            "knowledge_base_id": kb_id,
-            "doc_id": doc_id
+        endpoint = "/local_doc_qa/delete_files"
+        data = {
+            "kb_id": kb_id,
+            "user_id": user_id,
+            "file_ids": file_ids
         }
-        return self._make_request("GET", endpoint, params=params)
-
-    def get_doc_detail(self, kb_id: str, doc_id: str) -> Dict[str, Any]:
-        """
-        获取文档的详细信息
-        
-        Args:
-            kb_id: 知识库ID
-            doc_id: 文档ID
-            
-        Returns:
-            Dict: 文档详细信息
-        """
-        endpoint = "/local_doc_qa/get_doc"
-        params = {
-            "knowledge_base_id": kb_id,
-            "doc_id": doc_id
-        }
-        return self._make_request("GET", endpoint, params=params)
+        return self._make_request("POST", endpoint, json=data)    
 
     def chat(
         self,
