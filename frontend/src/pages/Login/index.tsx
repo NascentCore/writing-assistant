@@ -7,6 +7,7 @@ import './index.less';
 
 interface LoginResponse {
   access_token: string;
+  admin: number;
 }
 
 const LoginPage: React.FC = () => {
@@ -30,7 +31,9 @@ const LoginPage: React.FC = () => {
       if (response && 'access_token' in response) {
         localStorage.setItem('token', response.access_token);
         localStorage.setItem('username', values.username);
-        window.location.href = '/';
+        localStorage.setItem('admin', response.admin.toString());
+
+        history.push('/');
       }
     } catch (error) {
       messageApi.error('登录失败，请稍后重试');

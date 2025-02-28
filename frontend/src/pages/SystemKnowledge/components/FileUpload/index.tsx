@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '@/config';
+import { fetchWithAuthNew } from '@/utils/fetch';
 import { InboxOutlined } from '@ant-design/icons';
-import type { UploadProps } from 'antd';
+import type { UploadFile, UploadProps } from 'antd';
 import { message, Upload } from 'antd';
 import styles from './index.module.less';
 
@@ -10,12 +11,36 @@ const FileUpload: React.FC = () => {
   const props: UploadProps = {
     name: 'file',
     multiple: true,
-    action: `${API_BASE_URL}/api/v1/files`,
+    onRemove: async (file: UploadFile) => {
+      try {
+        console.log('file.response', file.response);
+
+        const fileId = file.response?.data[0]?.file_id;
+        if (!fileId) {
+          message.error('文件ID不存在');
+          return false;
+        }
+        const result = await fetchWithAuthNew('/api/v1/rag/files', {
+          method: 'DELETE',
+          data: {
+            file_ids: [fileId],
+          },
+        });
+        if (result !== undefined) {
+          message.success('删除成功');
+          return true;
+        }
+        return false;
+      } catch (error) {
+        message.error('删除失败');
+        return false;
+      }
+    },
     customRequest: ({ file, onSuccess, onError }) => {
       const formData = new FormData();
       formData.append('files', file);
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API_BASE_URL}/api/v1/files`);
+      xhr.open('POST', `${API_BASE_URL}/api/v1/rag/files?category=system`);
       // 添加额外的请求头
       xhr.setRequestHeader(
         'authorization',
@@ -57,7 +82,7 @@ const FileUpload: React.FC = () => {
 
   return (
     <div className={styles.uploadContainer}>
-      <Dragger {...props}>
+      <Dragger accept=".docx,.doc,.pdf" {...props}>
         <p className="ant-upload-drag-icon">
           <InboxOutlined />
         </p>

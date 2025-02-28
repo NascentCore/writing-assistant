@@ -1,192 +1,169 @@
+import { fetchWithAuthNew } from '@/utils/fetch';
 import { UploadOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import { ProTable, TableDropdown } from '@ant-design/pro-components';
-import { request } from '@umijs/max';
-import { Button, Space, Tag } from 'antd';
-import { useRef } from 'react';
-export const waitTimePromise = async (time: number = 100) => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve(true);
-    }, time);
-  });
-};
+import { ProTable } from '@ant-design/pro-components';
+import { Button, message, Modal, Popconfirm, Tag, Tooltip } from 'antd';
+import { useRef, useState } from 'react';
+import FileUpload from './components/FileUpload';
 
-export const waitTime = async (time: number = 100) => {
-  await waitTimePromise(time);
-};
-
-type GithubIssueItem = {
-  url: string;
-  id: number;
-  number: number;
-  title: string;
-  labels: {
-    name: string;
-    color: string;
-  }[];
-  state: string;
-  comments: number;
+type KnowledgeBaseFile = {
+  kb_id: string;
+  file_id: string;
+  file_name: string;
+  file_size: number;
+  file_words: number;
+  status: string;
+  error_message: string;
   created_at: string;
-  updated_at: string;
-  closed_at?: string;
 };
 
-const columns: ProColumns<GithubIssueItem>[] = [
-  {
-    title: '标题',
-    dataIndex: 'title',
-    copyable: true,
-    ellipsis: true,
-    tooltip: '标题过长会自动收缩',
-    formItemProps: {
-      rules: [
-        {
-          required: true,
-          message: '此项为必填项',
-        },
+const KnowledgeBaseList: React.FC = () => {
+  const actionRef = useRef<ActionType>();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleModalOk = () => {
+    setIsModalOpen(false);
+    actionRef.current?.reload();
+  };
+
+  const columns: ProColumns<KnowledgeBaseFile>[] = [
+    {
+      title: '文件名',
+      dataIndex: 'file_name',
+      copyable: true,
+      ellipsis: true,
+      tooltip: '文件名过长会自动收缩',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      search: false,
+      render: (_, record) => {
+        let color = 'default';
+        let text = record.status;
+        let tooltipText = record.error_message;
+
+        if (record.status === 'Done') {
+          color = 'success';
+          text = '解析完成';
+        } else if (record.status === 'Failed') {
+          color = 'error';
+          text = '解析失败';
+        } else {
+          color = 'processing';
+          text = '处理中';
+        }
+
+        return (
+          <Tooltip title={tooltipText}>
+            <Tag color={color}>{text}</Tag>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: '创建时间',
+      search: false,
+      dataIndex: 'created_at',
+      valueType: 'dateTime',
+    },
+    {
+      title: '操作',
+      valueType: 'option',
+      key: 'option',
+      render: (_, record) => [
+        <Popconfirm
+          key="delete"
+          title="确定要删除这个文件吗？"
+          onConfirm={async () => {
+            try {
+              const result = await fetchWithAuthNew('/api/v1/rag/files', {
+                method: 'DELETE',
+                data: {
+                  file_ids: [record.file_id],
+                },
+              });
+              if (result !== undefined) {
+                message.success('删除成功');
+              }
+              actionRef.current?.reload();
+            } catch (error) {
+              message.error('删除失败');
+            }
+          }}
+        >
+          <Button type="link" danger>
+            删除
+          </Button>
+        </Popconfirm>,
       ],
     },
-  },
-  {
-    title: '状态',
-    dataIndex: 'state',
-    filters: true,
-    search: false,
-    onFilter: true,
-    ellipsis: true,
-    valueType: 'select',
-    valueEnum: {
-      all: { text: '超长'.repeat(50) },
-      open: {
-        text: '未解决',
-        status: 'Error',
-      },
-      closed: {
-        text: '已解决',
-        status: 'Success',
-        disabled: true,
-      },
-      processing: {
-        text: '解决中',
-        status: 'Processing',
-      },
-    },
-  },
-  {
-    title: '标签',
-    dataIndex: 'labels',
-    search: false,
-    renderFormItem: (_, { defaultRender }) => {
-      return defaultRender(_);
-    },
-    render: (_, record) => (
-      <Space>
-        {record.labels.map(({ name, color }) => (
-          <Tag color={color} key={name}>
-            {name}
-          </Tag>
-        ))}
-      </Space>
-    ),
-  },
-  {
-    title: '创建时间',
-    key: 'showTime',
-    dataIndex: 'created_at',
-    valueType: 'date',
-    sorter: true,
-    hideInSearch: true,
-  },
+  ];
 
-  {
-    title: '操作',
-    valueType: 'option',
-    key: 'option',
-    render: (text, record, _, action) => [
-      <a
-        key="editable"
-        onClick={() => {
-          action?.startEditable?.(record.id);
-        }}
-      >
-        编辑
-      </a>,
-      <a href={record.url} target="_blank" rel="noopener noreferrer" key="view">
-        查看
-      </a>,
-      <TableDropdown
-        key="actionGroup"
-        onSelect={() => action?.reload()}
-        menus={[
-          { key: 'copy', name: '复制' },
-          { key: 'delete', name: '删除' },
-        ]}
-      />,
-    ],
-  },
-];
-
-export default () => {
-  const actionRef = useRef<ActionType>();
   return (
-    <ProTable<GithubIssueItem>
-      columns={columns}
-      actionRef={actionRef}
-      cardBordered
-      request={async (params, sort, filter) => {
-        console.log(sort, filter);
-        await waitTime(2000);
-        return request<{
-          data: GithubIssueItem[];
-        }>('https://proapi.azurewebsites.net/github/issues', {
-          params,
-        });
-      }}
-      columnsState={{
-        persistenceKey: 'pro-table-singe-demos',
-        persistenceType: 'localStorage',
-        defaultValue: {
-          option: { fixed: 'right', disable: true },
-        },
-        onChange(value) {
-          console.log('value: ', value);
-        },
-      }}
-      rowKey="id"
-      search={{
-        labelWidth: 'auto',
-      }}
-      form={{
-        // 由于配置了 transform，提交的参数与定义的不同这里需要转化一下
-        syncToUrl: (values, type) => {
-          if (type === 'get') {
+    <>
+      <ProTable<KnowledgeBaseFile>
+        columns={columns}
+        actionRef={actionRef}
+        cardBordered
+        request={async (params) => {
+          const { current, pageSize, ...rest } = params;
+          try {
+            const response = await fetchWithAuthNew('/api/v1/rag/files', {
+              params: {
+                page: current,
+                page_size: pageSize,
+                category: 'user',
+                ...rest,
+              },
+            });
             return {
-              ...values,
-              created_at: [values.startTime, values.endTime],
+              data: response.list,
+              success: true,
+              total: response.total,
+            };
+          } catch (error) {
+            message.error('获取列表失败');
+            return {
+              data: [],
+              success: false,
+              total: 0,
             };
           }
-          return values;
-        },
-      }}
-      pagination={{
-        pageSize: 5,
-        onChange: (page) => console.log(page),
-      }}
-      options={false}
-      dateFormatter="string"
-      toolBarRender={() => [
-        <Button
-          key="button"
-          icon={<UploadOutlined />}
-          onClick={() => {
-            actionRef.current?.reload();
-          }}
-          type="primary"
-        >
-          文件上传
-        </Button>,
-      ]}
-    />
+        }}
+        rowKey="file_id"
+        pagination={{
+          pageSize: 10,
+        }}
+        search={false}
+        dateFormatter="string"
+        headerTitle="知识库文件列表"
+        toolBarRender={() => [
+          <Button
+            key="upload"
+            icon={<UploadOutlined />}
+            onClick={() => setIsModalOpen(true)}
+            type="primary"
+          >
+            文件上传
+          </Button>,
+        ]}
+      />
+      <Modal
+        title="上传文件"
+        open={isModalOpen}
+        onOk={handleModalOk}
+        onCancel={() => {}}
+        closable={false}
+        maskClosable={false}
+        width={600}
+        cancelButtonProps={{ style: { display: 'none' } }}
+        destroyOnClose
+      >
+        <FileUpload />
+      </Modal>
+    </>
   );
 };
+
+export default KnowledgeBaseList;

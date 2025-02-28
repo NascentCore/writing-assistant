@@ -42,8 +42,16 @@ const iconMap: Record<string, React.ReactNode> = {
 
 // 将路由配置转换为菜单项
 const convertRoutesToMenuItems = (routes: RouteItem[]): MenuItem[] => {
+  const isAdmin = localStorage.getItem('admin') === '1';
+
   const menuItems: MenuItem[] = routes
-    .filter((route) => !route.hideInMenu && route.name && !route.redirect)
+    .filter((route) => {
+      // 如果不是管理员，过滤掉 SystemKnowledge 路由
+      if (route.path === '/SystemKnowledge' && !isAdmin) {
+        return false;
+      }
+      return !route.hideInMenu && route.name && !route.redirect;
+    })
     .map((route) => ({
       key: route.path,
       icon: iconMap[route.path] || <EditOutlined />,

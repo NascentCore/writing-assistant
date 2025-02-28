@@ -6,7 +6,7 @@ import {
   SwapOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import type { AttachmentsProps, BubbleProps } from '@ant-design/x';
+import type { AttachmentsProps } from '@ant-design/x';
 import { Attachments, Bubble, Sender, XProvider, XStream } from '@ant-design/x';
 import { Badge, Button, Flex, GetRef, Select, Typography } from 'antd';
 import markdownit from 'markdown-it';
@@ -22,13 +22,51 @@ import styles from './index.module.less';
 
 const md = markdownit({ html: true, breaks: true });
 
-// 定义 markdown 渲染函数
-const renderMarkdown: BubbleProps['messageRender'] = (content) => (
-  <Typography>
-    {/* biome-ignore lint/security/noDangerouslySetInnerHtml: used for markdown rendering */}
-    <div dangerouslySetInnerHTML={{ __html: md.render(content) }} />
-  </Typography>
-);
+// 定义消息渲染函数
+const messageRender = (
+  content: string,
+  props?: Record<string, unknown>,
+): React.ReactNode => {
+  const message = props?.['data-message'] as ChatMessage;
+  return (
+    <Flex vertical gap="small">
+      {/* 渲染消息内容 */}
+      <Typography>
+        <div dangerouslySetInnerHTML={{ __html: md.render(content) }} />
+      </Typography>
+
+      {/* 渲染关联文件 */}
+      {message?.files && message.files.length > 0 && (
+        <Flex
+          vertical
+          gap="small"
+          style={{
+            marginTop: 8,
+            background: '#f5f5f5',
+            padding: 8,
+            borderRadius: 4,
+          }}
+        >
+          <Typography.Text type="secondary">关联文件：</Typography.Text>
+          <Flex wrap="wrap" gap="small">
+            {message.files.map((file) => (
+              <Attachments.FileCard
+                key={file.file_id}
+                item={{
+                  uid: file.file_id,
+                  name: file.name,
+                  size: file.size,
+                  type: file.type,
+                  status: 'done',
+                }}
+              />
+            ))}
+          </Flex>
+        </Flex>
+      )}
+    </Flex>
+  );
+};
 
 const STORAGE_KEY = 'ai_chat_messages';
 const MODEL_STORAGE_KEY = 'ai_chat_model';
@@ -48,6 +86,7 @@ interface ChatMessage {
   placement: 'start' | 'end';
   content: string;
   avatarType: 'user' | 'assistant';
+  files?: FileItem[]; // 添加关联文件数组
 }
 
 // 文件列表相关接口定义
@@ -61,11 +100,16 @@ interface FileItem {
 }
 
 // 用于转换消息格式的辅助函数
-const createMessage = (content: string, isUser: boolean): ChatMessage => ({
+const createMessage = (
+  content: string,
+  isUser: boolean,
+  files?: FileItem[],
+): ChatMessage => ({
   key: Date.now().toString(),
   placement: isUser ? 'end' : 'start',
   content,
   avatarType: isUser ? 'user' : 'assistant',
+  files,
 });
 
 const getAvatarIcon = () => {
@@ -114,7 +158,12 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     ) {
       localStorage.removeItem(STORAGE_KEY);
     } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+      // 确保消息中的文件信息也被保存
+      const messagesToSave = messages.map((msg: ChatMessage) => ({
+        ...msg,
+        files: msg.files || [], // 确保 files 字段存在
+      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(messagesToSave));
     }
   }, [messages]);
 
@@ -129,9 +178,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           setSelectedModel(response.models[0].id);
           localStorage.setItem(MODEL_STORAGE_KEY, response.models[0].id);
         }
-      } catch (error) {
-        // 删除 console.error
-      }
+      } catch (error) {}
     };
     fetchModels();
   }, []);
@@ -180,8 +227,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   const handleSubmit = async () => {
     if (!value.trim()) return;
 
-    const userMessage = createMessage(value, true);
+    const userMessage = createMessage(value, true, selectedFiles);
     setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
+
     // 准备请求数据
     const requestData = {
       model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
@@ -189,9 +237,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       file_ids: selectedFiles
         .filter(
           (file) =>
-            file.type === 'application/docx' ||
-            file.type === 'application/pdf' ||
-            file.type === 'application/doc',
+            file.type === 'docx' || file.type === 'pdf' || file.type === 'doc',
         )
         .map((file) => file.file_id),
       max_tokens: 2000,
@@ -209,7 +255,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       temperature: 0.7,
     };
     setValue('');
-    setSelectedFiles([]);
     setOpen(false);
     try {
       const response = await fetchWithAuthStream(
@@ -229,7 +274,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       }
 
       // 创建一个新的消息对象用于累积内容
-      const assistantMessage = createMessage('', false);
+      const assistantMessage = createMessage('', false, []); // 明确指定空文件数组
       setMessages((prev: ChatMessage[]) => [...prev, assistantMessage]);
 
       // 使用 XStream 处理流式响应
@@ -247,42 +292,47 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
 
           if (data.choices?.[0]?.delta?.content) {
             const content = data.choices[0].delta.content;
-            // 更新最后一条消息的内容
+            // 更新最后一条消息的内容，保持文件信息不变
             setMessages((prev: ChatMessage[]) => {
               const newMessages = [...prev];
               const lastMessage = newMessages[newMessages.length - 1];
               newMessages[newMessages.length - 1] = {
                 ...lastMessage,
                 content: lastMessage.content + content,
+                files: lastMessage.files || [], // 保持文件信息
               };
               return newMessages;
             });
           }
-        } catch (error) {
-          // 删除 console.error
-        }
+        } catch (error) {}
       }
 
-      // 消息发送完成后清空选中的文件
+      // 消息发送完成后再清空选中的文件
       setSelectedFiles([]);
       setItems([]);
     } catch (error) {
-      // 删除 console.error
       // 在发生错误时添加错误消息
       const errorMessage = createMessage(
         '抱歉，处理您的请求时出现了错误。',
         false,
       );
       setMessages((prev: ChatMessage[]) => [...prev, errorMessage]);
+      // 发生错误时也清空选中的文件
+      setSelectedFiles([]);
+      setItems([]);
     }
   };
 
   // 处理消息显示，添加avatar组件和markdown渲染
-  const displayMessages = messages.map((msg: ChatMessage) => ({
-    ...msg,
-    avatar: getAvatarIcon(),
-    messageRender: renderMarkdown,
-  }));
+  const displayMessages = messages.map((msg: ChatMessage) => {
+    return {
+      ...msg,
+      avatar: getAvatarIcon(),
+      messageRender: (content: string) =>
+        messageRender(content, { 'data-message': msg }),
+      // 不再需要单独传递 data-message，因为它已经在 messageRender 函数调用中传递了
+    };
+  });
 
   // 处理模型变更
   const handleModelChange = (value: ModelType) => {
@@ -335,7 +385,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                 }
                 onSuccess?.(response);
               } catch (e) {
-                // 删除 console.error
                 onError?.(new Error('解析响应失败'));
               }
             } else {
@@ -380,7 +429,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                 file_id: fileData.file_id,
                 name: fileData.name || file.name,
                 size: fileData.size || file.size || 0,
-                type: fileData.type || file.type || '',
+                type: fileData.content_type || '',
                 status: 1,
                 created_at: new Date().toISOString(),
                 percent: 100,

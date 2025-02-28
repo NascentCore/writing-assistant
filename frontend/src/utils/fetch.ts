@@ -75,6 +75,7 @@ export const fetchWithAuthNew = async <T = any>(
     // 处理返回值，保持原有逻辑
     if (response.code !== 200) {
       message.error(response.message);
+      return undefined;
     }
     return response.data;
   } catch (error: any) {
