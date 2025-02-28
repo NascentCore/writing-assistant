@@ -78,6 +78,16 @@ class Settings(BaseSettings):
 
     """
     
+    # 知识库配置
+    RAG_API_BASE: str = yaml_config.get("rag", {}).get("api_base", "http://rag.llm.sxwl.ai:30003/api/")
+    RAG_LLM_MODEL: str = yaml_config.get("rag", {}).get("llm_model")
+    RAG_LLM_BASE_URL: str = yaml_config.get("rag", {}).get("llm_base_url")
+    RAG_LLM_API_KEY: str = yaml_config.get("rag", {}).get("llm_api_key")
+    RAG_LLM_TEMPERATURE: float = yaml_config.get("rag", {}).get("llm_temperature", 0.4)
+    RAG_LLM_TOP_P: float = yaml_config.get("rag", {}).get("llm_top_p", 0.6)
+    RAG_LLM_MAX_TOKENS: int = yaml_config.get("rag", {}).get("llm_max_tokens", 1500)
+    RAG_LLM_REQUEST_TIMEOUT: float = yaml_config.get("rag", {}).get("llm_request_timeout", 300.0)
+    RAG_FILE_PROCESSOR_INTERVAL: int = yaml_config.get("rag", {}).get("file_processor_interval", 60)
     class Config:
         case_sensitive = True
         env_file = ".env"
