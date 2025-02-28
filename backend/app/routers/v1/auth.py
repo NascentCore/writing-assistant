@@ -63,7 +63,8 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
             message="注册成功",
             data={
                 "access_token": access_token,
-                "token_type": "bearer"
+                "token_type": "bearer",
+                "admin": 0
             }
         )
     except Exception as e:
