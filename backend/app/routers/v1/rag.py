@@ -178,8 +178,24 @@ async def get_files(
                                                    RagKnowledgeBase.is_deleted == False).first()
         
         if not kb:
-            logger.error(f"知识库不存在: category={category}, user_id={current_user.user_id}")
-            return APIResponse.error(message="知识库不存在")
+            kb_name = "系统知识库" if category == "system" else f"用户知识库-{current_user.user_id}"
+            create_kb_response = rag_api.create_knowledge_base(kb_name=kb_name)
+            if create_kb_response["code"] != 200:
+                logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
+                return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
+            kb_id = create_kb_response["data"]["kb_id"]
+            if not kb_id:
+                logger.error(f"创建知识库成功, 但获取知识库ID失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
+                return APIResponse.error(message=f"创建知识库失败")
+            # 保存知识库到数据库
+            kb = RagKnowledgeBase(
+                kb_id=kb_id,
+                kb_type=RagKnowledgeBaseType.SYSTEM if category == "system" else RagKnowledgeBaseType.USER,
+                user_id=current_user.user_id,
+                kb_name=kb_name,
+            )
+            db.add(kb)
+            db.commit()
 
         total = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False).count()
         total_pages = (total + page_size - 1) // page_size
