@@ -1,30 +1,84 @@
+import logging
+import sys
+import threading
+import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from app.routers.v1 import api, auth, users, prompt, document, rag,writing
+from fastapi.openapi.utils import get_openapi
 from app.config import settings
 from app.database import engine, Base
-from fastapi.openapi.utils import get_openapi
+from app.rag.process import rag_worker
+from app.routers.v1 import api, auth, users, prompt, document, rag
+from fastapi.logger import logger as fastapi_logger
+logger = logging.getLogger("app")
 
+def setup_logging():
+    # 创建格式化器
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # 控制台处理器
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    
+    # 文件处理器
+    file_handler = logging.FileHandler('app.log', encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    
+    # 配置根日志器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    # 清除已有的处理器
+    root_logger.handlers.clear()
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    
+    # 配置FastAPI日志器
+    fastapi_logger.setLevel(logging.INFO)
+    # 清除已有的处理器
+    fastapi_logger.handlers.clear()
+    fastapi_logger.addHandler(console_handler)
+    fastapi_logger.addHandler(file_handler)
+    
+    # 配置应用日志器
+    app_logger = logging.getLogger('app')
+    app_logger.setLevel(logging.INFO)
+    # 防止日志传递到父日志器
+    app_logger.propagate = False
+    # 清除已有的处理器
+    app_logger.handlers.clear()
+    app_logger.addHandler(console_handler)
+    app_logger.addHandler(file_handler)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期事件处理"""
+    # 在应用启动时配置日志
+    setup_logging()
+    logger.info("应用正在启动...")
+    
+    # 启动知识库文件处理线程
+    thread = threading.Thread(target=rag_worker, name="rag_worker")
+    thread.daemon = True
+    thread.start()
+    logger.info("知识库文件处理线程已启动")
+    
+    yield
+    
+    logger.info("应用正在关闭...")
 
 # 创建所有表
 def create_tables():
     try:
         Base.metadata.create_all(bind=engine)
-        print("Database tables created successfully")
+        logger.info("数据库表创建成功")
     except Exception as e:
-        print(f"Error creating tables: {str(e)}")
-        # 不抛出异常，允许应用继续启动
-        print("Continuing despite table creation failure...")
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """应用生命周期事件处理"""
-    # 启动时创建数据库表
-    create_tables()
-    yield
+        logger.error(f"创建数据库表时出错: {str(e)}")
+        logger.exception("详细错误信息:")
 
 # 创建FastAPI应用实例
 app = FastAPI(
@@ -73,6 +127,7 @@ app.include_router(prompt.router, prefix="/api/v1", tags=["prompt"])
 app.include_router(document.router, prefix="/api/v1", tags=["document"])
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
 app.include_router(writing.router, prefix="/api/v1", tags=["writing"])
+
 @app.get("/")
 async def root():
     return {
@@ -126,10 +181,13 @@ app.openapi = custom_openapi
 if __name__ == "__main__":
     # 确保在启动时创建表
     create_tables()
-    
+
+    # 启动FastAPI应用
     uvicorn.run(
         "main:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=settings.DEBUG
+        reload=settings.DEBUG,
+        log_level="info",
+        access_log=True
     )
