@@ -9,7 +9,7 @@ import uvicorn
 from app.routers.v1 import api, auth, users, prompt, document, rag,writing
 from fastapi.openapi.utils import get_openapi
 from app.config import settings
-from app.database import engine, Base
+from app.database import sync_engine, Base
 from app.rag.process import rag_worker
 from app.routers.v1 import api, auth, users, prompt, document, rag
 from fastapi.logger import logger as fastapi_logger
@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
 # 创建所有表
 def create_tables():
     try:
-        Base.metadata.create_all(bind=engine)
+        Base.metadata.create_all(bind=sync_engine)
         logger.info("数据库表创建成功")
     except Exception as e:
         logger.error(f"创建数据库表时出错: {str(e)}")
