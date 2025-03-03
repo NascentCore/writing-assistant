@@ -25,6 +25,7 @@ MYSQL_USER = yaml_config.get("mysql", {}).get("user", "root")
 MYSQL_PASSWORD = yaml_config.get("mysql", {}).get("password", "")
 MYSQL_DATABASE = yaml_config.get("mysql", {}).get("database", "aieditor")
 DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
+ASYNC_DATABASE_URL = f"mysql+asyncmy://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
 
 class Settings(BaseSettings):
     # 基础配置
@@ -49,6 +50,7 @@ class Settings(BaseSettings):
     
     # 数据库URL
     DATABASE_URL: str = DATABASE_URL
+    ASYNC_DATABASE_URL: str = ASYNC_DATABASE_URL
     
     # 大模型配置
     LLM_MODELS: list = yaml_config.get("llm_models", []) or [{
