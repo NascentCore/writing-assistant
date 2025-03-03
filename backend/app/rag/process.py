@@ -20,30 +20,30 @@ async def get_rag_task():
             pool = await async_pool()
             async with pool.acquire() as conn:
                 async with conn.cursor() as cursor:
-                    await conn.begin()  # 开始事务
-                    try:
-                        # 使用 SELECT FOR UPDATE 锁定行
-                        query = """
-                            SELECT file_id, kb_id, kb_type, kb_file_id, user_id, file_name, file_ext, file_path, status, content FROM rag_files 
-                            WHERE status IN (%s, %s, %s, %s)
-                            LIMIT 15 
-                            FOR UPDATE SKIP LOCKED
-                        """
-                        await cursor.execute(query, (
-                            RagFileStatus.LOCAL_SAVED,
-                            RagFileStatus.LOCAL_PARSED,
-                            RagFileStatus.LLM_SUMMARYED,
-                            RagFileStatus.RAG_UPLOADED
-                        ))
-                        files = await cursor.fetchall()
-                        
-                        if not files:
-                            await conn.commit()  # 提交事务
-                            await asyncio.sleep(10)  # 没有任务时等待10秒
-                            continue
-                        
-                        # 更新状态
-                        for file in files:
+                    # 使用 SELECT FOR UPDATE 锁定行
+                    query = """
+                        SELECT file_id, kb_id, kb_type, kb_file_id, user_id, file_name, file_ext, file_path, status, content FROM rag_files 
+                        WHERE status IN (%s, %s, %s, %s)
+                        LIMIT 15 
+                        FOR UPDATE SKIP LOCKED
+                    """
+                    await cursor.execute(query, (
+                        RagFileStatus.LOCAL_SAVED,
+                        RagFileStatus.LOCAL_PARSED,
+                        RagFileStatus.LLM_SUMMARYED,
+                        RagFileStatus.RAG_UPLOADED
+                    ))
+                    files = await cursor.fetchall()
+                    
+                    if not files:
+                        await asyncio.sleep(10)  # 没有任务时等待10秒
+                        continue
+                    
+                    # 逐个处理文件，每个文件使用独立事务
+                    for file in files:
+                        try:
+                            await conn.begin()  # 开始单个文件的事务
+                            
                             # 将元组转换为对象以便使用
                             file_obj = RagFile()
                             file_obj.file_id = file[0]      
@@ -57,7 +57,6 @@ async def get_rag_task():
                             file_obj.status = file[8]      
                             file_obj.content = file[9]
                             
-                            # 根据当前状态决定下一个状态
                             status_map = {
                                 RagFileStatus.LOCAL_SAVED: RagFileStatus.LOCAL_PARSING,
                                 RagFileStatus.LOCAL_PARSED: RagFileStatus.LLM_SUMMARIZING,
@@ -73,114 +72,35 @@ async def get_rag_task():
                                     WHERE file_id = %s
                                 """
                                 await cursor.execute(update_query, (next_status, file_obj.file_id))
-                                if next_status == RagFileStatus.LOCAL_PARSING:
-                                    await rag_content_queue.put(file_obj)
-                                elif next_status == RagFileStatus.LLM_SUMMARIZING:
-                                    await rag_summary_queue.put(file_obj)
-                                elif next_status == RagFileStatus.RAG_UPLOADING:
-                                    await rag_upload_queue.put(file_obj)
-                                elif next_status == RagFileStatus.RAG_PARSING:
-                                    await rag_parsing_queue.put(file_obj)
-                                logger.info(f"获取RAG文件任务: {file_obj.file_id} {file_obj.file_name} {file_obj.status} -> {next_status}")
-                        
-                        await conn.commit()  # 提交事务
-                    except Exception as e:
-                        await conn.rollback()  # 发生错误时回滚事务
-                        raise e
+                                logger.info(f"get_rag_task 获取RAG文件任务: {file_obj.file_id} {file_obj.file_name} {file_obj.status} -> {next_status}")
+
+                                # 尝试将任务加入队列，设置超时
+                                try:
+                                    if next_status == RagFileStatus.LOCAL_PARSING:
+                                        await asyncio.wait_for(rag_content_queue.put(file_obj), timeout=1.0)
+                                    elif next_status == RagFileStatus.LLM_SUMMARIZING:
+                                        await asyncio.wait_for(rag_summary_queue.put(file_obj), timeout=1.0)
+                                    elif next_status == RagFileStatus.RAG_UPLOADING:
+                                        await asyncio.wait_for(rag_upload_queue.put(file_obj), timeout=1.0)
+                                    elif next_status == RagFileStatus.RAG_PARSING:
+                                        await asyncio.wait_for(rag_parsing_queue.put(file_obj), timeout=1.0)
+                                    
+                                    await conn.commit()  # 提交单个文件的事务
+                                except asyncio.TimeoutError:
+                                    await conn.rollback()  # 队列操作超时，回滚当前文件的事务
+                                    logger.warning(f"get_rag_task 队列已满，跳过任务: {file_obj.file_id}")
+                                    continue
+                                
+                        except Exception as e:
+                            await conn.rollback()  # 处理单个文件发生错误时回滚
+                            logger.error(f"get_rag_task 处理文件 {file[0]} 时发生错误: {str(e)}")
+                            continue
+                            
+                    logger.info(f"get_rag_task 当前队列大小: content={rag_content_queue.qsize()} summary={rag_summary_queue.qsize()} upload={rag_upload_queue.qsize()} parsing={rag_parsing_queue.qsize()}")
                     
         except Exception as e:
-            logger.error(f"获取RAG文件任务时发生错误: {str(e)}")
+            logger.error(f"get_rag_task 获取RAG文件任务时发生错误: {str(e)}")
             await asyncio.sleep(5)  # 发生错误时等待5秒后重试
-
-async def rag_summary_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
-    while True:
-        rag_file = None
-        try:
-            rag_file = await queue.get()
-            logger.info(f"成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
-            
-            async with semaphore:
-                # 获取解析器
-                parser = get_parser(rag_file.file_ext)
-                if not parser:
-                    logger.error(f"summary 找不到文件类型 {rag_file.file_ext} 的解析器")
-                    await update_file_status(
-                        rag_file.file_id,
-                        RagFileStatus.FAILED,
-                        f"summary 找不到文件类型 {rag_file.file_ext} 的解析器"
-                    )
-                    continue 
-                
-                # 生成摘要
-                summary = await parser.summary(rag_file.content, length="small")
-                
-                # 更新数据库
-                pool = await async_pool()
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cursor:
-                        await conn.begin()
-                        await cursor.execute(
-                            "UPDATE rag_files SET summary_small = %s, status = %s WHERE file_id = %s",
-                            (summary, RagFileStatus.LLM_SUMMARYED, rag_file.file_id)
-                        )
-                        await conn.commit()
-                        logger.info(f"文件摘要处理完成: {rag_file.file_id}")
-                        
-        except Exception as e:
-            logger.error(f"处理文件摘要时发生错误: {str(e)}")
-            if rag_file:
-                await update_file_status(
-                    rag_file.file_id,
-                    RagFileStatus.FAILED,
-                    f"处理文件摘要时发生错误: {str(e)}"
-                )
-                await asyncio.sleep(1)
-        finally:
-            if rag_file:    
-                queue.task_done()
-
-async def rag_upload_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
-    while True:
-        rag_file = None
-        try:
-            rag_file = await queue.get()
-            logger.info(f"成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}") 
-            
-            async with semaphore:
-                resp = rag_api.upload_files(rag_file.kb_id, [rag_file.file_path], mode="strong")
-                if resp.get("code") != 200 or len(resp.get("data")) == 0:
-                    logger.error(f"上传文件到知识库失败: {resp.get('msg')}")
-                    await update_file_status(
-                        rag_file.file_id,
-                        RagFileStatus.FAILED,
-                        f"上传文件到知识库失败: {resp.get('msg')}"
-                    )
-                    continue
-                
-                # 更新数据库
-                pool = await async_pool()
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cursor:
-                        await conn.begin()
-                        await cursor.execute(
-                            "UPDATE rag_files SET kb_file_id = %s, status = %s WHERE file_id = %s",
-                            (resp.get("data")[0].get("file_id"), RagFileStatus.RAG_UPLOADED, rag_file.file_id)
-                        )
-                        await conn.commit()
-                        logger.info(f"文件上传知识库完成，正在解析: {rag_file.file_id}")
-                
-        except Exception as e:
-            logger.error(f"处理文件上传时发生错误: {str(e)}")
-            if rag_file:
-                await update_file_status(
-                    rag_file.file_id,
-                    RagFileStatus.FAILED,
-                    f"处理文件上传时发生错误: {str(e)}"
-                )
-                await asyncio.sleep(1)
-        finally:
-            if rag_file:
-                queue.task_done()
 
 async def rag_content_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
     while True:
@@ -188,18 +108,18 @@ async def rag_content_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
         try:
             # 1. 获取任务 - 使用异步等待而不是立即检查
             rag_file = await queue.get()
-            logger.info(f"成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
+            logger.info(f"rag_content_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
 
             # 2. 处理任务
             async with semaphore:
                 # 获取解析器
                 parser = get_parser(rag_file.file_ext)
                 if not parser:
-                    logger.error(f"content 找不到文件类型 {rag_file.file_ext} 的解析器")
+                    logger.error(f"rag_content_task 找不到文件类型 {rag_file.file_ext} 的解析器")
                     await update_file_status(
                         rag_file.file_id,
                         RagFileStatus.FAILED,
-                        f"content 找不到文件类型 {rag_file.file_ext} 的解析器"
+                        f"rag_content_task 找不到文件类型 {rag_file.file_ext} 的解析器"
                     )
                     continue
 
@@ -216,17 +136,107 @@ async def rag_content_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
                             (content, RagFileStatus.LOCAL_PARSED, len(content), rag_file.file_id)
                         )
                         await conn.commit()
-                        logger.info(f"文件内容处理完成: {rag_file.file_id}")
+                        logger.info(f"rag_content_task 文件内容处理完成: {rag_file.file_id}")
 
         except Exception as e:
-            logger.error(f"处理文件内容时发生错误: {str(e)}")
+            logger.error(f"rag_content_task 处理文件内容时发生错误: {str(e)}")
             if rag_file:
                 await update_file_status(
                     rag_file.file_id,
                     RagFileStatus.FAILED,
-                    f"处理文件内容时发生错误: {str(e)}"
+                    f"rag_content_task 处理文件内容时发生错误: {str(e)}"
                 )
                 await asyncio.sleep(1)  # 发生错误时短暂等待
+        finally:
+            if rag_file:
+                queue.task_done()
+
+async def rag_summary_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
+    while True:
+        rag_file = None
+        try:
+            rag_file = await queue.get()
+            logger.info(f"rag_summary_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
+            
+            async with semaphore:
+                # 获取解析器
+                parser = get_parser(rag_file.file_ext)
+                if not parser:
+                    logger.error(f"rag_summary_task 找不到文件类型 {rag_file.file_ext} 的解析器")
+                    await update_file_status(
+                        rag_file.file_id,
+                        RagFileStatus.FAILED,
+                        f"rag_summary_task 找不到文件类型 {rag_file.file_ext} 的解析器"
+                    )
+                    continue 
+                
+                # 生成摘要
+                summary = await parser.summary(rag_file.content, length="small")
+                
+                # 更新数据库
+                pool = await async_pool()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cursor:
+                        await conn.begin()
+                        await cursor.execute(
+                            "UPDATE rag_files SET summary_small = %s, status = %s WHERE file_id = %s",
+                            (summary, RagFileStatus.LLM_SUMMARYED, rag_file.file_id)
+                        )
+                        await conn.commit()
+                        logger.info(f"rag_summary_task 文件摘要处理完成: {rag_file.file_id}")
+                        
+        except Exception as e:
+            logger.error(f"rag_summary_task 处理文件摘要时发生错误: {str(e)}")
+            if rag_file:
+                await update_file_status(
+                    rag_file.file_id,
+                    RagFileStatus.FAILED,
+                    f"rag_summary_task 处理文件摘要时发生错误: {str(e)}"
+                )
+                await asyncio.sleep(1)
+        finally:
+            if rag_file:    
+                queue.task_done()
+
+async def rag_upload_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
+    while True:
+        rag_file = None
+        try:
+            rag_file = await queue.get()
+            logger.info(f"rag_upload_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}") 
+            
+            async with semaphore:
+                resp = rag_api.upload_files(rag_file.kb_id, [rag_file.file_path], mode="strong")
+                if resp.get("code") != 200 or len(resp.get("data")) == 0:
+                    logger.error(f"rag_upload_task 上传文件到知识库失败: {resp.get('msg')}")
+                    await update_file_status(
+                        rag_file.file_id,
+                        RagFileStatus.FAILED,
+                        f"rag_upload_task 上传文件到知识库失败: {resp.get('msg')}"
+                    )
+                    continue
+                
+                # 更新数据库
+                pool = await async_pool()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cursor:
+                        await conn.begin()
+                        await cursor.execute(
+                            "UPDATE rag_files SET kb_file_id = %s, status = %s WHERE file_id = %s",
+                            (resp.get("data")[0].get("file_id"), RagFileStatus.RAG_UPLOADED, rag_file.file_id)
+                        )
+                        await conn.commit()
+                        logger.info(f"rag_upload_task 文件上传知识库完成，正在解析: {rag_file.file_id}")
+                
+        except Exception as e:
+            logger.error(f"rag_upload_task 处理文件上传时发生错误: {str(e)}")
+            if rag_file:
+                await update_file_status(
+                    rag_file.file_id,
+                    RagFileStatus.FAILED,
+                    f"rag_upload_task 处理文件上传时发生错误: {str(e)}"
+                )
+                await asyncio.sleep(1)
         finally:
             if rag_file:
                 queue.task_done()
@@ -236,42 +246,51 @@ async def rag_file_poll_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore)
         rag_file = None
         try:
             rag_file = await queue.get()
+            logger.info(f"rag_file_poll_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
+
             async with semaphore:
                 resp = rag_api.list_files(rag_file.kb_id, file_id=rag_file.kb_file_id)
                 details = resp.get("data").get("details")
                 if resp.get("code") != 200 or details is None or len(details) == 0:
-                    logger.error(f"查询RAG解析进度失败: {resp.get('msg')}")
+                    logger.error(f"rag_file_poll_task 查询RAG解析进度失败: {resp.get('msg')}")
                     await update_file_status(
                         rag_file.file_id,
                         RagFileStatus.FAILED,
-                        f"查询RAG解析进度失败: {resp.get('msg')}"
+                        f"rag_file_poll_task 查询RAG解析进度失败: {resp.get('msg')}"
                     )
+                    await asyncio.sleep(2)
+                    queue.task_done()
                     continue
                 detail = details[0]
-                if detail.get("status") == "yellow": # 黄色表示解析中
-                    await update_file_status(
-                        rag_file.file_id,
-                        RagFileStatus.RAG_UPLOADED,
-                    )
+                if detail.get("status") == "yellow" or detail.get("status") == "gray": # 黄色、灰色表示解析中
+                    await asyncio.sleep(2)  # 等待2秒
+                    await queue.put(rag_file)  # 重新加入队列
                 elif detail.get("status") == "green": # 绿色表示解析完成
                     await update_file_status(
                         rag_file.file_id,
                         RagFileStatus.DONE,
                     )
                 elif detail.get("status") == "red": # 红色表示解析失败
-                    logger.error(f"文件RAG解析失败: {rag_file.file_id}")
+                    logger.error(f"rag_file_poll_task 文件RAG解析失败: {rag_file.file_id}")
                     await update_file_status(
                         rag_file.file_id,
                         RagFileStatus.FAILED,
-                        f"文件RAG解析失败: {rag_file.file_id}"
+                        f"rag_file_poll_task 文件RAG解析失败: {rag_file.file_id}"
+                    )
+                else:
+                    logger.error(f"rag_file_poll_task 文件RAG解析状态未知: {rag_file.file_id} status: {detail.get('status')}")
+                    await update_file_status(
+                        rag_file.file_id,
+                        RagFileStatus.FAILED,
+                        f"rag_file_poll_task 文件RAG解析失败: {rag_file.file_id} 异常状态: {detail.get('status')}"
                     )
         except Exception as e:
-            logger.error(f"查询RAG解析进度时发生错误: {str(e)}")
+            logger.error(f"rag_file_poll_task 查询RAG解析进度时发生错误: {str(e)}")
             if rag_file:
                 await update_file_status(
                     rag_file.file_id,
                     RagFileStatus.FAILED,
-                    f"查询RAG解析进度时发生错误: {str(e)}"
+                    f"rag_file_poll_task 查询RAG解析进度时发生错误: {str(e)}"
                 )
                 await asyncio.sleep(1)
         finally:
@@ -291,7 +310,7 @@ async def update_file_status(file_id: str, status: RagFileStatus, error_message:
                 )
                 await conn.commit()
     except Exception as e:
-        logger.error(f"更新文件状态失败 {file_id}: {str(e)}")
+        logger.error(f"update_file_status 更新文件状态失败 {file_id}: {str(e)}")
         
 # 知识库文件任务处理线程
 def rag_worker():
