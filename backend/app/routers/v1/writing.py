@@ -69,7 +69,7 @@ class ReferenceUpdate(BaseModel):
     web_link: Optional[WebLinkUpdate] = Field(None, description="网页链接，仅当type为WEB_LINK时有效")
 
 class UpdateOutlineContent(BaseModel):
-    id: Optional[int] = Field(None, description="段落ID，如果为空则创建新段落")
+    key: Optional[int] = Field(None, description="段落ID，如果为空则创建新段落")
     title: str = Field(..., description="标题")
     description: Optional[str] = Field(None, description="描述")
     level: int = Field(..., description="段落级别")
@@ -187,7 +187,7 @@ async def update_outline(
             result_ids = []
             
             for para_data in paragraphs:
-                paragraph_id = para_data.id
+                paragraph_id = para_data.key
                 
                 # 如果有ID且存在于现有段落中，则更新
                 if paragraph_id is not None and paragraph_id in existing_dict:
@@ -348,7 +348,7 @@ async def get_outline(
     # 递归构建段落数据
     def build_paragraph_data(paragraph):
         data = {
-            "id": paragraph.id,
+            "key": paragraph.id,
             "title": paragraph.title,
             "description": paragraph.description,
             "level": paragraph.level,
