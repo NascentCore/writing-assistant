@@ -254,7 +254,7 @@ async def delete_files(
         resp = rag_api.delete_files(kb_id=files[0].kb_id, file_ids=[file.kb_file_id for file in files])
         if resp["code"] != 200:
             logger.error(f"删除RAG知识库文件失败: user_id={current_user.user_id}, kb_id={files[0].kb_id}, file_ids={request.file_ids}, msg={resp['msg']}")
-            return APIResponse.error(message=f"删除文件失败: {resp['msg']}")
+            # return APIResponse.error(message=f"删除文件失败: {resp['msg']}")
 
         db.query(RagFile).filter(RagFile.file_id.in_(request.file_ids), RagFile.is_deleted == False).update({"is_deleted": True})
         db.commit()
