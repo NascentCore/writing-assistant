@@ -262,13 +262,9 @@ class OutlineGenerator:
                 "markdown": ""
             }
             
-            markdown_content = f"# {outline.title}\n\n"
-            
-            # 递归生成段落标题的markdown
-            def generate_paragraph_titles(paragraph, level=2):
-                # 生成当前段落的标题
-                heading = "#" * level
-                return f"{heading} {paragraph.title}\n\n"
+            # 使用outline.markdown_content获取大纲的基本结构
+            # 这包含了所有段落的标题和描述
+            outline_structure = outline.markdown_content
             
             # 递归获取段落的所有子段落标题
             def get_sub_paragraph_titles(paragraph):
@@ -287,6 +283,8 @@ class OutlineGenerator:
                 return titles
             
             # 为每个1级段落生成内容
+            markdown_content = f"# {outline.title}\n\n"
+            
             for para in level_one_paragraphs:
                 # 只有1级段落才有count_style
                 if not para.count_style:
@@ -346,6 +344,9 @@ class OutlineGenerator:
                 
                 # 递归生成子段落的标题结构
                 def add_child_headings(parent_id, current_level=3):
+                    # 声明使用外部的markdown_content变量
+                    nonlocal markdown_content
+                    
                     children = db_session.query(SubParagraph).filter(
                         SubParagraph.parent_id == parent_id
                     ).all()
@@ -360,6 +361,9 @@ class OutlineGenerator:
             
             # 设置markdown内容
             full_content["markdown"] = markdown_content
+            
+            # 添加大纲结构
+            full_content["outline_structure"] = outline_structure
             
             return full_content
             
