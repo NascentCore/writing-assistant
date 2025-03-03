@@ -104,6 +104,12 @@ async def upload_files(
             db.add(kb)
             db.commit()
         
+        # 过滤已存在的文件
+        file_names = [file.filename for file in files]
+        existing_files = db.query(RagFile).filter(RagFile.kb_id == kb_id, RagFile.file_name.in_(file_names), RagFile.is_deleted == False).all()
+        existing_file_names = [file.file_name for file in existing_files]
+        files = [file for file in files if file.filename not in existing_file_names]
+        
         result = []
         for file in files:
             file_id = f"file-{shortuuid.uuid()}"
@@ -149,7 +155,7 @@ async def upload_files(
             db.commit() 
 
         return APIResponse.success(
-            message="文件上传成功, 正在解析中",
+            message=f"文件上传成功, 正在解析中。已经存在文件: {existing_file_names}",
             data=result
         )
     except Exception as e:

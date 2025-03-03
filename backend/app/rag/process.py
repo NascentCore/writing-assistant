@@ -36,7 +36,6 @@ async def get_rag_task():
                     files = await cursor.fetchall()
                     
                     if not files:
-                        await asyncio.sleep(10)  # 没有任务时等待10秒
                         continue
                     
                     # 逐个处理文件，每个文件使用独立事务
@@ -121,6 +120,7 @@ async def rag_content_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
                         RagFileStatus.FAILED,
                         f"rag_content_task 找不到文件类型 {rag_file.file_ext} 的解析器"
                     )
+                    queue.task_done()
                     continue
 
                 # 解析内容
@@ -168,6 +168,7 @@ async def rag_summary_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
                         RagFileStatus.FAILED,
                         f"rag_summary_task 找不到文件类型 {rag_file.file_ext} 的解析器"
                     )
+                    queue.task_done()
                     continue 
                 
                 # 生成摘要
@@ -214,6 +215,7 @@ async def rag_upload_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
                         RagFileStatus.FAILED,
                         f"rag_upload_task 上传文件到知识库失败: {resp.get('msg')}"
                     )
+                    queue.task_done()
                     continue
                 
                 # 更新数据库
@@ -246,7 +248,7 @@ async def rag_file_poll_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore)
         rag_file = None
         try:
             rag_file = await queue.get()
-            logger.info(f"rag_file_poll_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
+            # logger.info(f"rag_file_poll_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
 
             async with semaphore:
                 resp = rag_api.list_files(rag_file.kb_id, file_id=rag_file.kb_file_id)
