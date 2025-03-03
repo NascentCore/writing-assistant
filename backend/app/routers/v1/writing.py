@@ -10,7 +10,8 @@ from app.database import get_db
 from app.services import OutlineGenerator
 from app.models.upload_file import UploadFile
 from app.models.outline import (
-    Outline, 
+    Outline,
+    ReferenceStatus, 
     SubParagraph, 
     CountStyle, 
     WritingTemplate, 
@@ -143,7 +144,7 @@ async def update_outline(
     db: Session = Depends(get_db)
 ):
     """
-    全量更新大纲结构
+    差异化更新大纲结构
     
     Args:
         outline_id: 大纲ID
@@ -169,72 +170,157 @@ async def update_outline(
     # 注意：markdown_content 是一个只读属性，由系统根据段落结构自动生成
     # 这里不需要手动更新 markdown_content
     
-    # 删除所有现有段落（级联删除引用）
-    db.query(SubParagraph).filter(SubParagraph.outline_id == outline_id).delete()
-    db.commit()
-    
-    # 递归创建段落和引用
-    def create_paragraphs(paragraphs, parent_id=None):
-        for para_data in paragraphs:
-            # 创建段落
-            paragraph = SubParagraph(
-                outline_id=outline_id,
-                title=para_data.title,
-                description=para_data.description,
-                reference_status=para_data.reference_status,
-                level=para_data.level,
-                parent_id=parent_id
-            )
+    try:
+        # 获取所有现有段落
+        existing_paragraphs = db.query(SubParagraph).filter(
+            SubParagraph.outline_id == outline_id
+        ).all()
+        
+        # 将现有段落转换为字典，以ID为键
+        existing_dict = {p.id: p for p in existing_paragraphs}
+        
+        # 收集新结构中的所有段落ID
+        new_paragraph_ids = set()
+        
+        # 递归更新段落
+        def update_paragraphs_recursively(paragraphs, parent_id=None):
+            result_ids = []
             
-            # 只有1级段落才能设置count_style
-            if para_data.level == 1 and para_data.count_style:
-                count_style_value = para_data.count_style.lower()
-                # 确保count_style是有效的枚举值
-                if count_style_value not in [e.value for e in CountStyle]:
-                    count_style_value = "medium"  # 默认值
-                paragraph.count_style = count_style_value
-            
-            db.add(paragraph)
-            db.flush()  # 获取ID
-            
-            # 只有1级段落才能有引用
-            if para_data.level == 1 and para_data.references:
-                for ref_data in para_data.references:
-                    # 创建引用
-                    ref_id = ref_data.id if ref_data.id else str(uuid.uuid4())
-                    reference = Reference(
-                        id=ref_id,
-                        sub_paragraph_id=paragraph.id,
-                        type=ref_data.type.value,
-                        is_selected=ref_data.is_selected
+            for para_data in paragraphs:
+                paragraph_id = para_data.id
+                
+                # 如果有ID且存在于现有段落中，则更新
+                if paragraph_id is not None and paragraph_id in existing_dict:
+                    paragraph = existing_dict[paragraph_id]
+                    
+                    # 更新基本信息
+                    paragraph.title = para_data.title
+                    paragraph.description = para_data.description
+                    paragraph.reference_status = ReferenceStatus(para_data.reference_status)
+                    paragraph.level = para_data.level
+                    paragraph.parent_id = parent_id
+                    
+                    # 只有1级段落才能设置count_style
+                    if para_data.level == 1 and para_data.count_style:
+                        count_style_value = para_data.count_style.lower()
+                        # 确保count_style是有效的枚举值
+                        if count_style_value not in [e.value for e in CountStyle]:
+                            count_style_value = "medium"  # 默认值
+                        paragraph.count_style = count_style_value
+                    
+                    # 记录此段落已处理
+                    new_paragraph_ids.add(paragraph_id)
+                    result_ids.append(paragraph_id)
+                    
+                    # 处理引用（只有1级段落才能有引用）
+                    if para_data.level == 1:
+                        # 删除所有现有引用
+                        db.query(Reference).filter(
+                            Reference.sub_paragraph_id == paragraph_id
+                        ).delete()
+                        
+                        # 添加新引用
+                        if para_data.references:
+                            for ref_data in para_data.references:
+                                # 创建引用
+                                ref_id = ref_data.id if ref_data.id else str(uuid.uuid4())
+                                reference = Reference(
+                                    id=ref_id,
+                                    sub_paragraph_id=paragraph.id,
+                                    type=ref_data.type.value,
+                                    is_selected=ref_data.is_selected
+                                )
+                                db.add(reference)
+                                db.flush()  # 获取ID
+                                
+                                # 如果是网页链接类型，创建WebLink
+                                if ref_data.type == ReferenceType.WEB_LINK and ref_data.web_link:
+                                    web_link = WebLink(
+                                        reference_id=reference.id,
+                                        url=ref_data.web_link.url,
+                                        title=ref_data.web_link.title,
+                                        summary=ref_data.web_link.summary,
+                                        icon_url=ref_data.web_link.icon_url,
+                                        content_count=ref_data.web_link.content_count,
+                                        content=ref_data.web_link.content
+                                    )
+                                    db.add(web_link)
+                else:
+                    # 创建新段落
+                    paragraph = SubParagraph(
+                        outline_id=outline_id,
+                        title=para_data.title,
+                        description=para_data.description,
+                        reference_status=ReferenceStatus(para_data.reference_status),
+                        level=para_data.level,
+                        parent_id=parent_id
                     )
-                    db.add(reference)
+                    
+                    # 只有1级段落才能设置count_style
+                    if para_data.level == 1 and para_data.count_style:
+                        count_style_value = para_data.count_style.lower()
+                        # 确保count_style是有效的枚举值
+                        if count_style_value not in [e.value for e in CountStyle]:
+                            count_style_value = "medium"  # 默认值
+                        paragraph.count_style = count_style_value
+                    
+                    db.add(paragraph)
                     db.flush()  # 获取ID
                     
-                    # 如果是网页链接类型，创建或更新WebLink
-                    if ref_data.type == ReferenceType.WEB_LINK and ref_data.web_link:
-                        web_link = WebLink(
-                            reference_id=reference.id,
-                            url=ref_data.web_link.url,
-                            title=ref_data.web_link.title,
-                            summary=ref_data.web_link.summary,
-                            icon_url=ref_data.web_link.icon_url,
-                            content_count=ref_data.web_link.content_count,
-                            content=ref_data.web_link.content
-                        )
-                        db.add(web_link)
+                    # 如果是新创建的段落，记录其ID
+                    if paragraph_id is not None:
+                        new_paragraph_ids.add(paragraph_id)
+                    result_ids.append(paragraph.id)
+                    
+                    # 只有1级段落才能有引用
+                    if para_data.level == 1 and para_data.references:
+                        for ref_data in para_data.references:
+                            # 创建引用
+                            ref_id = ref_data.id if ref_data.id else str(uuid.uuid4())
+                            reference = Reference(
+                                id=ref_id,
+                                sub_paragraph_id=paragraph.id,
+                                type=ref_data.type.value,
+                                is_selected=ref_data.is_selected
+                            )
+                            db.add(reference)
+                            db.flush()  # 获取ID
+                            
+                            # 如果是网页链接类型，创建WebLink
+                            if ref_data.type == ReferenceType.WEB_LINK and ref_data.web_link:
+                                web_link = WebLink(
+                                    reference_id=reference.id,
+                                    url=ref_data.web_link.url,
+                                    title=ref_data.web_link.title,
+                                    summary=ref_data.web_link.summary,
+                                    icon_url=ref_data.web_link.icon_url,
+                                    content_count=ref_data.web_link.content_count,
+                                    content=ref_data.web_link.content
+                                )
+                                db.add(web_link)
+                
+                # 递归处理子段落
+                if para_data.children:
+                    child_ids = update_paragraphs_recursively(para_data.children, paragraph.id)
             
-            # 递归处理子段落
-            if para_data.children:
-                create_paragraphs(para_data.children, paragraph.id)
+            return result_ids
+        
+        # 开始递归更新
+        update_paragraphs_recursively(request.sub_paragraphs)
+        
+        # 删除不再存在的段落
+        for old_id, old_paragraph in existing_dict.items():
+            if old_id not in new_paragraph_ids:
+                db.delete(old_paragraph)
+        
+        # 提交更改
+        db.commit()
+        
+        return APIResponse.success(message="大纲更新成功", data={"id": outline.id})
     
-    # 创建所有段落
-    create_paragraphs(request.sub_paragraphs)
-    
-    # 提交更改
-    db.commit()
-    
-    return APIResponse.success(message="大纲更新成功", data={"id": outline.id})
+    except Exception as e:
+        db.rollback()
+        return APIResponse.error(message=f"更新大纲失败: {str(e)}")
 
 
 @router.get("/outlines/{outline_id}")
@@ -266,7 +352,7 @@ async def get_outline(
             "title": paragraph.title,
             "description": paragraph.description,
             "level": paragraph.level,
-            "reference_status": paragraph.reference_status
+            "reference_status": ReferenceStatus(paragraph.reference_status).value
         }
         
         # 只有1级段落才有count_style
