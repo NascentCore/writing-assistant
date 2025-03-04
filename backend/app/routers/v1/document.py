@@ -5,7 +5,7 @@ from typing import Optional, List
 from fastapi.params import Body
 from app.database import get_db
 from app.models.system_config import SystemConfig
-from app.models.chat import ChatSession
+from app.models.chat import ChatSession, ChatSessionType
 from app.schemas.response import APIResponse
 from app.auth import get_current_user
 from app.models.user import User
@@ -253,7 +253,8 @@ async def get_documents(
         doc.sessions = []
         sessions = db.query(ChatSession).filter(
             ChatSession.user_id == current_user.user_id,
-            ChatSession.doc_id == doc.doc_id
+            ChatSession.doc_id == doc.doc_id,
+            ChatSession.session_type == ChatSessionType.WRITING
         ).order_by(desc(ChatSession.id)).all()
         for session in sessions:
             doc.sessions.append({

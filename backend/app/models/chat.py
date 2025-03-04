@@ -1,6 +1,10 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey, Boolean
+from sqlalchemy import Enum, Column, Integer, SmallInteger, String, Text, DateTime, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
+
+class ChatSessionType(Enum):
+    WRITING = 1
+    KNOWLEDGE_BASE = 2
 
 class ChatSession(Base):
     """聊天会话记录表"""
@@ -8,6 +12,7 @@ class ChatSession(Base):
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="自增主键")
     session_id = Column(String(100), unique=True, comment="会话ID")
+    session_type = Column(SmallInteger, default=1, comment="会话类型 1: 写作会话, 2: 知识库会话")
     user_id = Column(String(100), index=True, comment="用户ID")
     doc_id = Column(String(100), index=True, default="", comment="文档ID")
     meta = Column(Text, default="", comment="额外元数据")

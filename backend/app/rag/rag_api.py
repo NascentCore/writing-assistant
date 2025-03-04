@@ -1,12 +1,16 @@
 import os
 import requests
-from typing import List, Optional, Dict, Any
+import json
+from typing import List, Optional, Dict, Any, Union, Iterator
 from app.config import settings
+import logging
+
+logger = logging.getLogger("app.rag_api")
 
 class RagAPI:
     """QAnything API封装类"""
     
-    def __init__(self, base_url: str = settings.RAG_API_BASE):
+    def __init__(self, base_url: str = settings.RAG_KB_API_BASE):
         self.base_url = base_url.rstrip('/')
         
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
@@ -18,6 +22,43 @@ class RagAPI:
             return response.json()
         except requests.exceptions.RequestException as e:
             raise Exception(f"RAG API请求失败: {str(e)}")
+
+    def _make_streaming_request(self, method: str, endpoint: str, **kwargs) -> Iterator[Dict[str, Any]]:
+        """发送HTTP流式请求的通用方法"""
+        url = f"{self.base_url}{endpoint}"
+        try:
+            with requests.request(method, url, stream=True, **kwargs) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    
+                    # 先解码为字符串
+                    line_str = line.decode('utf-8').strip()
+                    
+                    # 处理SSE格式
+                    if line_str.startswith("data: "):
+                        json_str = line_str[6:].strip()  # 去掉 "data: " 前缀
+                        if json_str == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(json_str)
+                            yield data
+                        except json.JSONDecodeError as e:
+                            logger.error(f"JSON解析错误: {json_str}, 错误: {str(e)}")
+                            continue
+                    else:
+                        # 尝试直接解析JSON
+                        try:
+                            data = json.loads(line_str)
+                            yield data
+                        except json.JSONDecodeError:
+                            logger.debug(f"非JSON格式数据: {line_str}")
+                            continue
+                        
+        except requests.exceptions.RequestException as e:
+            logger.error(f"RAG API流式请求失败: {str(e)}")
+            raise Exception(f"RAG API流式请求失败: {str(e)}")
 
     def create_knowledge_base(self, kb_name: str) -> Dict[str, Any]:
         """
@@ -139,45 +180,80 @@ class RagAPI:
 
     def chat(
         self,
-        kb_id: str,
+        kb_ids: List[str],
         question: str,
-        history: Optional[List[Dict[str, str]]] = None,
-        stream: bool = False,
-        temperature: float = 0.7,
-        top_p: float = 0.7,
-        max_tokens: int = 2048,
-        doc_ids: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        history: Optional[List[List[str]]] = None,
+        streaming: bool = True,  # 默认开启流式返回
+        networking: bool = False,
+        product_source: str = "saas",
+        rerank: bool = False,
+        only_need_search_results: bool = False,
+        hybrid_search: bool = False,
+        max_token: int = 512,
+        api_base: str = settings.RAG_KB_API_BASE, 
+        api_key: str = settings.RAG_SUMMARY_API_KEY,
+        model: str = settings.RAG_SUMMARY_MODEL,
+        api_context_length: int = 4096,
+        chunk_size: int = 800,
+        top_p: float = 1.0,
+        top_k: int = 30,
+        temperature: float = 0.5,
+        user_id: str = "zzp"
+    ) -> Union[Dict[str, Any], Iterator[Dict[str, Any]]]:
         """
         知识库问答接口
         
         Args:
-            kb_id: 知识库ID
+            kb_ids: 知识库ID列表
             question: 问题内容
-            history: 历史对话记录
-            stream: 是否使用流式响应
-            temperature: 温度参数
+            history: 历史对话记录，格式为[[question1, answer1], [question2, answer2], ...]
+            streaming: 是否使用流式返回
+            networking: 是否使用联网功能
+            product_source: 产品来源
+            rerank: 是否重新排序
+            only_need_search_results: 是否只需要搜索结果
+            hybrid_search: 是否使用混合搜索
+            max_token: 最大生成token数
+            api_base: API基础URL
+            api_key: API密钥
+            model: 模型名称
+            api_context_length: API上下文长度
+            chunk_size: 分块大小
             top_p: 核采样参数
-            max_tokens: 最大生成token数
-            doc_ids: 指定的文档ID列表
+            top_k: 保留最高概率的k个token
+            temperature: 温度参数
+            user_id: 用户ID
             
         Returns:
-            Dict: 问答结果
+            Union[Dict[str, Any], Iterator[Dict[str, Any]]]: 如果streaming=True，返回迭代器；否则返回字典
         """
         endpoint = "/local_doc_qa/local_doc_chat"
         data = {
-            "knowledge_base_id": kb_id,
-            "question": question,
+            "user_id": user_id,
+            "kb_ids": kb_ids,
             "history": history or [],
-            "stream": stream,
-            "temperature": temperature,
+            "question": question,
+            "streaming": streaming,  # 添加streaming参数
+            "networking": networking,
+            "product_source": product_source,
+            "rerank": rerank,
+            "only_need_search_results": only_need_search_results,
+            "hybrid_search": hybrid_search,
+            "max_token": max_token,
+            "api_base": api_base,
+            "api_key": api_key,
+            "model": model,
+            "api_context_length": api_context_length,
+            "chunk_size": chunk_size,
             "top_p": top_p,
-            "max_tokens": max_tokens
+            "top_k": top_k,
+            "temperature": temperature
         }
-        if doc_ids:
-            data["doc_ids"] = doc_ids
-            
-        return self._make_request("POST", endpoint, json=data)
+        
+        if streaming:
+            return self._make_streaming_request("POST", endpoint, json=data)
+        else:
+            return self._make_request("POST", endpoint, json=data)
 
 # 创建全局实例
 rag_api = RagAPI()

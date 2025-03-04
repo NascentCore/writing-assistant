@@ -81,15 +81,26 @@ class Settings(BaseSettings):
     """
     
     # 知识库配置
-    RAG_API_BASE: str = yaml_config.get("rag", {}).get("api_base", "http://rag.llm.sxwl.ai:30003/api/")
-    RAG_LLM_MODEL: str = yaml_config.get("rag", {}).get("llm_model")
-    RAG_LLM_BASE_URL: str = yaml_config.get("rag", {}).get("llm_base_url")
-    RAG_LLM_API_KEY: str = yaml_config.get("rag", {}).get("llm_api_key")
-    RAG_LLM_TEMPERATURE: float = yaml_config.get("rag", {}).get("llm_temperature", 0.4)
-    RAG_LLM_TOP_P: float = yaml_config.get("rag", {}).get("llm_top_p", 0.6)
-    RAG_LLM_MAX_TOKENS: int = yaml_config.get("rag", {}).get("llm_max_tokens", 1500)
-    RAG_LLM_REQUEST_TIMEOUT: float = yaml_config.get("rag", {}).get("llm_request_timeout", 300.0)
-    RAG_FILE_PROCESSOR_INTERVAL: int = yaml_config.get("rag", {}).get("file_processor_interval", 60)
+    RAG_KB_API_BASE: str = yaml_config.get("rag", {}).get("kb_api_base", "http://rag.llm.sxwl.ai:30003/api/")
+    RAG_SUMMARY_MODEL: str = yaml_config.get("rag", {}).get("summary_model")
+    RAG_SUMMARY_BASE_URL: str = yaml_config.get("rag", {}).get("summary_base_url")
+    RAG_SUMMARY_API_KEY: str = yaml_config.get("rag", {}).get("summary_api_key")
+    RAG_SUMMARY_TEMPERATURE: float = yaml_config.get("rag", {}).get("summary_temperature", 0.4)
+    RAG_SUMMARY_TOP_P: float = yaml_config.get("rag", {}).get("summary_top_p", 0.6)
+    RAG_SUMMARY_MAX_TOKENS: int = yaml_config.get("rag", {}).get("summary_max_tokens", 1500)
+    RAG_SUMMARY_REQUEST_TIMEOUT: float = yaml_config.get("rag", {}).get("summary_request_timeout", 300.0)
+    RAG_FILE_PROCESSOR_INTERVAL: int = yaml_config.get("rag", {}).get("file_processor_interval", 5)
+    RAG_CHAT_TEMPERATURE: float = yaml_config.get("rag", {}).get("chat_temperature", 0.5)
+    RAG_CHAT_TOP_P: float = yaml_config.get("rag", {}).get("chat_top_p", 1.0)
+    RAG_CHAT_TOP_K: int = yaml_config.get("rag", {}).get("chat_top_k", 30)
+    RAG_CHAT_MAX_TOKENS: int = yaml_config.get("rag", {}).get("chat_max_tokens", 512)
+    RAG_CHAT_NETWORKING: bool = yaml_config.get("rag", {}).get("chat_networking", False)
+    RAG_CHAT_PRODUCT_SOURCE: str = yaml_config.get("rag", {}).get("chat_product_source", "saas")
+    RAG_CHAT_RERANK: bool = yaml_config.get("rag", {}).get("chat_rerank", False)
+    RAG_CHAT_ONLY_NEED_SEARCH_RESULTS: bool = yaml_config.get("rag", {}).get("chat_only_need_search_results", False)
+    RAG_CHAT_HYBRID_SEARCH: bool = yaml_config.get("rag", {}).get("chat_hybrid_search", False)
+    RAG_CHAT_API_CONTEXT_LENGTH: int = yaml_config.get("rag", {}).get("chat_api_context_length", 4096)
+    RAG_CHAT_CHUNK_SIZE: int = yaml_config.get("rag", {}).get("chat_chunk_size", 800)
     class Config:
         case_sensitive = True
         env_file = ".env"
