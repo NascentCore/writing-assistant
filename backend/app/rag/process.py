@@ -30,8 +30,8 @@ async def get_rag_task():
                             select(RagFile)
                             .where(RagFile.status.in_([
                                 RagFileStatus.LOCAL_SAVED,
-                                RagFileStatus.LOCAL_PARSED,
-                                RagFileStatus.LLM_SUMMARYED,
+                                # RagFileStatus.LOCAL_PARSED,
+                                # RagFileStatus.LLM_SUMMARYED,
                                 RagFileStatus.RAG_UPLOADED
                             ]))
                             .limit(15)
@@ -46,9 +46,11 @@ async def get_rag_task():
                         
                         # 2. 在同一事务中更新状态
                         status_map = {
-                            RagFileStatus.LOCAL_SAVED: RagFileStatus.LOCAL_PARSING,
-                            RagFileStatus.LOCAL_PARSED: RagFileStatus.LLM_SUMMARIZING,
-                            RagFileStatus.LLM_SUMMARYED: RagFileStatus.RAG_UPLOADING,
+                            # RagFileStatus.LOCAL_SAVED: RagFileStatus.LOCAL_PARSING,
+                            # RagFileStatus.LOCAL_PARSED: RagFileStatus.LLM_SUMMARIZING,
+                            # RagFileStatus.LLM_SUMMARYED: RagFileStatus.RAG_UPLOADING,
+                            # RagFileStatus.RAG_UPLOADED: RagFileStatus.RAG_PARSING,
+                            RagFileStatus.LOCAL_SAVED: RagFileStatus.RAG_UPLOADING,
                             RagFileStatus.RAG_UPLOADED: RagFileStatus.RAG_PARSING,
                         }
                         
@@ -75,8 +77,8 @@ async def get_rag_task():
             for file, next_status in files_to_process:
                 try:
                     queue_map = {
-                        RagFileStatus.LOCAL_PARSING: rag_content_queue,
-                        RagFileStatus.LLM_SUMMARIZING: rag_summary_queue,
+                        # RagFileStatus.LOCAL_PARSING: rag_content_queue,
+                        # RagFileStatus.LLM_SUMMARIZING: rag_summary_queue,
                         RagFileStatus.RAG_UPLOADING: rag_upload_queue,
                         RagFileStatus.RAG_PARSING: rag_parsing_queue,
                     }
@@ -330,17 +332,17 @@ def rag_worker():
     # 任务获取
     tasks.append(get_rag_task())
 
-    # 文件内容解析
-    max_content_tasks = 2
-    content_semaphore = asyncio.Semaphore(max_content_tasks)
-    for _ in range(max_content_tasks):
-        tasks.append(rag_content_task(rag_content_queue, content_semaphore))
+    # # 文件内容解析
+    # max_content_tasks = 2
+    # content_semaphore = asyncio.Semaphore(max_content_tasks)
+    # for _ in range(max_content_tasks):
+    #     tasks.append(rag_content_task(rag_content_queue, content_semaphore))
 
-    # 文件摘要
-    max_summary_tasks = 4
-    summary_semaphore = asyncio.Semaphore(max_summary_tasks)
-    for _ in range(max_summary_tasks):
-        tasks.append(rag_summary_task(rag_summary_queue, summary_semaphore))
+    # # 文件摘要
+    # max_summary_tasks = 4
+    # summary_semaphore = asyncio.Semaphore(max_summary_tasks)
+    # for _ in range(max_summary_tasks):
+    #     tasks.append(rag_summary_task(rag_summary_queue, summary_semaphore))
 
     # 文件上传RAG知识库
     max_upload_tasks = 4
