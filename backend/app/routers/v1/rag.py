@@ -1,5 +1,5 @@
 import logging
-from pathlib import Path
+from pathlib import Path as PathLib
 from typing import List, Optional, Dict, Any
 import shortuuid
 from fastapi import APIRouter, Depends, UploadFile as FastAPIUploadFile, File
@@ -58,7 +58,7 @@ async def upload_files(
     db: Session = Depends(get_db)
 ):
     try:
-        upload_dir = Path(settings.UPLOAD_DIR)
+        upload_dir = PathLib(settings.UPLOAD_DIR)
         upload_dir.mkdir(exist_ok=True) # 确保上传目录存在
 
         kb_id = ''
@@ -584,3 +584,95 @@ async def get_chat_detail(
     except Exception as e:
         logger.error(f"获取知识库会话详情失败: {str(e)}")
         return APIResponse.error(message=f"获取知识库会话详情失败: {str(e)}")
+
+@router.post("/attachments", summary="知识库对话附件上传")
+async def upload_attachment(
+    files: List[FastAPIUploadFile] = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        upload_dir = PathLib(settings.UPLOAD_DIR)
+        upload_dir.mkdir(exist_ok=True) # 确保上传目录存在
+        
+        kb_id = ''
+        # 查询用户知识库
+        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
+                                                   RagKnowledgeBase.user_id == current_user.user_id, 
+                                                   RagKnowledgeBase.is_deleted == False).first()
+        if kb:
+           kb_id = kb.kb_id
+        else:
+            kb_name = f"用户知识库-{current_user.user_id}"
+            create_kb_response = rag_api.create_knowledge_base(kb_name=kb_name)
+            if create_kb_response["code"] != 200:
+                logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
+                return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
+            kb_id = create_kb_response["data"]["kb_id"]
+            # 保存知识库到数据库
+            kb = RagKnowledgeBase(
+                kb_id=kb_id,
+                kb_type=RagKnowledgeBaseType.USER,
+                user_id=current_user.user_id,
+                kb_name=kb_name,
+            )
+            db.add(kb)
+            db.commit()
+
+        # 过滤已存在的文件
+        file_names = [file.filename for file in files]
+        existing_files = db.query(RagFile).filter(RagFile.kb_id == kb_id, RagFile.file_name.in_(file_names), RagFile.is_deleted == False).all()
+        existing_file_names = [file.file_name for file in existing_files]
+        files = [file for file in files if file.filename not in existing_file_names]
+        
+        result = []
+        for file in files:
+            file_id = f"file-{shortuuid.uuid()}"
+            file_location = upload_dir / f"{file_id}_{file.filename}" # 文件存储路径
+            # 保存文件到磁盘
+            try:
+                contents = await file.read()
+                with open(file_location, "wb") as f:
+                    f.write(contents)
+                # 从文件内容判断格式
+                file_format = get_file_format(str(file_location))
+                result.append({
+                    "file_id": file_id,
+                    "filename": file.filename,
+                    "size": len(contents),
+                    "content_type": file_format,
+                    "path": str(file_location)
+                })
+            except Exception as e:
+                logger.error(f"上传文件 {file.filename} 时发生错误: {str(e)}")
+                return APIResponse.error(message=f"上传文件 {file.filename} 时发生错误: {str(e)}")
+            finally:
+                await file.close()
+        
+            db_file = RagFile(
+                file_id=file_id,    
+                kb_id=kb_id,
+                kb_type=RagKnowledgeBaseType.USER,
+                user_id=current_user.user_id,
+                file_name=file.filename,
+                file_size=len(contents),
+                file_ext=file_format, 
+                file_path=str(file_location),
+                status=RagFileStatus.LOCAL_SAVED,
+                summary_small='',
+                summary_medium='',
+                summary_large='',
+                content='',
+                meta='',
+            )
+        
+            db.add(db_file)
+            db.commit() 
+
+        return APIResponse.success(
+            message=f"文件上传成功, 正在解析中。已经存在文件: {existing_file_names}",
+            data=result
+        )
+    except Exception as e:
+        logger.error(f"上传文件时发生异常: {str(e)}")
+        return APIResponse.error(message=f"上传失败: {str(e)}")
