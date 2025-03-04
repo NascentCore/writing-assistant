@@ -265,7 +265,7 @@ async def delete_files(
         logger.error(f"删除文件事务失败: {str(e)}")
         return APIResponse.error(message="删除文件失败")
 
-@router.post("/chats", summary="创建知识库对话会话")
+@router.post("/chat/session", summary="创建知识库对话会话")
 async def create_chat_session(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -456,7 +456,7 @@ async def chat(
 
 @router.get(
     "/chats", 
-    summary="获取知识库历史会话列表",
+    summary="获取知识库会话列表",
 )
 async def get_chat_history(
     page: int = 1,
@@ -517,7 +517,7 @@ async def get_chat_history(
         logger.error(f"获取知识库会话列表失败: {str(e)}")
         return APIResponse.error(message=f"获取知识库会话列表失败: {str(e)}")
 
-@router.get("/chats/{session_id}", summary="获取知识库历史会话详情")
+@router.get("/chats/{session_id}", summary="获取知识库会话详情")
 async def get_chat_detail(
     session_id: str = Path(..., description="会话ID"),
     page: int = 1,
