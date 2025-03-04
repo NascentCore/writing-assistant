@@ -265,6 +265,33 @@ async def delete_files(
         logger.error(f"删除文件事务失败: {str(e)}")
         return APIResponse.error(message="删除文件失败")
 
+@router.post("/chats", summary="创建知识库对话会话")
+async def create_chat_session(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        session_id = f"chat-{shortuuid.uuid()}"
+        chat_session = ChatSession(
+            session_id=session_id,
+            session_type=ChatSessionType.KNOWLEDGE_BASE,
+            user_id=current_user.user_id,
+        )
+
+        db.add(chat_session)
+        db.commit()
+
+        return APIResponse.success(
+            message="创建会话成功",
+            data={
+                "session_id": session_id,
+                "created_at": chat_session.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            }
+        )
+    except Exception as e:
+        logger.error(f"创建知识库会话失败: user_id={current_user.user_id}, error={str(e)}")
+        return APIResponse.error(message=f"创建知识库会话失败: {str(e)}")
+
 @router.post("/chat", summary="知识库对话")
 async def chat(
     request: ChatRequest,
