@@ -401,9 +401,21 @@ async def chat(
                     assistant_content = ''
                     for chunk in response:
                         if chunk:
-                            # 确保返回正确的SSE格式
-                            assistant_content += chunk.get("response", "")
-                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                            response_text = chunk.get("response", "")
+                            # 构建新的响应格式
+                            new_chunk = {
+                                **chunk,  # 保留原有的所有字段
+                                "choices": [
+                                    {
+                                        "delta": {
+                                            "content": response_text,
+                                            "role": "assistant"
+                                        }
+                                    }
+                                ]
+                            }
+                            assistant_content += response_text
+                            yield f"data: {json.dumps(new_chunk, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
                     # 流式响应结束后保存回答记录
                     assistant_message = ChatMessage(
