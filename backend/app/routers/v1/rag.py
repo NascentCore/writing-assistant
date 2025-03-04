@@ -3,17 +3,21 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 import shortuuid
 from fastapi import APIRouter, Depends, UploadFile as FastAPIUploadFile, File
-from fastapi.params import Body, Query
+from fastapi.params import Body, Query, Path
 from pydantic import BaseModel, Field
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models.rag import RagKnowledgeBase, RagFile, RagKnowledgeBaseType, RagFileStatus
 from app.models.user import User
+from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from app.parser import get_file_format
 from app.rag.rag_api import rag_api
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
+from fastapi.responses import StreamingResponse
+import json
 
 logger = logging.getLogger("app")
 
@@ -23,18 +27,11 @@ class FilesResponse(PaginationResponse):
     data: List[Dict[str, Any]]
 
 class ChatRequest(BaseModel):
-    question: str = Field(
-        description="问题内容",
-    )
-    model_name: str = Field(
-        description="模型名称",
-    )
-    file_ids: List[str] = Field(
-        description="关联的文件ID列表",
-    )
-    streaming: bool = Field(
-        description="是否使用流式响应",
-    )
+    question: str = Field(description="问题内容")
+    model_name: str = Field(description="模型名称")
+    file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
+    session_id: Optional[str] = Field(default=None, description="会话ID")
+    streaming: Optional[bool] = Field(default=True, description="是否使用流式返回")
 
     class Config:
         json_schema_extra = {
@@ -42,15 +39,13 @@ class ChatRequest(BaseModel):
                 "question": "这是一个问题",
                 "model_name": "deepseek-v3",
                 "file_ids": [],
+                "session_id": None,
                 "streaming": True
             }
         }
 
 class FileUploadRequest(BaseModel):
     files: List[str]
-
-class ChatHistoryResponse(PaginationResponse):
-    data: List[Dict[str, Any]]
 
 class DeleteFilesRequest(BaseModel):
     file_ids: List[str] = Field(..., description="要删除的文件ID列表")
@@ -276,12 +271,165 @@ async def chat(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    pass
+    try:
+        kb_ids = []
+        # 查询系统知识库
+        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
+                                                   RagKnowledgeBase.is_deleted == False).first()
+        if kb:
+            kb_ids.append(kb.kb_id)
+        # 查询用户知识库
+        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
+                                                   RagKnowledgeBase.user_id == current_user.user_id, 
+                                                   RagKnowledgeBase.is_deleted == False).first()
+        if kb:
+            kb_ids.append(kb.kb_id)
+        if not kb_ids:
+            logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到任何相关知识库")
+            return APIResponse.error(message="未找到相关知识库")
+
+        # 根据model_name获取模型
+        model = next((m for m in settings.LLM_MODELS if m["readable_model_name"] == request.model_name), None)
+        if not model:
+            logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到模型: {request.model_name}")
+            return APIResponse.error(message="请输入正确的模型名称")
+        
+        # seesion
+        # 处理会话ID
+        session_id = request.session_id
+        if not session_id:
+            session_id = f"chat-{shortuuid.uuid()}"
+            # 创建新会话
+            chat_session = ChatSession(
+                session_id=session_id,
+                session_type=ChatSessionType.KNOWLEDGE_BASE,
+                user_id=current_user.user_id,
+            )
+
+            db.add(chat_session)
+            db.commit()
+        else:
+            # 验证会话是否存在且属于当前用户
+            chat_session = db.query(ChatSession).filter(
+                ChatSession.session_id == session_id,
+                ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
+                ChatSession.user_id == current_user.user_id,
+                ChatSession.is_deleted == False
+            ).first()
+            if not chat_session:
+                return APIResponse.error(message="会话不存在或无权访问")
+
+        # 获取历史消息
+        history_messages = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.is_deleted == False
+        ).order_by(ChatMessage.id.desc()).limit(4).all()
+        # 拼装history
+        history_messages.reverse()
+        history = []
+        for i in range(len(history_messages) // 2):
+            question = history_messages[i * 2]
+            answer = history_messages[i * 2 + 1]
+            if question.question_id == answer.message_id:
+                history.append([question.content, answer.content])
+        
+        # 保存问题
+        user_question = ChatMessage(
+            message_id=f"msg-{shortuuid.uuid()}",
+            session_id=session_id,
+            role="user",
+            content=request.question
+        )
+        db.add(user_question)
+        db.commit()
+        
+        # 根据请求参数决定是否使用流式返回
+        streaming = request.streaming
+
+        response = rag_api.chat(
+            kb_ids=kb_ids,
+            question=request.question,
+            history=history,
+            streaming=streaming,
+            networking=settings.RAG_CHAT_NETWORKING,
+            product_source=settings.RAG_CHAT_PRODUCT_SOURCE,
+            rerank=settings.RAG_CHAT_RERANK,
+            only_need_search_results=settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
+            hybrid_search=settings.RAG_CHAT_HYBRID_SEARCH,
+            max_token=settings.RAG_CHAT_MAX_TOKENS,
+            api_base=model["base_url"],
+            api_key=model["api_key"],
+            model=model["model"],
+            api_context_length=settings.RAG_CHAT_API_CONTEXT_LENGTH,
+            chunk_size=settings.RAG_CHAT_CHUNK_SIZE,
+            top_p=settings.RAG_CHAT_TOP_P,
+            top_k=settings.RAG_CHAT_TOP_K,
+            temperature=settings.RAG_CHAT_TEMPERATURE,
+        )
+
+        if streaming:
+            async def generate():
+                try:
+                    assistant_content = ''
+                    for chunk in response:
+                        if chunk:
+                            # 确保返回正确的SSE格式
+                            assistant_content += chunk.get("response", "")
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    # 流式响应结束后保存回答记录
+                    assistant_message = ChatMessage(
+                        message_id=f"msg-{shortuuid.uuid()}",
+                        session_id=session_id,
+                        question_id=user_question.message_id,
+                        role="assistant",
+                        content=assistant_content
+                    )
+                    db.add(assistant_message)
+                    db.commit()
+                except Exception as e:
+                    logger.exception("流式响应生成异常")
+                    error_msg = {"error": str(e)}
+                    yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                generate(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Transfer-Encoding": "chunked",
+                    "X-Session-ID": session_id
+                }
+            )
+        else:
+            if isinstance(response, dict) and response.get("code") == 200:
+                answer = response.get("history",["", ""])[1]
+                assistant_message = ChatMessage(
+                    message_id=f"msg-{shortuuid.uuid()}",
+                    session_id=session_id,
+                    question_id=user_question.message_id,
+                    role="assistant",
+                    content=answer
+                )
+                db.add(assistant_message)
+                db.commit() 
+                return APIResponse.success(
+                    message="对话成功",
+                    data=answer
+                )
+            else:
+                logger.error(f"RAG对话失败: user_id={current_user.user_id}, response={response}")
+                return APIResponse.error(message="对话失败")
+        
+    except Exception as e:
+        logger.exception(f"知识库对话发生异常: {str(e)}")
+        return APIResponse.error(message=f"对话失败: {str(e)}")
 
 @router.get(
     "/chats", 
     summary="获取知识库历史会话列表",
-    response_model=ChatHistoryResponse
 )
 async def get_chat_history(
     page: int = 1,
@@ -289,12 +437,110 @@ async def get_chat_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    pass
+    try:
+        # 构建基础查询
+        query = db.query(ChatSession).filter(
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
+            ChatSession.is_deleted == False
+        )
+        
+        # 获取总记录数
+        total = query.count()
+        pages = (total + page_size - 1) // page_size
+        
+        # 分页查询会话
+        sessions = query.order_by(desc(ChatSession.id))\
+            .offset((page - 1) * page_size)\
+            .limit(page_size)\
+            .all()
+        
+        # 获取每个会话的最后一条消息
+        session_data = []
+        for session in sessions:
+            last_message = db.query(ChatMessage)\
+                .filter(
+                    ChatMessage.session_id == session.session_id,
+                    ChatMessage.is_deleted == False
+                )\
+                .order_by(desc(ChatMessage.id))\
+                .first()
+            
+            session_data.append({
+                "session_id": session.session_id,
+                "session_type": session.session_type,
+                "last_message": last_message.content if last_message else None,
+                "last_message_time": last_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if last_message else None,
+                "created_at": session.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": session.updated_at.strftime("%Y-%m-%d %H:%M:%S") if session.updated_at else None
+            })
+        
+        return APIResponse.success(
+            message="获取知识库会话列表成功",
+            data=PaginationData(
+                list=session_data,
+                total=total,
+                page=page,
+                page_size=page_size,
+                total_pages=pages
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"获取知识库会话列表失败: {str(e)}")
+        return APIResponse.error(message=f"获取知识库会话列表失败: {str(e)}")
 
-@router.get("/chats/{chat_id}", summary="获取知识库历史会话详情")
+@router.get("/chats/{session_id}", summary="获取知识库历史会话详情")
 async def get_chat_detail(
-    chat_id: str,
+    session_id: str = Path(..., description="会话ID"),
+    page: int = 1,
+    page_size: int = 10,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    pass
+    try:
+        # 验证会话是否存在且属于当前用户
+        session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
+            ChatSession.is_deleted == False
+        ).first()
+        if not session:
+            return APIResponse.error(message="会话不存在或无权访问")
+        
+        # 查询消息
+        query = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.is_deleted == False
+        )
+        
+        total = query.count()
+        pages = (total + page_size - 1) // page_size
+        
+        messages = query.order_by(ChatMessage.id)\
+            .offset((page - 1) * page_size)\
+            .limit(page_size)\
+            .all()
+            
+        return APIResponse.success(
+            data={
+                "total": total,
+                "items": [
+                    {
+                        "message_id": msg.message_id,
+                        "role": msg.role,
+                        "content": msg.content,
+                        "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    for msg in messages
+                ],
+                "page": page,
+                "page_size": page_size,
+                "pages": pages
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"获取知识库会话详情失败: {str(e)}")
+        return APIResponse.error(message=f"获取知识库会话详情失败: {str(e)}")

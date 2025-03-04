@@ -17,7 +17,7 @@ from sqlalchemy import desc
 from app.auth import get_current_user
 from app.models.user import User
 from app.models.system_config import SystemConfig
-from app.models.chat import ChatSession, ChatMessage
+from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from urllib.parse import quote
 from jinja2 import Environment, FileSystemLoader, Template
 import logging
@@ -128,6 +128,7 @@ async def completions(
             chat_session = ChatSession(
                 session_id=session_id,
                 user_id=current_user.user_id,
+                session_type=ChatSessionType.WRITING
             )
             if request.doc_id:
                 chat_session.doc_id = request.doc_id
@@ -139,6 +140,7 @@ async def completions(
             chat_session = db.query(ChatSession).filter(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.user_id,
+                ChatSession.session_type == ChatSessionType.WRITING,
                 ChatSession.is_deleted == False
             ).first()
             if not chat_session:
@@ -303,6 +305,7 @@ async def completions(
                 assistant_message = ChatMessage(
                     message_id=f"msg-{shortuuid.uuid()}",
                     session_id=session_id,
+                    question_id=user_message.message_id,
                     role="assistant",
                     content=assistant_content
                 )
@@ -562,6 +565,7 @@ async def get_sessions(
         # 构建基础查询
         query = db.query(ChatSession).filter(
             ChatSession.user_id == current_user.user_id,
+            ChatSession.session_type == ChatSessionType.WRITING,
             ChatSession.is_deleted == False
         )
         
@@ -642,6 +646,7 @@ async def get_session_messages(
         # 验证会话是否存在且属于当前用户
         session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
+            ChatSession.session_type == ChatSessionType.WRITING,
             ChatSession.user_id == current_user.user_id,
             ChatSession.is_deleted == False
         ).first()
