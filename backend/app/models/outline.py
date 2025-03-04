@@ -190,6 +190,7 @@ class WritingTemplate(Base):
     background_url = Column(String(1024), nullable=True, comment="背景图片URL")
     template_type = Column(Enum(WritingTemplateType), default=WritingTemplateType.OTHER, comment="模板类型")
     variables = Column(JSON, nullable=True, comment="模板变量列表")
+    default_outline_ids = Column(JSON, nullable=True, comment="默认大纲ID列表")
     
     # 使用UTC时间并简化时间戳创建方式
     created_at = Column(DateTime, default=datetime.now(timezone.utc), comment="创建时间")

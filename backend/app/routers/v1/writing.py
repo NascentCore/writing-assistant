@@ -46,7 +46,8 @@ class WebLinkBase(BaseModel):
     content: Optional[str] = None
 
 
-class WritingRequest(BaseModel):
+class GenerateOutlineRequest(BaseModel):
+    outline_id: Optional[str] = Field(None, description="大纲ID，如果提供则直接返回对应大纲")
     prompt: str = Field(..., description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
 
@@ -67,7 +68,7 @@ class ReferenceUpdate(BaseModel):
     web_link: Optional[WebLinkUpdate] = Field(None, description="网页链接，仅当type为WEB_LINK时有效")
 
 class UpdateOutlineContent(BaseModel):
-    key: Optional[int] = Field(None, description="段落ID，如果为空则创建新段落")
+    id: Optional[int] = Field(None, description="段落ID，如果为空则创建新段落")
     title: str = Field(..., description="标题")
     description: Optional[str] = Field(None, description="描述")
     level: int = Field(..., description="段落级别")
@@ -90,15 +91,52 @@ class GetOutlineRequest(BaseModel):
     outline_id: str = Field(..., description="大纲ID")
 
 
+def get_sibling_index(paragraph, outline_id, db):
+    """获取段落在同级中的序号（从1开始）"""
+    if not paragraph.parent_id:
+        # 获取所有顶级段落
+        siblings = db.query(SubParagraph).filter(
+            SubParagraph.outline_id == outline_id,
+            SubParagraph.parent_id == None
+        ).order_by(SubParagraph.id).all()
+    else:
+        # 获取同一父段落下的所有子段落
+        siblings = db.query(SubParagraph).filter(
+            SubParagraph.parent_id == paragraph.parent_id
+        ).order_by(SubParagraph.id).all()
+    
+    # 找到当前段落的索引
+    for i, sibling in enumerate(siblings, 1):
+        if sibling.id == paragraph.id:
+            return i
+    return 1
+
+def build_paragraph_key(paragraph, siblings_dict, parent_dict):
+    """递归构建段落的层级key"""
+    if not paragraph.parent_id:
+        # 顶级段落
+        siblings = siblings_dict.get(None, [])
+        return str(siblings.index(paragraph.id) + 1)
+    
+    # 获取父段落的key
+    parent_key = build_paragraph_key(parent_dict[paragraph.parent_id], siblings_dict, parent_dict)
+    
+    # 获取当前段落在同级中的序号
+    siblings = siblings_dict.get(paragraph.parent_id, [])
+    current_index = siblings.index(paragraph.id) + 1
+    
+    return f"{parent_key}-{current_index}"
+
 @router.post("/outlines/generate")
 async def generate_outline(
-    request: WritingRequest,
+    request: GenerateOutlineRequest,
     db: Session = Depends(get_db)
 ):
     """
     生成大纲
 
     Args:
+        outline_id: 大纲ID，如果提供则直接返回对应大纲
         prompt: 写作提示
         file_ids: 文件ID列表
 
@@ -107,6 +145,90 @@ async def generate_outline(
         title: 大纲标题
         sub_paragraphs: 子段落列表
     """
+    
+    # 如果提供了outline_id，直接返回对应大纲
+    if request.outline_id:
+        outline = db.query(Outline).filter(Outline.id == request.outline_id).first()
+        if not outline:
+            return APIResponse.error(message=f"未找到ID为{request.outline_id}的大纲")
+            
+        # 构建响应数据
+        def build_paragraph_data(paragraph):
+            data = {
+                "id": paragraph.id,
+                "key": build_paragraph_key(paragraph, outline.id, db),
+                "title": paragraph.title,
+                "description": paragraph.description,
+                "level": paragraph.level,
+                "reference_status": ReferenceStatus(paragraph.reference_status).value
+            }
+            
+            # 只有1级段落才有count_style
+            if paragraph.level == 1 and paragraph.count_style:
+                data["count_style"] = paragraph.count_style.value
+            
+            # 只有1级段落才有引用
+            if paragraph.level == 1:
+                # 获取引用
+                references = db.query(Reference).filter(
+                    Reference.sub_paragraph_id == paragraph.id
+                ).all()
+                
+                if references:
+                    data["references"] = []
+                    for ref in references:
+                        ref_data = {
+                            "id": ref.id,
+                            "type": ref.type,
+                            "is_selected": ref.is_selected
+                        }
+                        
+                        # 如果是网页链接类型，获取WebLink信息
+                        if ref.type == ModelReferenceType.WEB_LINK.value:
+                            web_link = db.query(WebLink).filter(
+                                WebLink.reference_id == ref.id
+                            ).first()
+                            
+                            if web_link:
+                                ref_data["web_link"] = {
+                                    "id": web_link.id,
+                                    "url": web_link.url,
+                                    "title": web_link.title,
+                                    "summary": web_link.summary,
+                                    "icon_url": web_link.icon_url,
+                                    "content_count": web_link.content_count,
+                                    "content": web_link.content
+                                }
+                        
+                        data["references"].append(ref_data)
+                else:
+                    data["references"] = []
+            
+            # 获取子段落
+            children = db.query(SubParagraph).filter(
+                SubParagraph.parent_id == paragraph.id
+            ).all()
+            
+            if children:
+                data["children"] = [build_paragraph_data(child) for child in children]
+            else:
+                data["children"] = []
+            
+            return data
+        
+        response_data = {
+            "id": outline.id,
+            "title": outline.title,
+            "markdown_content": outline.markdown_content,
+            "sub_paragraphs": [
+                build_paragraph_data(para) for para in db.query(SubParagraph).filter(
+                    SubParagraph.outline_id == outline.id,
+                    SubParagraph.parent_id == None
+                ).all()
+            ]
+        }
+        
+        return APIResponse.success(message="获取大纲成功", data=response_data)
     
     # 获取文件内容
     file_contents = []
@@ -182,7 +304,7 @@ async def update_outline(
             result_ids = []
             
             for para_data in paragraphs:
-                paragraph_id = para_data.key
+                paragraph_id = para_data.id
                 
                 # 如果有ID且存在于现有段落中，则更新
                 if paragraph_id is not None and paragraph_id in existing_dict:
@@ -340,10 +462,48 @@ async def get_outline(
     if not outline:
         return APIResponse.error(message=f"未找到ID为{outline_id}的大纲")
     
+    # 一次性获取所有段落
+    all_paragraphs = db.query(SubParagraph).filter(
+        SubParagraph.outline_id == outline_id
+    ).all()
+    
+    # 构建段落字典和父子关系字典
+    paragraphs_dict = {p.id: p for p in all_paragraphs}
+    siblings_dict = {}  # parent_id -> [ordered_child_ids]
+    for p in all_paragraphs:
+        if p.parent_id not in siblings_dict:
+            siblings_dict[p.parent_id] = []
+        siblings_dict[p.parent_id].append(p.id)
+    
+    # 确保每个列表都是按ID排序的
+    for parent_id in siblings_dict:
+        siblings_dict[parent_id].sort()
+    
+    # 一次性获取所有引用
+    all_references = db.query(Reference).filter(
+        Reference.sub_paragraph_id.in_([p.id for p in all_paragraphs])
+    ).all()
+    references_dict = {}  # paragraph_id -> [references]
+    for ref in all_references:
+        if ref.sub_paragraph_id not in references_dict:
+            references_dict[ref.sub_paragraph_id] = []
+        references_dict[ref.sub_paragraph_id].append(ref)
+    
+    # 一次性获取所有WebLink
+    weblink_ids = [
+        ref.id for ref in all_references 
+        if ref.type == ModelReferenceType.WEB_LINK.value
+    ]
+    all_weblinks = db.query(WebLink).filter(
+        WebLink.reference_id.in_(weblink_ids)
+    ).all() if weblink_ids else []
+    weblinks_dict = {wl.reference_id: wl for wl in all_weblinks}
+    
     # 递归构建段落数据
     def build_paragraph_data(paragraph):
         data = {
-            "key": paragraph.id,
+            "id": paragraph.id,
+            "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
             "title": paragraph.title,
             "description": paragraph.description,
             "level": paragraph.level,
@@ -356,48 +516,38 @@ async def get_outline(
         
         # 只有1级段落才有引用
         if paragraph.level == 1:
-            # 获取引用
-            references = db.query(Reference).filter(
-                Reference.sub_paragraph_id == paragraph.id
-            ).all()
-            
-            if references:
-                data["references"] = []
-                for ref in references:
-                    ref_data = {
-                        "id": ref.id,
-                        "type": ref.type,
-                        "is_selected": ref.is_selected
-                    }
-                    
-                    # 如果是网页链接类型，获取WebLink信息
-                    if ref.type == ModelReferenceType.WEB_LINK.value:
-                        web_link = db.query(WebLink).filter(
-                            WebLink.reference_id == ref.id
-                        ).first()
-                        
-                        if web_link:
-                            ref_data["web_link"] = {
-                                "id": web_link.id,
-                                "url": web_link.url,
-                                "title": web_link.title,
-                                "summary": web_link.summary,
-                                "icon_url": web_link.icon_url,
-                                "content_count": web_link.content_count,
-                                "content": web_link.content
-                            }
-                    
-                    data["references"].append(ref_data)
-            else:
-                data["references"] = []
+            data["references"] = []
+            # 从缓存中获取引用
+            for ref in references_dict.get(paragraph.id, []):
+                ref_data = {
+                    "id": ref.id,
+                    "type": ref.type,
+                    "is_selected": ref.is_selected
+                }
+                
+                # 如果是网页链接类型，从缓存中获取WebLink信息
+                if ref.type == ModelReferenceType.WEB_LINK.value:
+                    web_link = weblinks_dict.get(ref.id)
+                    if web_link:
+                        ref_data["web_link"] = {
+                            "id": web_link.id,
+                            "url": web_link.url,
+                            "title": web_link.title,
+                            "summary": web_link.summary,
+                            "icon_url": web_link.icon_url,
+                            "content_count": web_link.content_count,
+                            "content": web_link.content
+                        }
+                
+                data["references"].append(ref_data)
         
-        # 获取子段落
-        children = db.query(SubParagraph).filter(
-            SubParagraph.parent_id == paragraph.id
-        ).all()
-        
-        if children:
-            data["children"] = [build_paragraph_data(child) for child in children]
+        # 从缓存中获取子段落
+        children_ids = siblings_dict.get(paragraph.id, [])
+        if children_ids:
+            data["children"] = [
+                build_paragraph_data(paragraphs_dict[child_id]) 
+                for child_id in children_ids
+            ]
         else:
             data["children"] = []
         
@@ -409,10 +559,8 @@ async def get_outline(
         "title": outline.title,
         "markdown_content": outline.markdown_content,
         "sub_paragraphs": [
-            build_paragraph_data(para) for para in db.query(SubParagraph).filter(
-                SubParagraph.outline_id == outline.id,
-                SubParagraph.parent_id == None
-            ).all()
+            build_paragraph_data(paragraphs_dict[para_id]) 
+            for para_id in siblings_dict.get(None, [])  # 获取顶级段落
         ]
     }
     
@@ -551,7 +699,8 @@ async def get_templates(
                     "template_type": template.template_type,
                     "variables": template.variables,
                     "created_at": template.created_at.isoformat(),
-                    "updated_at": template.updated_at.isoformat()
+                    "updated_at": template.updated_at.isoformat(),
+                    "outline_ids": template.default_outline_ids
                 }
                 for template in templates
             ],
@@ -604,6 +753,7 @@ async def create_template(
         
         return APIResponse.success(message="创建模板成功", data={"id": new_template.id})
     except Exception as e:
+
         db.rollback()
         print(f"Error creating template: {str(e)}")
         return APIResponse.error(message=f"创建模板失败: {str(e)}")

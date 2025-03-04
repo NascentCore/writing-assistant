@@ -7,6 +7,7 @@ from app.config import settings
 import json
 import logging
 import re
+import markdown
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ class OutlineGenerator:
             db_session: 数据库会话
             
         Returns:
-            Dict: 生成的全文内容
+            Dict: 生成的全文内容，包含markdown和html格式
         """
         from app.models.outline import Outline, SubParagraph, CountStyle
         
@@ -363,6 +364,9 @@ class OutlineGenerator:
             # 设置markdown内容
             full_content["markdown"] = markdown_content
             
+            # 转换为HTML
+            full_content["html"] = markdown.markdown(markdown_content, extensions=['extra'])
+            
             # 添加大纲结构
             full_content["outline_structure"] = outline_structure
             
@@ -381,7 +385,7 @@ class OutlineGenerator:
             file_contents: 参考文件内容列表
             
         Returns:
-            Dict: 生成的文章内容，包含标题、内容和markdown格式
+            Dict: 生成的文章内容，包含标题、内容、markdown格式和html格式
         """
         try:
             # 构建提示模板
@@ -444,14 +448,17 @@ class OutlineGenerator:
                 })
 
             # 构建返回数据
-            return {
+            result = {
                 "title": title,
                 "content": sections,
-                "markdown": markdown_content
+                "markdown": markdown_content,
+                "html": markdown.markdown(markdown_content, extensions=['extra'])
             }
+            return result
 
         except Exception as e:
             logger.error(f"直接生成文章内容时出错: {str(e)}")
+            error_content = "# 生成失败，请重试\n\n## 生成失败\n\n生成文章内容时出错，请重试"
             # 返回一个基本结构，避免完全失败
             return {
                 "title": "生成失败，请重试",
@@ -462,5 +469,6 @@ class OutlineGenerator:
                     "count_style": "medium",
                     "level": 1
                 }],
-                "markdown": "# 生成失败，请重试\n\n## 生成失败\n\n生成文章内容时出错，请重试"
+                "markdown": error_content,
+                "html": markdown.markdown(error_content, extensions=['extra'])
             } 
