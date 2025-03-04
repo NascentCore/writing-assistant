@@ -253,8 +253,9 @@ async def completions(
             max_tokens = 200
 
         # 保存用户消息到数据库
+        question_message_id = f"msg-{shortuuid.uuid()}"
         user_message = ChatMessage(
-            message_id=f"msg-{shortuuid.uuid()}",
+            message_id=question_message_id,
             session_id=session_id,
             role="user",
             content=original_message,
@@ -305,7 +306,7 @@ async def completions(
                 assistant_message = ChatMessage(
                     message_id=f"msg-{shortuuid.uuid()}",
                     session_id=session_id,
-                    question_id=user_message.message_id,
+                    question_id=question_message_id,
                     role="assistant",
                     content=assistant_content
                 )
@@ -322,7 +323,7 @@ async def completions(
             assistant_message = ChatMessage(
                 message_id=f"msg-{shortuuid.uuid()}",
                 session_id=session_id,
-                question_id=user_message.message_id,
+                question_id=question_message_id,
                 role="assistant",
                 content=completion.choices[0].message.content,
                 full_content=completion.choices[0].message.content,

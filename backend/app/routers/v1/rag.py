@@ -361,8 +361,9 @@ async def chat(
                 history.append([question.content, answer.content])
         
         # 保存问题
+        question_message_id = f"msg-{shortuuid.uuid()}"
         user_question = ChatMessage(
-            message_id=f"msg-{shortuuid.uuid()}",
+            message_id=question_message_id,
             session_id=session_id,
             role="user",
             content=request.question
@@ -408,7 +409,7 @@ async def chat(
                     assistant_message = ChatMessage(
                         message_id=f"msg-{shortuuid.uuid()}",
                         session_id=session_id,
-                        question_id=user_question.message_id,
+                        question_id=question_message_id,
                         role="assistant",
                         content=assistant_content
                     )
@@ -432,11 +433,11 @@ async def chat(
             )
         else:
             if isinstance(response, dict) and response.get("code") == 200:
-                answer = response.get("history",["", ""])[1]
+                answer = response.get("history",[["", ""]])[0][1]
                 assistant_message = ChatMessage(
                     message_id=f"msg-{shortuuid.uuid()}",
                     session_id=session_id,
-                    question_id=user_question.message_id,
+                    question_id=question_message_id,
                     role="assistant",
                     content=answer
                 )
