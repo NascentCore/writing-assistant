@@ -49,8 +49,6 @@ class WebLinkBase(BaseModel):
 class WritingRequest(BaseModel):
     prompt: str = Field(..., description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
-    tpl_id: Optional[str] = Field(None, description="模板ID")
-    outline_id: Optional[str] = Field(None, description="大纲ID")
 
 
 class WebLinkUpdate(BaseModel):
@@ -98,13 +96,11 @@ async def generate_outline(
     db: Session = Depends(get_db)
 ):
     """
-    获取生成大纲
+    生成大纲
 
     Args:
         prompt: 写作提示
         file_ids: 文件ID列表
-        tpl_id: 模板ID
-        outline_id: 大纲ID
 
     Returns:
         id: 大纲ID
@@ -130,8 +126,7 @@ async def generate_outline(
     # 保存到数据库
     saved_outline = outline_generator.save_outline_to_db(
         outline_data=outline_data,
-        db_session=db,
-        outline_id=request.outline_id if request.outline_id != "0" else None
+        db_session=db
     )
     
     return APIResponse.success(message="大纲生成成功", data=saved_outline)
@@ -425,19 +420,26 @@ async def get_outline(
 
 
 class GenerateFullContentRequest(BaseModel):
-    outline_id: str = Field(..., description="大纲ID")
+    outline_id: Optional[str] = Field(None, description="大纲ID，如果为空则直接生成全文")
+    prompt: Optional[str] = Field(None, description="直接生成模式下的写作提示")
+    file_ids: Optional[List[str]] = Field(None, description="直接生成模式下的参考文件ID列表")
 
 
-@router.post("/outlines/{outline_id}/content")
+@router.post("/content/generate")
 async def generate_content(
-    outline_id: str,
+    request: GenerateFullContentRequest,
     db: Session = Depends(get_db)
 ):
     """
-    根据大纲生成全文
+    生成全文，支持两种模式：
+    1. 基于大纲生成：提供 outline_id
+    2. 直接生成：提供 prompt 和可选的 file_ids
     
     Args:
-        outline_id: 大纲ID
+        request: 请求体，包含：
+            - outline_id: 大纲ID（可选）
+            - prompt: 写作提示（直接生成模式下必需）
+            - file_ids: 参考文件ID列表（可选）
         
     Returns:
         title: 文章标题
@@ -448,8 +450,27 @@ async def generate_content(
     outline_generator = OutlineGenerator()
     
     try:
-        # 调用生成全文的方法
-        full_content = outline_generator.generate_full_content(outline_id, db)
+        if request.outline_id:
+            # 基于大纲生成模式
+            full_content = outline_generator.generate_full_content(request.outline_id, db)
+        else:
+            # 直接生成模式
+            if not request.prompt:
+                return APIResponse.error(message="直接生成模式下必须提供写作提示")
+            
+            # 获取文件内容
+            file_contents = []
+            if request.file_ids:
+                for file_id in request.file_ids:
+                    file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
+                    if file and file.content:
+                        file_contents.append(file.content)
+            
+            # 调用直接生成方法
+            full_content = outline_generator.generate_content_directly(
+                prompt=request.prompt,
+                file_contents=file_contents
+            )
         
         return APIResponse.success(message="全文生成成功", data=full_content)
     except ValueError as e:

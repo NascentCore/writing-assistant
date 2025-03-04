@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from app.config import settings
 import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -370,3 +371,96 @@ class OutlineGenerator:
         except Exception as e:
             logger.error(f"生成全文内容时出错: {str(e)}")
             raise 
+
+    def generate_content_directly(self, prompt: str, file_contents: List[str] = None) -> Dict[str, Any]:
+        """
+        直接生成文章内容，不需要先生成大纲
+        
+        Args:
+            prompt: 写作提示
+            file_contents: 参考文件内容列表
+            
+        Returns:
+            Dict: 生成的文章内容，包含标题、内容和markdown格式
+        """
+        try:
+            # 构建提示模板
+            template = """
+            你是一个专业的写作助手，请根据用户的写作需求直接生成一篇完整的文章。
+
+            写作需求: {prompt}
+
+            {file_context}
+
+            请生成一篇结构完整、内容丰富的文章，要求：
+            1. 生成合适的文章标题
+            2. 自动规划合理的章节结构
+            3. 每个章节生成800-1200字的内容
+            4. 内容要有逻辑性、连贯性，并包含充分的论据和例子
+            5. 使用markdown格式，一级标题使用 # ，二级标题使用 ##
+
+            直接返回文章内容，使用markdown格式。
+            """
+
+            # 处理文件内容
+            file_context = ""
+            if file_contents and len(file_contents) > 0:
+                file_context = "参考以下文件内容:\n" + "\n".join(file_contents)
+            else:
+                file_context = "没有提供参考文件内容。"
+
+            # 创建提示
+            prompt_template = ChatPromptTemplate.from_template(template)
+
+            # 创建链
+            chain = prompt_template | self.llm
+
+            # 执行链
+            result = chain.invoke({
+                "prompt": prompt,
+                "file_context": file_context
+            })
+
+            # 提取内容
+            markdown_content = result.content if hasattr(result, 'content') else str(result)
+
+            # 解析markdown内容，提取标题和章节
+            # 提取文章标题（第一个一级标题）
+            title_match = re.search(r'^#\s+(.+)$', markdown_content, re.MULTILINE)
+            title = title_match.group(1) if title_match else "生成的文章"
+
+            # 提取所有章节（二级标题及其内容）
+            sections = []
+            section_pattern = r'^##\s+(.+)\n(.*?)(?=##|\Z)'
+            for match in re.finditer(section_pattern, markdown_content, re.MULTILINE | re.DOTALL):
+                section_title = match.group(1).strip()
+                section_content = match.group(2).strip()
+                sections.append({
+                    "id": len(sections) + 1,  # 简单的自增ID
+                    "title": section_title,
+                    "content": section_content,
+                    "count_style": "medium",  # 默认使用medium长度
+                    "level": 1  # 所有章节都作为一级段落
+                })
+
+            # 构建返回数据
+            return {
+                "title": title,
+                "content": sections,
+                "markdown": markdown_content
+            }
+
+        except Exception as e:
+            logger.error(f"直接生成文章内容时出错: {str(e)}")
+            # 返回一个基本结构，避免完全失败
+            return {
+                "title": "生成失败，请重试",
+                "content": [{
+                    "id": 1,
+                    "title": "生成失败",
+                    "content": "生成文章内容时出错，请重试",
+                    "count_style": "medium",
+                    "level": 1
+                }],
+                "markdown": "# 生成失败，请重试\n\n## 生成失败\n\n生成文章内容时出错，请重试"
+            } 
