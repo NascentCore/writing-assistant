@@ -798,7 +798,7 @@ async def parse_outline(
         
         # 解析文档
         parser = DocxParser()
-        doc = parser.parse(file_path)
+        doc = parser.parse_to_doc(file_path)
         
         # 获取大纲结构
         outline_data = parser.get_outline_structure(doc)
