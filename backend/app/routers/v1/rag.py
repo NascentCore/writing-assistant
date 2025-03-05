@@ -29,8 +29,8 @@ class FilesResponse(PaginationResponse):
 class ChatRequest(BaseModel):
     question: str = Field(description="问题内容")
     model_name: str = Field(description="模型名称")
+    session_id: str = Field(description="会话ID")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
-    session_id: Optional[str] = Field(default=None, description="会话ID")
     streaming: Optional[bool] = Field(default=True, description="是否使用流式返回")
 
     class Config:
@@ -321,30 +321,16 @@ async def chat(
             logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到模型: {request.model_name}")
             return APIResponse.error(message="请输入正确的模型名称")
         
-        # seesion
-        # 处理会话ID
+        # session_id 验证
         session_id = request.session_id
-        if not session_id:
-            session_id = f"chat-{shortuuid.uuid()}"
-            # 创建新会话
-            chat_session = ChatSession(
-                session_id=session_id,
-                session_type=ChatSessionType.KNOWLEDGE_BASE,
-                user_id=current_user.user_id,
-            )
-
-            db.add(chat_session)
-            db.commit()
-        else:
-            # 验证会话是否存在且属于当前用户
-            chat_session = db.query(ChatSession).filter(
-                ChatSession.session_id == session_id,
-                ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
-                ChatSession.user_id == current_user.user_id,
-                ChatSession.is_deleted == False
-            ).first()
-            if not chat_session:
-                return APIResponse.error(message="会话不存在或无权访问")
+        chat_session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.is_deleted == False
+        ).first()
+        if not chat_session:
+            return APIResponse.error(message="会话不存在或无权访问")
 
         # 获取历史消息
         history_messages = db.query(ChatMessage).filter(
