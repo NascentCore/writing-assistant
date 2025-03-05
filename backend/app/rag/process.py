@@ -315,14 +315,10 @@ def refresh_tasks_status():
     db = next(get_db())
     try:
         db.query(RagFile).filter(RagFile.status.in_([
-            RagFileStatus.LOCAL_PARSING,
-            RagFileStatus.LLM_SUMMARIZING,
             RagFileStatus.RAG_UPLOADING,
             RagFileStatus.RAG_PARSING,
         ])).update({
             "status": case(
-                (RagFile.status == RagFileStatus.LOCAL_PARSING, RagFileStatus.LOCAL_SAVED),
-                (RagFile.status == RagFileStatus.LLM_SUMMARIZING, RagFileStatus.LOCAL_PARSED),
                 (RagFile.status == RagFileStatus.RAG_UPLOADING, RagFileStatus.LOCAL_SAVED),
                 (RagFile.status == RagFileStatus.RAG_PARSING, RagFileStatus.RAG_UPLOADED),
             )
