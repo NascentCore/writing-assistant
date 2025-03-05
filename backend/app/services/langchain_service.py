@@ -9,6 +9,8 @@ import logging
 import re
 import markdown
 
+from app.utils.outline import build_paragraph_key
+
 logger = logging.getLogger(__name__)
 
 class OutlineGenerator:
@@ -192,10 +194,28 @@ class OutlineGenerator:
             # 提交事务
             db_session.commit()
             
+            # 一次性获取所有段落
+            all_paragraphs = db_session.query(SubParagraph).filter(
+                SubParagraph.outline_id == outline.id
+            ).all()
+            
+            # 构建段落字典和父子关系字典
+            paragraphs_dict = {p.id: p for p in all_paragraphs}
+            siblings_dict = {}  # parent_id -> [ordered_child_ids]
+            for p in all_paragraphs:
+                if p.parent_id not in siblings_dict:
+                    siblings_dict[p.parent_id] = []
+                siblings_dict[p.parent_id].append(p.id)
+            
+            # 确保每个列表都是按ID排序的
+            for parent_id in siblings_dict:
+                siblings_dict[parent_id].sort()
+            
             # 递归构建返回数据
             def build_paragraph_data(paragraph):
                 data = {
-                    "key": paragraph.id,
+                    "id": paragraph.id,
+                    "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
                     "title": paragraph.title,
                     "description": paragraph.description,
                     "level": paragraph.level

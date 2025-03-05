@@ -24,8 +24,9 @@ from app.models.outline import (
 )
 from app.config import Settings
 from app.parser import DocxParser
-from backend.app.auth import get_current_user
-from backend.app.models.user import User
+from app.auth import get_current_user
+from app.models.user import User
+from app.utils.outline import build_paragraph_key
 
 
 router = APIRouter()
@@ -53,7 +54,7 @@ class WebLinkBase(BaseModel):
 
 class GenerateOutlineRequest(BaseModel):
     outline_id: Optional[str] = Field(None, description="大纲ID，如果提供则直接返回对应大纲")
-    prompt: str = Field(..., description="写作提示")
+    prompt: Optional[str] = Field(None, description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
 
 
@@ -116,22 +117,6 @@ def get_sibling_index(paragraph, outline_id, db):
             return i
     return 1
 
-def build_paragraph_key(paragraph, siblings_dict, parent_dict):
-    """递归构建段落的层级key"""
-    if not paragraph.parent_id:
-        # 顶级段落
-        siblings = siblings_dict.get(None, [])
-        return str(siblings.index(paragraph.id) + 1)
-    
-    # 获取父段落的key
-    parent_key = build_paragraph_key(parent_dict[paragraph.parent_id], siblings_dict, parent_dict)
-    
-    # 获取当前段落在同级中的序号
-    siblings = siblings_dict.get(paragraph.parent_id, [])
-    current_index = siblings.index(paragraph.id) + 1
-    
-    return f"{parent_key}-{current_index}"
-
 @router.post("/outlines/generate")
 async def generate_outline(
     request: GenerateOutlineRequest,
@@ -159,7 +144,7 @@ async def generate_outline(
             return APIResponse.error(message=f"未找到ID为{request.outline_id}的大纲")
             
         # 校验权限：只能访问自己的大纲或系统预留的大纲
-        if outline.user_id is not None and outline.user_id != current_user.id:
+        if outline.user_id is not None and outline.user_id != current_user.user_id:
             return APIResponse.error(message="您没有权限访问该大纲")
             
         # 如果是系统预留大纲（user_id为空），创建一个副本
@@ -167,7 +152,7 @@ async def generate_outline(
             # 创建新大纲
             new_outline = Outline(
                 title=outline.title,
-                user_id=current_user.id,
+                user_id=current_user.user_id,
                 reference_status=outline.reference_status
             )
             db.add(new_outline)
@@ -236,11 +221,28 @@ async def generate_outline(
             # 使用新创建的大纲
             outline = new_outline
             
+        # 一次性获取所有段落
+        all_paragraphs = db.query(SubParagraph).filter(
+            SubParagraph.outline_id == outline.id
+        ).all()
+        
+        # 构建段落字典和父子关系字典
+        paragraphs_dict = {p.id: p for p in all_paragraphs}
+        siblings_dict = {}  # parent_id -> [ordered_child_ids]
+        for p in all_paragraphs:
+            if p.parent_id not in siblings_dict:
+                siblings_dict[p.parent_id] = []
+            siblings_dict[p.parent_id].append(p.id)
+        
+        # 确保每个列表都是按ID排序的
+        for parent_id in siblings_dict:
+            siblings_dict[parent_id].sort()
+            
         # 构建响应数据
         def build_paragraph_data(paragraph):
             data = {
                 "id": paragraph.id,
-                "key": build_paragraph_key(paragraph, outline.id, db),
+                "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
                 "title": paragraph.title,
                 "description": paragraph.description,
                 "level": paragraph.level,
@@ -553,7 +555,7 @@ async def get_outline(
         return APIResponse.error(message=f"未找到ID为{outline_id}的大纲")
     
     # 校验权限：只能访问自己的大纲或系统预留的大纲
-    if outline.user_id is not None and outline.user_id != current_user.id:
+    if outline.user_id is not None and outline.user_id != current_user.user_id:
         return APIResponse.error(message="您没有权限访问该大纲")
     
     # 一次性获取所有段落

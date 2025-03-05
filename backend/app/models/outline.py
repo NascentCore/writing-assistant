@@ -138,7 +138,7 @@ class SubParagraph(Base):
 
 # 引用资料表
 class Reference(Base):
-    __tablename__ = "references"
+    __tablename__ = "outline_references"
     
     id = Column(String(255), primary_key=True, comment="引用ID")
     sub_paragraph_id = Column(Integer, ForeignKey("sub_paragraphs.id"), nullable=False)
@@ -166,7 +166,7 @@ class WebLink(Base):
     __tablename__ = "web_links"
     
     id = Column(Integer, primary_key=True)
-    reference_id = Column(String(255), ForeignKey("references.id"), nullable=False)
+    reference_id = Column(String(255), ForeignKey("outline_references.id"), nullable=False)
     url = Column(String(1024), nullable=False, comment="网页URL")
     title = Column(String(255), nullable=True, comment="网页标题")
     summary = Column(Text, nullable=True, comment="网页摘要") 
