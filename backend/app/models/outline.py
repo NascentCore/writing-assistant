@@ -187,6 +187,7 @@ class WritingTemplate(Base):
     show_name = Column(String(255), nullable=False, comment="模板显示名称")
     value = Column(Text, nullable=False, comment="模板内容")
     is_default = Column(Boolean, default=False, comment="是否默认模板")
+    has_steps = Column(Boolean, default=False, comment="是否分步骤")
     background_url = Column(String(1024), nullable=True, comment="背景图片URL")
     template_type = Column(Enum(WritingTemplateType), default=WritingTemplateType.OTHER, comment="模板类型")
     variables = Column(JSON, nullable=True, comment="模板变量列表")
