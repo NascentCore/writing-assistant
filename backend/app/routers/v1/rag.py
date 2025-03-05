@@ -467,11 +467,8 @@ async def chat(
         logger.exception(f"知识库对话发生异常: {str(e)}")
         return APIResponse.error(message=f"对话失败: {str(e)}")
 
-@router.get(
-    "/chats", 
-    summary="获取知识库会话列表",
-)
-async def get_chat_history(
+@router.get("/chat/sessions", summary="获取知识库会话列表")
+async def get_chat_sessions(
     page: int = 1,
     page_size: int = 10,
     current_user: User = Depends(get_current_user),
@@ -530,8 +527,8 @@ async def get_chat_history(
         logger.error(f"获取知识库会话列表失败: {str(e)}")
         return APIResponse.error(message=f"获取知识库会话列表失败: {str(e)}")
 
-@router.get("/chats/{session_id}", summary="获取知识库会话详情")
-async def get_chat_detail(
+@router.get("/chat/sessions/{session_id}", summary="获取知识库会话详情")
+async def get_chat_session_detail(
     session_id: str = Path(..., description="会话ID"),
     page: int = 1,
     page_size: int = 10,
