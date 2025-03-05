@@ -24,6 +24,9 @@ from app.models.outline import (
 )
 from app.config import Settings
 from app.parser import DocxParser
+from app.auth import get_current_user
+from app.models.user import User
+from app.utils.outline import build_paragraph_key
 
 
 router = APIRouter()
@@ -51,7 +54,7 @@ class WebLinkBase(BaseModel):
 
 class GenerateOutlineRequest(BaseModel):
     outline_id: Optional[str] = Field(None, description="大纲ID，如果提供则直接返回对应大纲")
-    prompt: str = Field(..., description="写作提示")
+    prompt: Optional[str] = Field(None, description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
 
 
@@ -114,26 +117,11 @@ def get_sibling_index(paragraph, outline_id, db):
             return i
     return 1
 
-def build_paragraph_key(paragraph, siblings_dict, parent_dict):
-    """递归构建段落的层级key"""
-    if not paragraph.parent_id:
-        # 顶级段落
-        siblings = siblings_dict.get(None, [])
-        return str(siblings.index(paragraph.id) + 1)
-    
-    # 获取父段落的key
-    parent_key = build_paragraph_key(parent_dict[paragraph.parent_id], siblings_dict, parent_dict)
-    
-    # 获取当前段落在同级中的序号
-    siblings = siblings_dict.get(paragraph.parent_id, [])
-    current_index = siblings.index(paragraph.id) + 1
-    
-    return f"{parent_key}-{current_index}"
-
 @router.post("/outlines/generate")
 async def generate_outline(
     request: GenerateOutlineRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     生成大纲
@@ -155,11 +143,106 @@ async def generate_outline(
         if not outline:
             return APIResponse.error(message=f"未找到ID为{request.outline_id}的大纲")
             
+        # 校验权限：只能访问自己的大纲或系统预留的大纲
+        if outline.user_id is not None and outline.user_id != current_user.user_id:
+            return APIResponse.error(message="您没有权限访问该大纲")
+            
+        # 如果是系统预留大纲（user_id为空），创建一个副本
+        if outline.user_id is None:
+            # 创建新大纲
+            new_outline = Outline(
+                title=outline.title,
+                user_id=current_user.user_id,
+                reference_status=outline.reference_status
+            )
+            db.add(new_outline)
+            db.flush()  # 获取新ID
+            
+            # 递归复制子段落
+            def copy_paragraphs(paragraphs, parent_id=None):
+                for para in paragraphs:
+                    # 创建段落副本
+                    new_para = SubParagraph(
+                        outline_id=new_outline.id,
+                        parent_id=parent_id,
+                        level=para.level,
+                        title=para.title,
+                        description=para.description,
+                        count_style=para.count_style,
+                        reference_status=para.reference_status
+                    )
+                    db.add(new_para)
+                    db.flush()  # 获取新ID
+                    
+                    # 复制引用
+                    if para.level == 1:
+                        for ref in para.references:
+                            # 创建引用副本
+                            new_ref = Reference(
+                                id=shortuuid.uuid(),
+                                sub_paragraph_id=new_para.id,
+                                type=ref.type,
+                                is_selected=ref.is_selected
+                            )
+                            db.add(new_ref)
+                            db.flush()
+                            
+                            # 如果是网页链接，复制WebLink
+                            if ref.type == ModelReferenceType.WEB_LINK.value and ref.web_link:
+                                web_link = ref.web_link
+                                new_web_link = WebLink(
+                                    reference_id=new_ref.id,
+                                    url=web_link.url,
+                                    title=web_link.title,
+                                    summary=web_link.summary,
+                                    icon_url=web_link.icon_url,
+                                    content_count=web_link.content_count,
+                                    content=web_link.content
+                                )
+                                db.add(new_web_link)
+                    
+                    # 递归处理子段落
+                    children = db.query(SubParagraph).filter(
+                        SubParagraph.parent_id == para.id
+                    ).all()
+                    if children:
+                        copy_paragraphs(children, new_para.id)
+            
+            # 开始复制顶级段落
+            top_level_paragraphs = db.query(SubParagraph).filter(
+                SubParagraph.outline_id == outline.id,
+                SubParagraph.parent_id == None
+            ).all()
+            copy_paragraphs(top_level_paragraphs)
+            
+            # 提交事务
+            db.commit()
+            
+            # 使用新创建的大纲
+            outline = new_outline
+            
+        # 一次性获取所有段落
+        all_paragraphs = db.query(SubParagraph).filter(
+            SubParagraph.outline_id == outline.id
+        ).all()
+        
+        # 构建段落字典和父子关系字典
+        paragraphs_dict = {p.id: p for p in all_paragraphs}
+        siblings_dict = {}  # parent_id -> [ordered_child_ids]
+        for p in all_paragraphs:
+            if p.parent_id not in siblings_dict:
+                siblings_dict[p.parent_id] = []
+            siblings_dict[p.parent_id].append(p.id)
+        
+        # 确保每个列表都是按ID排序的
+        for parent_id in siblings_dict:
+            siblings_dict[parent_id].sort()
+            
         # 构建响应数据
         def build_paragraph_data(paragraph):
             data = {
                 "id": paragraph.id,
-                "key": build_paragraph_key(paragraph, outline.id, db),
+                "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
                 "title": paragraph.title,
                 "description": paragraph.description,
                 "level": paragraph.level,
@@ -251,7 +334,8 @@ async def generate_outline(
     # 保存到数据库
     saved_outline = outline_generator.save_outline_to_db(
         outline_data=outline_data,
-        db_session=db
+        db_session=db,
+        user_id=current_user.user_id
     )
     
     return APIResponse.success(message="大纲生成成功", data=saved_outline)
@@ -261,7 +345,8 @@ async def generate_outline(
 async def update_outline(
     outline_id: str,
     request: UpdateOutlineMetaRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     差异化更新大纲结构
@@ -280,7 +365,10 @@ async def update_outline(
         return APIResponse.error(message="路径参数与请求体中的大纲ID不一致")
     
     # 查找大纲
-    outline = db.query(Outline).filter(Outline.id == outline_id).first()
+    outline = db.query(Outline).filter(
+        Outline.id == outline_id,
+        Outline.user_id == current_user.user_id
+    ).first()
     if not outline:
         return APIResponse.error(message=f"未找到ID为{outline_id}的大纲")
     
@@ -446,7 +534,8 @@ async def update_outline(
 @router.get("/outlines/{outline_id}")
 async def get_outline(
     outline_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     获取大纲详情
@@ -464,6 +553,10 @@ async def get_outline(
     outline = db.query(Outline).filter(Outline.id == outline_id).first()
     if not outline:
         return APIResponse.error(message=f"未找到ID为{outline_id}的大纲")
+    
+    # 校验权限：只能访问自己的大纲或系统预留的大纲
+    if outline.user_id is not None and outline.user_id != current_user.user_id:
+        return APIResponse.error(message="您没有权限访问该大纲")
     
     # 一次性获取所有段落
     all_paragraphs = db.query(SubParagraph).filter(
