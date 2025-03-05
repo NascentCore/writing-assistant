@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models.rag import RagKnowledgeBase, RagFile, RagKnowledgeBaseType, RagFileStatus
 from app.models.user import User
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
-from app.parser import get_file_format
+from app.parser import get_parser, get_file_format
 from app.rag.rag_api import rag_api
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from fastapi.responses import StreamingResponse
@@ -29,8 +29,8 @@ class FilesResponse(PaginationResponse):
 class ChatRequest(BaseModel):
     question: str = Field(description="问题内容")
     model_name: str = Field(description="模型名称")
+    session_id: str = Field(description="会话ID")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
-    session_id: Optional[str] = Field(default=None, description="会话ID")
     streaming: Optional[bool] = Field(default=True, description="是否使用流式返回")
 
     class Config:
@@ -321,30 +321,16 @@ async def chat(
             logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到模型: {request.model_name}")
             return APIResponse.error(message="请输入正确的模型名称")
         
-        # seesion
-        # 处理会话ID
+        # session_id 验证
         session_id = request.session_id
-        if not session_id:
-            session_id = f"chat-{shortuuid.uuid()}"
-            # 创建新会话
-            chat_session = ChatSession(
-                session_id=session_id,
-                session_type=ChatSessionType.KNOWLEDGE_BASE,
-                user_id=current_user.user_id,
-            )
-
-            db.add(chat_session)
-            db.commit()
-        else:
-            # 验证会话是否存在且属于当前用户
-            chat_session = db.query(ChatSession).filter(
-                ChatSession.session_id == session_id,
-                ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
-                ChatSession.user_id == current_user.user_id,
-                ChatSession.is_deleted == False
-            ).first()
-            if not chat_session:
-                return APIResponse.error(message="会话不存在或无权访问")
+        chat_session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.is_deleted == False
+        ).first()
+        if not chat_session:
+            return APIResponse.error(message="会话不存在或无权访问")
 
         # 获取历史消息
         history_messages = db.query(ChatMessage).filter(
@@ -467,11 +453,8 @@ async def chat(
         logger.exception(f"知识库对话发生异常: {str(e)}")
         return APIResponse.error(message=f"对话失败: {str(e)}")
 
-@router.get(
-    "/chats", 
-    summary="获取知识库会话列表",
-)
-async def get_chat_history(
+@router.get("/chat/sessions", summary="获取知识库会话列表")
+async def get_chat_sessions(
     page: int = 1,
     page_size: int = 10,
     current_user: User = Depends(get_current_user),
@@ -530,8 +513,8 @@ async def get_chat_history(
         logger.error(f"获取知识库会话列表失败: {str(e)}")
         return APIResponse.error(message=f"获取知识库会话列表失败: {str(e)}")
 
-@router.get("/chats/{session_id}", summary="获取知识库会话详情")
-async def get_chat_detail(
+@router.get("/chat/sessions/{session_id}", summary="获取知识库会话详情")
+async def get_chat_session_detail(
     session_id: str = Path(..., description="会话ID"),
     page: int = 1,
     page_size: int = 10,
@@ -626,6 +609,7 @@ async def upload_attachment(
         files = [file for file in files if file.filename not in existing_file_names]
         
         result = []
+        update_content_files = []
         for file in files:
             file_id = f"file-{shortuuid.uuid()}"
             file_location = upload_dir / f"{file_id}_{file.filename}" # 文件存储路径
@@ -641,7 +625,6 @@ async def upload_attachment(
                     "filename": file.filename,
                     "size": len(contents),
                     "content_type": file_format,
-                    "path": str(file_location)
                 })
             except Exception as e:
                 logger.error(f"上传文件 {file.filename} 时发生错误: {str(e)}")
@@ -649,6 +632,7 @@ async def upload_attachment(
             finally:
                 await file.close()
         
+            # 提交RAG解析任务
             db_file = RagFile(
                 file_id=file_id,    
                 kb_id=kb_id,
@@ -665,10 +649,48 @@ async def upload_attachment(
                 content='',
                 meta='',
             )
-        
             db.add(db_file)
             db.commit() 
+            # 同步解析内容，附件的内容马上要使用，所以进行同步解析
+            parser = get_parser(file_format)
+            if not parser:
+                logger.error(f"upload_attachment 不支持解析的文件格式: {file_format}")
+                continue
+            content = parser.parse(file_location)
+            if not content.strip():
+                logger.error(f"upload_attachment 解析文件 {file.filename} 时发生错误: 文件内容为空")
+                continue
+            # 添加到更新内容列表
+            update_content_files.append((file_id, content))
 
+        for file in existing_files:
+            result.append({
+                "file_id": file.file_id,
+                "filename": file.file_name,
+                "size": file.file_size,
+                "content_type": file.file_ext,
+            })
+            if not file.content.strip():
+                parser = get_parser(file.file_ext)
+                if not parser:
+                    logger.error(f"upload_attachment 不支持解析的文件格式: {file.file_ext}")
+                    continue
+                content = parser.parse(file.file_path)
+                if not content.strip():
+                    logger.error(f"upload_attachment 解析文件 {file.file_name} 时发生错误: 文件内容为空")
+                    continue
+                update_content_files.append((file.file_id, content))
+        
+        # 更新内容
+        for file_id, content in update_content_files:
+            if not content.strip():
+                logger.error(f"upload_attachment 更新文件 {file_id} 内容时发生错误: 文件内容为空")
+                continue
+            db.query(RagFile).filter(RagFile.file_id == file_id).update({
+                "content": content
+            })
+            db.commit()
+        
         return APIResponse.success(
             message=f"文件上传成功, 正在解析中。已经存在文件: {existing_file_names}",
             data=result
