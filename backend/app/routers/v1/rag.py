@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models.rag import RagKnowledgeBase, RagFile, RagKnowledgeBaseType, RagFileStatus
 from app.models.user import User
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
-from app.parser import get_file_format
+from app.parser import get_parser, get_file_format
 from app.rag.rag_api import rag_api
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from fastapi.responses import StreamingResponse
@@ -626,6 +626,7 @@ async def upload_attachment(
         files = [file for file in files if file.filename not in existing_file_names]
         
         result = []
+        update_content_files = []
         for file in files:
             file_id = f"file-{shortuuid.uuid()}"
             file_location = upload_dir / f"{file_id}_{file.filename}" # 文件存储路径
@@ -641,7 +642,6 @@ async def upload_attachment(
                     "filename": file.filename,
                     "size": len(contents),
                     "content_type": file_format,
-                    "path": str(file_location)
                 })
             except Exception as e:
                 logger.error(f"上传文件 {file.filename} 时发生错误: {str(e)}")
@@ -649,6 +649,7 @@ async def upload_attachment(
             finally:
                 await file.close()
         
+            # 提交RAG解析任务
             db_file = RagFile(
                 file_id=file_id,    
                 kb_id=kb_id,
@@ -665,10 +666,48 @@ async def upload_attachment(
                 content='',
                 meta='',
             )
-        
             db.add(db_file)
             db.commit() 
+            # 同步解析内容，附件的内容马上要使用，所以进行同步解析
+            parser = get_parser(file_format)
+            if not parser:
+                logger.error(f"upload_attachment 不支持解析的文件格式: {file_format}")
+                continue
+            content = parser.parse(file_location)
+            if not content.strip():
+                logger.error(f"upload_attachment 解析文件 {file.filename} 时发生错误: 文件内容为空")
+                continue
+            # 添加到更新内容列表
+            update_content_files.append((file_id, content))
 
+        for file in existing_files:
+            result.append({
+                "file_id": file.file_id,
+                "filename": file.file_name,
+                "size": file.file_size,
+                "content_type": file.file_ext,
+            })
+            if not file.content.strip():
+                parser = get_parser(file.file_ext)
+                if not parser:
+                    logger.error(f"upload_attachment 不支持解析的文件格式: {file.file_ext}")
+                    continue
+                content = parser.parse(file.file_path)
+                if not content.strip():
+                    logger.error(f"upload_attachment 解析文件 {file.file_name} 时发生错误: 文件内容为空")
+                    continue
+                update_content_files.append((file.file_id, content))
+        
+        # 更新内容
+        for file_id, content in update_content_files:
+            if not content.strip():
+                logger.error(f"upload_attachment 更新文件 {file_id} 内容时发生错误: 文件内容为空")
+                continue
+            db.query(RagFile).filter(RagFile.file_id == file_id).update({
+                "content": content
+            })
+            db.commit()
+        
         return APIResponse.success(
             message=f"文件上传成功, 正在解析中。已经存在文件: {existing_file_names}",
             data=result

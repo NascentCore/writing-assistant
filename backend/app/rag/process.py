@@ -1,10 +1,11 @@
 import asyncio
 import logging
-from app.database import get_async_db
+import time
+from app.database import get_async_db, get_db
 from app.models.rag import RagFile, RagFileStatus
 from app.rag.parser import get_parser
 from app.rag.rag_api import rag_api
-from sqlalchemy import update, select
+from sqlalchemy import update, select, case
 
 logger = logging.getLogger("app")
 
@@ -309,6 +310,27 @@ async def rag_file_poll_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore)
             if rag_file:
                 queue.task_done()
 
+def refresh_tasks_status():
+    """刷新任务状态，将处理中的状态回退一步"""
+    db = next(get_db())
+    try:
+        db.query(RagFile).filter(RagFile.status.in_([
+            RagFileStatus.LOCAL_PARSING,
+            RagFileStatus.LLM_SUMMARIZING,
+            RagFileStatus.RAG_UPLOADING,
+            RagFileStatus.RAG_PARSING,
+        ])).update({
+            "status": case(
+                (RagFile.status == RagFileStatus.LOCAL_PARSING, RagFileStatus.LOCAL_SAVED),
+                (RagFile.status == RagFileStatus.LLM_SUMMARIZING, RagFileStatus.LOCAL_PARSED),
+                (RagFile.status == RagFileStatus.RAG_UPLOADING, RagFileStatus.LOCAL_SAVED),
+                (RagFile.status == RagFileStatus.RAG_PARSING, RagFileStatus.RAG_UPLOADED),
+            )
+        }, synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+    
 async def update_file_status(file_id: str, status: RagFileStatus, error_message: str = ""):
     """更新文件状态的辅助函数"""
     try:
@@ -325,6 +347,8 @@ async def update_file_status(file_id: str, status: RagFileStatus, error_message:
         
 # 知识库文件任务处理线程
 def rag_worker():
+    refresh_tasks_status() # 刷新任务状态
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
