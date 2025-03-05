@@ -40,6 +40,7 @@ class Outline(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(100), nullable=True, index=True, comment="用户ID，为空表示系统预留大纲")
+
     title = Column(String(255), nullable=False, comment="大纲标题")
     reference_status = Column(Enum(ReferenceStatus), nullable=False, default=ReferenceStatus.NOT_REFERENCED, comment="引用状态")
     created_at = Column(DateTime, default=datetime.now)
