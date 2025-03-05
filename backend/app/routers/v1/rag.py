@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models.rag import RagKnowledgeBase, RagFile, RagKnowledgeBaseType, RagFileStatus
 from app.models.user import User
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
-from app.parser import get_parser, get_file_format
+from app.rag.parser import get_parser, get_file_format
 from app.rag.rag_api import rag_api
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from fastapi.responses import StreamingResponse
@@ -656,7 +656,7 @@ async def upload_attachment(
             if not parser:
                 logger.error(f"upload_attachment 不支持解析的文件格式: {file_format}")
                 continue
-            content = parser.parse(file_location)
+            content = parser.content(file_location)
             if not content.strip():
                 logger.error(f"upload_attachment 解析文件 {file.filename} 时发生错误: 文件内容为空")
                 continue
@@ -675,7 +675,7 @@ async def upload_attachment(
                 if not parser:
                     logger.error(f"upload_attachment 不支持解析的文件格式: {file.file_ext}")
                     continue
-                content = parser.parse(file.file_path)
+                content = parser.content(file.file_path)
                 if not content.strip():
                     logger.error(f"upload_attachment 解析文件 {file.file_name} 时发生错误: 文件内容为空")
                     continue
