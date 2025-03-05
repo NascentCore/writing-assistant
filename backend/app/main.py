@@ -61,6 +61,9 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("应用正在启动...")
     
+    # 创建数据库表
+    create_tables()
+    
     # 启动知识库文件处理线程
     thread = threading.Thread(target=rag_worker, name="rag_worker")
     thread.daemon = True

@@ -1,9 +1,10 @@
 from enum import Enum
-import uuid
+import shortuuid
 from typing import List, Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile as FastAPIUploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+import os
 
 from app.schemas.response import APIResponse
 from app.database import get_db
@@ -18,9 +19,11 @@ from app.models.outline import (
     WritingTemplateType, 
     Reference, 
     WebLink,
-    ReferenceType as ModelReferenceType
+    ReferenceType as ModelReferenceType,
+    generate_uuid
 )
 from app.config import Settings
+from app.parser import DocxParser
 
 
 router = APIRouter()
@@ -340,7 +343,7 @@ async def update_outline(
                         if para_data.references:
                             for ref_data in para_data.references:
                                 # 创建引用
-                                ref_id = ref_data.id if ref_data.id else str(uuid.uuid4())
+                                ref_id = ref_data.id if ref_data.id else shortuuid.uuid()
                                 reference = Reference(
                                     id=ref_id,
                                     sub_paragraph_id=paragraph.id,
@@ -393,7 +396,7 @@ async def update_outline(
                     if para_data.level == 1 and para_data.references:
                         for ref_data in para_data.references:
                             # 创建引用
-                            ref_id = ref_data.id if ref_data.id else str(uuid.uuid4())
+                            ref_id = ref_data.id if ref_data.id else shortuuid.uuid()
                             reference = Reference(
                                 id=ref_id,
                                 sub_paragraph_id=paragraph.id,
@@ -632,9 +635,11 @@ class TemplateBase(BaseModel):
     show_name: str = Field(..., description="模板显示名称")
     value: str = Field(..., description="模板内容")
     is_default: bool = Field(False, description="是否默认模板")
+    has_steps: bool = Field(False, description="是否分步骤")
     background_url: Optional[str] = Field(None, description="背景图片URL")
     template_type: WritingTemplateType = Field(WritingTemplateType.OTHER, description="模板类型")
     variables: Optional[List[str]] = Field(None, description="模板变量列表")
+    outline_ids: Optional[List[str]] = Field(None, description="大纲ID列表")
 
 class TemplateCreate(TemplateBase):
     pass
@@ -700,7 +705,8 @@ async def get_templates(
                     "variables": template.variables,
                     "created_at": template.created_at.isoformat(),
                     "updated_at": template.updated_at.isoformat(),
-                    "outline_ids": template.default_outline_ids
+                    "outline_ids": template.default_outline_ids,
+                    "has_steps": template.has_steps
                 }
                 for template in templates
             ],
@@ -738,12 +744,15 @@ async def create_template(
     try:
         # 创建模板
         new_template = WritingTemplate(
+            id=shortuuid.uuid(),
             show_name=template.show_name,
             value=template.value,
             is_default=template.is_default,
+            has_steps=template.has_steps,
             background_url=template.background_url,
             template_type=template.template_type,
-            variables=template.variables
+            variables=template.variables,
+            default_outline_ids=template.outline_ids
         )
         
         # 保存到数据库
@@ -753,8 +762,67 @@ async def create_template(
         
         return APIResponse.success(message="创建模板成功", data={"id": new_template.id})
     except Exception as e:
-
         db.rollback()
         print(f"Error creating template: {str(e)}")
         return APIResponse.error(message=f"创建模板失败: {str(e)}")
+
+
+@router.post("/outlines/parse")
+async def parse_outline(
+    file: FastAPIUploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    从Word文档解析大纲结构
+    
+    Args:
+        file: Word文档文件(.doc或.docx)
+        
+    Returns:
+        id: 大纲ID
+        title: 大纲标题
+        sub_paragraphs: 段落列表
+    """
+    file_path = None
+    
+    try:
+        # 检查文件类型
+        if not file.filename.lower().endswith(('.doc', '.docx')):
+            return APIResponse.error(message="仅支持.doc或.docx格式的Word文档")
+        
+        # 保存上传的文件
+        file_path = f"/tmp/{file.filename}"
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        # 解析文档
+        parser = DocxParser()
+        doc = parser.parse(file_path)
+        
+        # 获取大纲结构
+        outline_data = parser.get_outline_structure(doc)
+        
+        # 初始化大纲生成器
+        outline_generator = OutlineGenerator()
+        
+        # 保存到数据库
+        saved_outline = outline_generator.save_outline_to_db(
+            outline_data=outline_data,
+            db_session=db
+        )
+        
+        return APIResponse.success(message="大纲解析成功", data=saved_outline)
+        
+    except Exception as e:
+        return APIResponse.error(message=f"解析大纲失败: {str(e)}")
+    
+    finally:
+        # 清理临时文件
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"清理临时文件失败: {str(e)}")  # 记录错误但不影响主流程
+
 
