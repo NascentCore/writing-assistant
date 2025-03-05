@@ -677,6 +677,8 @@ async def get_session_messages(
                         "message_id": msg.message_id,
                         "role": msg.role,
                         "content": msg.content,
+                        "content_type": msg.content_type,
+                        "outline_id": msg.outline_id,
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages

@@ -22,6 +22,7 @@ from app.models.outline import (
     ReferenceType as ModelReferenceType,
     generate_uuid
 )
+from app.models.chat import ChatSession, ChatMessage, ChatSessionType, ContentType
 from app.config import Settings
 from app.parser import DocxParser
 from app.auth import get_current_user
@@ -337,6 +338,39 @@ async def generate_outline(
         db_session=db,
         user_id=current_user.user_id
     )
+    
+    # 创建聊天会话
+    session_id = shortuuid.uuid()
+    chat_session = ChatSession(
+        session_id=session_id,
+        session_type=ChatSessionType.WRITING,
+        user_id=current_user.user_id,
+    )
+    db.add(chat_session)
+    
+    # 创建用户的提问消息
+    user_message = ChatMessage(
+        message_id=shortuuid.uuid(),
+        session_id=session_id,
+        role="user",
+        content=request.prompt,
+        content_type=ContentType.TEXT,
+    )
+    db.add(user_message)
+    
+    # 创建助手的回答消息
+    assistant_message = ChatMessage(
+        message_id=shortuuid.uuid(),
+        session_id=session_id,
+        role="assistant",
+        content_type=ContentType.OUTLINE,
+        outline_id=saved_outline["id"]
+    )
+    db.add(assistant_message)
+    
+    # 提交事务
+    db.commit()
+    saved_outline["session_id"] = session_id
     
     return APIResponse.success(message="大纲生成成功", data=saved_outline)
 
