@@ -25,6 +25,7 @@ export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
 
   const response = await fetch(fullUrl, { ...options, headers });
   const clone = response.clone();
+
   const data = await clone.json();
   if (data.code !== 200) {
     message.error(data.message);
@@ -115,6 +116,23 @@ export const fetchWithAuthStream = async (
     window.location.href = '/Login';
     return null;
   }
+
+  // 打印可访问的headers
+  // console.log('🚀 ~ fetchWithAuthStream ~ 可访问的headers:', {
+  //   // 将Headers对象转换为普通对象
+  //   headers: Object.fromEntries(response.headers.entries()),
+  //   status: response.status,
+  //   statusText: response.statusText,
+  // });
+
+  // 尝试单独获取一些常见headers
+  // console.log('单独获取headers:');
+  // console.log('Content-Type:', response.headers.get('content-type'));
+  // console.log('Cache-Control:', response.headers.get('cache-control'));
+  // console.log('Authorization:', response.headers.get('authorization')); // 可能因CORS限制无法获取
+  // console.log('Content-Length:', response.headers.get('content-length')); // 可能因CORS限制无法获取
+  // console.log('X-Powered-By:', response.headers.get('x-powered-by')); // 可能因CORS限制无法获取
+
   if (response.ok) {
     if (originData) {
       return response;

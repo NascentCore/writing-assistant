@@ -233,32 +233,20 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     // 准备请求数据
     const requestData = {
       model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
-      doc_id: localStorage.getItem('current_document_id') || '',
       file_ids: selectedFiles
         .filter(
           (file) =>
             file.type === 'docx' || file.type === 'pdf' || file.type === 'doc',
         )
         .map((file) => file.file_id),
-      max_tokens: 2000,
-      messages: [
-        {
-          content: value,
-          role: 'user',
-        },
-      ],
-      selected_contents: selectedFiles
-        .filter((file) => file.type === 'text')
-        .map((file) => file.name),
+      question: value,
       stream: true,
-      action: 'chat',
-      temperature: 0.7,
     };
     setValue('');
     setOpen(false);
     try {
       const response = await fetchWithAuthStream(
-        '/api/v1/completions',
+        '/api/v1/rag/chat',
         {
           method: 'POST',
           headers: {
