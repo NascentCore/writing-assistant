@@ -60,15 +60,15 @@ const convertRoutesToMenuItems = (routes: RouteItem[]): MenuItem[] => {
     }));
 
   // 添加最近对话菜单项
-  menuItems.push({
-    key: 'RecentChat',
-    icon: <Icon type="RecentChat" />,
-    title: '最近对话',
-    children: Array.from({ length: 12 }, (_, i) => ({
-      key: `chat-${String(i + 1).padStart(2, '0')}`,
-      title: `最近对话${String(i + 1).padStart(2, '0')}`,
-    })),
-  });
+  // menuItems.push({
+  //   key: 'RecentChat',
+  //   icon: <Icon type="RecentChat" />,
+  //   title: '最近对话',
+  //   children: Array.from({ length: 12 }, (_, i) => ({
+  //     key: `chat-${String(i + 1).padStart(2, '0')}`,
+  //     title: `最近对话${String(i + 1).padStart(2, '0')}`,
+  //   })),
+  // });
 
   return menuItems;
 };

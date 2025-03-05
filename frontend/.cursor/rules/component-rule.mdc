@@ -1,0 +1,10 @@
+---
+description: 组件创建规则
+globs: 
+alwaysApply: false
+---
+
+# Your rule content
+
+- 创建组件的时候，如果非明确提及要创建全局组件，那就放在当前页面的 components 录下，（没有components文件夹的话那就先创建一个）不要放到根目录的 components 文件夹下
+- You can use markdown but dont have to

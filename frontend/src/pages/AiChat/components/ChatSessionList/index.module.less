@@ -1,0 +1,55 @@
+.sidebar {
+  width: 200px;
+  height: 100%;
+  border-right: 1px solid rgba(229, 231, 235, 0.8);
+  display: flex;
+  flex-direction: column;
+  background-color: #fff;
+  ul {
+    padding: 0;
+  }
+}
+
+.sidebarHeader {
+  padding: 16px;
+  border-bottom: 1px solid rgba(229, 231, 235, 0.8);
+  display: flex;
+  align-items: center;
+}
+
+.conversationsContainer {
+  flex: 1;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.loadMore {
+  text-align: center;
+  padding: 8px 0;
+}
+
+.sidebarFooter {
+  padding: 16px;
+  border-top: 1px solid rgba(229, 231, 235, 0.8);
+}
+
+.loading {
+  text-align: center;
+  color: #999;
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggleButton {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  border-radius: 0 4px 4px 0;
+  padding: 8px 4px;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+}

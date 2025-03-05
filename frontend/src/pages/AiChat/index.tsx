@@ -4,20 +4,22 @@ import {
   // PlusCircleOutlined,
   PaperClipOutlined,
   SwapOutlined,
-  UserOutlined,
 } from '@ant-design/icons';
 import type { AttachmentsProps } from '@ant-design/x';
 import { Attachments, Bubble, Sender, XProvider, XStream } from '@ant-design/x';
-import { Badge, Button, Flex, GetRef, Select, Typography } from 'antd';
+import { history, useLocation } from '@umijs/max';
+import { Badge, Button, Flex, GetRef, Select, Typography, message } from 'antd';
 import markdownit from 'markdown-it';
 import React, {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   useState,
 } from 'react';
 import { API_BASE_URL } from '../../config';
+import ChatSessionList, { ChatMessage } from './components/ChatSessionList';
 import styles from './index.module.less';
 
 const md = markdownit({ html: true, breaks: true });
@@ -81,15 +83,6 @@ interface Model {
 // 定义可用的模型类型
 type ModelType = string;
 
-interface ChatMessage {
-  key: string;
-  placement: 'start' | 'end';
-  content: string;
-  avatarType: 'user' | 'assistant';
-  files?: FileItem[]; // 添加关联文件数组
-}
-
-// 文件列表相关接口定义
 interface FileItem {
   file_id: string;
   name: string;
@@ -112,10 +105,6 @@ const createMessage = (
   files,
 });
 
-const getAvatarIcon = () => {
-  return { icon: <UserOutlined /> };
-};
-
 const DEFAULT_MESSAGE = createMessage('你好，我是你的AI助手', false);
 
 interface AIChatProps {
@@ -127,28 +116,32 @@ interface AIChatRef {
 }
 
 const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
+  // 获取当前路由信息
+  const location = useLocation();
+
   const [value, setValue] = useState('');
   const [items, setItems] = useState<AttachmentsProps['items']>([]);
   const [open, setOpen] = useState(false);
 
+  // 会话历史相关状态
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // 会话消息状态，用于存储当前会话的所有消息
+  const [messages, setMessages] = useState<ChatMessage[]>([DEFAULT_MESSAGE]);
+  // 刷新会话列表的函数
+  const [refreshSessionsList, setRefreshSessionsList] = useState<
+    (() => void) | null
+  >(null);
+
   const attachmentsRef = React.useRef<GetRef<typeof Attachments>>(null);
   const senderRef = React.useRef<GetRef<typeof Sender>>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const [models, setModels] = useState<Model[]>([]);
   const [selectedModel, setSelectedModel] = useState<ModelType>(() => {
     const savedModel = localStorage.getItem(MODEL_STORAGE_KEY);
     return savedModel || '';
   });
-  const [messages, setMessages] = useState(() => {
-    const savedMessages = localStorage.getItem(STORAGE_KEY);
-    if (savedMessages) {
-      return JSON.parse(savedMessages);
-    }
-    return [DEFAULT_MESSAGE];
-  });
   const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
-
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // 当消息更新时，保存到 localStorage
   useEffect(() => {
@@ -183,150 +176,73 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     fetchModels();
   }, []);
 
-  // 添加一个函数来检查是否在底部附近
-  const isNearBottom = () => {
-    if (!scrollContainerRef.current) return true;
-    const { scrollHeight, scrollTop, clientHeight } =
-      scrollContainerRef.current;
-    return scrollHeight - scrollTop - clientHeight < 100;
-  };
+  // 创建新会话
+  const createNewSession = useCallback(() => {
+    setActiveSessionId(null);
+    setMessages([DEFAULT_MESSAGE]);
+    setSelectedFiles([]);
+    setValue('');
 
-  // 智能滚动函数
-  const scrollToBottom = (isUserMessage: boolean) => {
-    if (!scrollContainerRef.current) return;
-
-    // 如果是用户消息，总是滚动到底部，且立即滚动
-    // 如果是系统消息，只在用户本来就在底部时才滚动
-    if (isUserMessage || isNearBottom()) {
-      scrollContainerRef.current.scrollTo({
-        top: scrollContainerRef.current.scrollHeight,
-        behavior: isUserMessage ? 'auto' : 'smooth',
-      });
-    }
-  };
-
-  // 监听消息变化
-  useEffect(() => {
-    // 判断最后一条消息是否是用户发送的
-    const isUserMessage =
-      messages.length > 0 &&
-      messages[messages.length - 1].avatarType === 'user';
-    scrollToBottom(isUserMessage);
-  }, [messages]);
-
-  // 页面首次加载时滚动到底部
-  useEffect(() => {
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTo({
-        top: scrollContainerRef.current.scrollHeight,
-        behavior: 'auto',
-      });
-    }
+    // 清除 URL 中的会话 ID 参数
+    history.push('/AiChat');
   }, []);
 
-  const handleSubmit = async () => {
-    if (!value.trim()) return;
+  // 添加一个函数来检查是否在底部附近
+  const isNearBottom = useCallback(() => {
+    if (!scrollContainerRef.current) return false;
+    const { scrollTop, scrollHeight, clientHeight } =
+      scrollContainerRef.current;
+    return scrollHeight - scrollTop - clientHeight < 100;
+  }, []);
 
-    const userMessage = createMessage(value, true, selectedFiles);
-    setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
+  // 滚动到底部
+  const scrollToBottom = useCallback(
+    (isUserMessage: boolean) => {
+      if (!scrollContainerRef.current) return;
 
-    // 准备请求数据
-    const requestData = {
-      model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
-      file_ids: selectedFiles
-        .filter(
-          (file) =>
-            file.type === 'docx' || file.type === 'pdf' || file.type === 'doc',
-        )
-        .map((file) => file.file_id),
-      question: value,
-      stream: true,
-    };
-    setValue('');
-    setOpen(false);
-    try {
-      const response = await fetchWithAuthStream(
-        '/api/v1/rag/chat',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestData),
-        },
-        true,
-      );
-
-      if (!response.ok || !response.body) {
-        throw new Error('Stream response not available');
+      // 如果是用户消息，或者已经在底部附近，则滚动到底部
+      if (isUserMessage || isNearBottom()) {
+        scrollContainerRef.current.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        });
       }
+    },
+    [isNearBottom],
+  );
 
-      // 创建一个新的消息对象用于累积内容
-      const assistantMessage = createMessage('', false, []); // 明确指定空文件数组
-      setMessages((prev: ChatMessage[]) => [...prev, assistantMessage]);
+  // 处理会话切换
+  const handleSessionChange = useCallback(
+    (sessionId: string, sessionMessages: ChatMessage[]) => {
+      setActiveSessionId(sessionId);
+      setMessages(sessionMessages);
 
-      // 使用 XStream 处理流式响应
-      for await (const chunk of XStream({
-        readableStream: response.body,
-      })) {
-        try {
-          // 如果 chunk.data 是字符串，需要解析它
-          let data;
-          if (typeof chunk.data === 'string') {
-            data = JSON.parse(chunk.data);
-          } else {
-            data = chunk.data;
-          }
+      // 滚动到底部
+      setTimeout(() => {
+        scrollToBottom(false);
+      }, 100);
+    },
+    [scrollToBottom],
+  );
 
-          if (data.choices?.[0]?.delta?.content) {
-            const content = data.choices[0].delta.content;
-            // 更新最后一条消息的内容，保持文件信息不变
-            setMessages((prev: ChatMessage[]) => {
-              const newMessages = [...prev];
-              const lastMessage = newMessages[newMessages.length - 1];
-              newMessages[newMessages.length - 1] = {
-                ...lastMessage,
-                content: lastMessage.content + content,
-                files: lastMessage.files || [], // 保持文件信息
-              };
-              return newMessages;
-            });
-          }
-        } catch (error) {}
-      }
-
-      // 消息发送完成后再清空选中的文件
-      setSelectedFiles([]);
-      setItems([]);
-    } catch (error) {
-      // 在发生错误时添加错误消息
-      const errorMessage = createMessage(
-        '抱歉，处理您的请求时出现了错误。',
-        false,
-      );
-      setMessages((prev: ChatMessage[]) => [...prev, errorMessage]);
-      // 发生错误时也清空选中的文件
-      setSelectedFiles([]);
-      setItems([]);
-    }
-  };
-
-  // 处理消息显示，添加avatar组件和markdown渲染
-  const displayMessages = messages.map((msg: ChatMessage) => {
-    return {
-      ...msg,
-      avatar: getAvatarIcon(),
-      messageRender: (content: string) =>
-        messageRender(content, { 'data-message': msg }),
-      // 不再需要单独传递 data-message，因为它已经在 messageRender 函数调用中传递了
-    };
-  });
+  // 计算要显示的消息
+  const displayMessages = messages.map((msg) => ({
+    ...msg,
+    render: messageRender,
+    'data-message': msg, // 传递消息对象给渲染函数
+    loading: msg.loading, // 确保 loading 属性被传递给 Bubble 组件
+  }));
 
   // 处理模型变更
   const handleModelChange = (value: ModelType) => {
     setSelectedModel(value);
     localStorage.setItem(MODEL_STORAGE_KEY, value);
   };
+
+  // 处理会话列表刷新
+  const handleRefreshSessions = useCallback((refreshFn: () => void) => {
+    setRefreshSessionsList(() => refreshFn);
+  }, []);
 
   const headerNode = (
     <Sender.Header
@@ -349,7 +265,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           const formData = new FormData();
           formData.append('files', file);
           const xhr = new XMLHttpRequest();
-          xhr.open('POST', `${API_BASE_URL}/api/v1/files`);
+          xhr.open('POST', `${API_BASE_URL}/api/v1/rag/files?category=user`);
           xhr.setRequestHeader(
             'authorization',
             `Bearer ${localStorage.getItem('token')}`,
@@ -466,91 +382,303 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     },
   }));
 
+  // 页面首次加载时滚动到底部
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: 'auto',
+      });
+    }
+  }, []);
+
+  // 监听消息变化
+  useEffect(() => {
+    // 判断最后一条消息是否是用户发送的
+    const isUserMessage =
+      messages.length > 0 &&
+      messages[messages.length - 1].avatarType === 'user';
+    scrollToBottom(isUserMessage);
+  }, [messages]);
+
+  // 处理 URL 参数变化
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const sessionIdFromUrl = query.get('id');
+
+    // 如果 URL 中没有会话 ID，则创建新会话
+    if (!sessionIdFromUrl && activeSessionId !== null) {
+      createNewSession();
+    }
+
+    // 不在这里处理会话 ID 存在的情况，由 ChatSessionList 组件负责
+  }, [location.search, activeSessionId, createNewSession]);
+
+  const handleSubmit = async () => {
+    if (!value.trim()) return;
+
+    const userMessage = createMessage(value, true, selectedFiles);
+    setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
+
+    // 准备请求数据
+    let currentSessionId = activeSessionId;
+
+    // 如果是第一轮对话（没有活动会话ID），先创建会话
+    if (!currentSessionId) {
+      try {
+        // 调用创建会话接口
+        const sessionResponse = await fetchWithAuthNew(
+          '/api/v1/rag/chat/session',
+          {
+            method: 'POST',
+          },
+        );
+
+        if (sessionResponse && sessionResponse.session_id) {
+          currentSessionId = sessionResponse.session_id;
+          // 设置活动会话ID
+          setActiveSessionId(currentSessionId);
+
+          // 更新路由，添加会话ID参数
+          // 使用非空断言，因为我们已经检查了 sessionResponse.session_id 存在
+          const sessionIdWithoutPrefix = currentSessionId!.replace('chat-', '');
+          history.push(`/AiChat?id=${sessionIdWithoutPrefix}`);
+        }
+      } catch (error) {
+        console.error('创建会话失败:', error);
+        message.error('创建会话失败');
+      }
+    }
+
+    // 构建请求数据对象
+    const requestData: {
+      model_name: string;
+      file_ids: string[];
+      question: string;
+      stream: boolean;
+      session_id?: string;
+    } = {
+      model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
+      file_ids: selectedFiles
+        .filter(
+          (file) =>
+            file.type === 'docx' || file.type === 'pdf' || file.type === 'doc',
+        )
+        .map((file) => file.file_id),
+      question: value,
+      stream: true,
+    };
+
+    // 只有当 currentSessionId 不为 null 时才添加到请求数据中
+    if (currentSessionId) {
+      requestData.session_id = currentSessionId;
+    }
+    setValue('');
+    setOpen(false);
+    try {
+      const response = await fetchWithAuthStream(
+        '/api/v1/rag/chat',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestData),
+        },
+        true,
+      );
+
+      if (!response.ok || !response.body) {
+        throw new Error('Stream response not available');
+      }
+
+      // 创建一个新的消息对象用于累积内容
+      const assistantMessage = createMessage('', false, []); // 明确指定空文件数组
+      setMessages((prev: ChatMessage[]) => [
+        ...prev,
+        {
+          ...assistantMessage,
+          loading: true, // 添加 loading 状态
+        },
+      ]);
+
+      // 使用 XStream 处理流式响应
+      for await (const chunk of XStream({
+        readableStream: response.body,
+      })) {
+        try {
+          // 如果 chunk.data 是字符串，需要解析它
+          let data;
+          if (typeof chunk.data === 'string') {
+            data = JSON.parse(chunk.data);
+          } else {
+            data = chunk.data;
+          }
+
+          if (data.choices?.[0]?.delta?.content) {
+            const content = data.choices[0].delta.content;
+            // 更新最后一条消息的内容，保持文件信息不变
+            setMessages((prev: ChatMessage[]) => {
+              const newMessages = [...prev];
+              const lastMessage = newMessages[newMessages.length - 1];
+              newMessages[newMessages.length - 1] = {
+                ...lastMessage,
+                content: lastMessage.content + content,
+                files: lastMessage.files || [], // 保持文件信息
+                loading: false, // 收到第一个有效内容时就移除 loading 状态
+              };
+              return newMessages;
+            });
+          }
+        } catch (error) {}
+      }
+
+      // 确保在流处理结束后，如果消息仍然处于 loading 状态，则移除该状态
+      setMessages((prev: ChatMessage[]) => {
+        const newMessages = [...prev];
+        const lastMessage = newMessages[newMessages.length - 1];
+        // 如果最后一条消息仍然处于 loading 状态，则移除该状态
+        if (lastMessage && lastMessage.loading) {
+          newMessages[newMessages.length - 1] = {
+            ...lastMessage,
+            loading: false,
+            // 如果内容为空，添加一个提示信息
+            content: lastMessage.content || '未收到有效回复',
+          };
+        }
+        return newMessages;
+      });
+
+      // 消息发送完成后再清空选中的文件
+      setSelectedFiles([]);
+      setItems([]);
+
+      // 刷新会话列表
+      if (refreshSessionsList) {
+        refreshSessionsList();
+      }
+    } catch (error) {
+      // 在发生错误时添加错误消息
+      const errorMessage = createMessage(
+        '抱歉，处理您的请求时出现了错误。',
+        false,
+      );
+      setMessages((prev: ChatMessage[]) => {
+        // 先移除最后一条带有 loading 状态的消息（如果存在）
+        const newMessages = [...prev];
+        if (
+          newMessages.length > 0 &&
+          newMessages[newMessages.length - 1].loading
+        ) {
+          newMessages.pop();
+        }
+        // 添加错误消息
+        return [...newMessages, errorMessage];
+      });
+      // 发生错误时也清空选中的文件
+      setSelectedFiles([]);
+      setItems([]);
+    }
+  };
+
   return (
     <div className={styles.container}>
       <XProvider>
-        <Flex
-          vertical
-          justify="space-between"
-          style={{
-            height: 'calc(100vh - 60px)',
-          }}
-          gap={8}
-        >
+        <Flex gap={20} style={{ height: 'calc(100vh - 60px)' }}>
+          {/* 使用 ChatSessionList 组件 */}
+          <ChatSessionList
+            onSessionChange={handleSessionChange}
+            onCreateNewSession={createNewSession}
+            activeSessionId={activeSessionId}
+            defaultMessage={DEFAULT_MESSAGE}
+            refreshSessions={handleRefreshSessions}
+          />
+
+          {/* 右侧聊天区域 */}
           <Flex
+            vertical
             justify="space-between"
-            align="center"
             style={{
-              padding: '12px 16px',
-              backgroundColor: '#fff',
-              borderBottom: '1px solid rgba(229, 231, 235, 0.8)',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              marginBottom: 12,
+              flex: 1,
+              height: '100%',
             }}
+            gap={8}
           >
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{
-                  fontSize: '16px',
-                  fontWeight: 500,
-                  marginTop: -7,
-                }}
-              >
-                模型：
+            <Flex
+              justify="space-between"
+              align="center"
+              style={{
+                padding: '12px 16px',
+                backgroundColor: '#fff',
+                borderBottom: '1px solid rgba(229, 231, 235, 0.8)',
+                position: 'sticky',
+                top: 0,
+                zIndex: 10,
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                marginBottom: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  style={{
+                    fontSize: '16px',
+                    fontWeight: 500,
+                    marginTop: -7,
+                  }}
+                >
+                  模型：
+                </div>
+                <Select
+                  size="small"
+                  value={selectedModel}
+                  onChange={handleModelChange}
+                  popupMatchSelectWidth={false}
+                  prefix={<SwapOutlined />}
+                  style={{ marginBottom: 8 }}
+                >
+                  {models.map((model) => (
+                    <Select.Option
+                      key={model.id}
+                      value={model.name}
+                      title={model.description}
+                    >
+                      {model.name}
+                    </Select.Option>
+                  ))}
+                </Select>
               </div>
-              <Select
-                size="small"
-                value={selectedModel}
-                onChange={handleModelChange}
-                popupMatchSelectWidth={false}
-                prefix={<SwapOutlined />}
-                style={{ marginBottom: 8 }}
-              >
-                {models.map((model) => (
-                  <Select.Option
-                    key={model.id}
-                    value={model.name}
-                    title={model.description}
-                  >
-                    {model.name}
-                  </Select.Option>
-                ))}
-              </Select>
+            </Flex>
+            <div className={styles.scrollContainer} ref={scrollContainerRef}>
+              <Bubble.List items={displayMessages} />
+            </div>
+            <div>
+              <Sender
+                ref={senderRef}
+                style={{
+                  marginTop: 12,
+                }}
+                header={headerNode}
+                value={value}
+                prefix={
+                  <Badge dot={!open && selectedFiles.length > 0}>
+                    <Button
+                      icon={<PaperClipOutlined style={{ fontSize: 18 }} />}
+                      onClick={() => setOpen(!open)}
+                    />
+                  </Badge>
+                }
+                onChange={(nextVal: string) => {
+                  setValue(nextVal);
+                }}
+                onPasteFile={(file) => {
+                  attachmentsRef.current?.upload(file);
+                  setOpen(true);
+                }}
+                onSubmit={handleSubmit}
+              />
             </div>
           </Flex>
-          <div className={styles.scrollContainer} ref={scrollContainerRef}>
-            <Bubble.List items={displayMessages} />
-          </div>
-          <div>
-            <Sender
-              ref={senderRef}
-              style={{
-                marginTop: 12,
-              }}
-              header={headerNode}
-              value={value}
-              prefix={
-                <Badge dot={!open && selectedFiles.length > 0}>
-                  <Button
-                    icon={<PaperClipOutlined style={{ fontSize: 18 }} />}
-                    onClick={() => setOpen(!open)}
-                  />
-                </Badge>
-              }
-              onChange={(nextVal: string) => {
-                setValue(nextVal);
-              }}
-              onPasteFile={(file) => {
-                attachmentsRef.current?.upload(file);
-                setOpen(true);
-              }}
-              onSubmit={handleSubmit}
-            />
-          </div>
         </Flex>
       </XProvider>
     </div>
