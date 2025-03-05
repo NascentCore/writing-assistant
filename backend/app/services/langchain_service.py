@@ -112,7 +112,7 @@ class OutlineGenerator:
                 ]
             }
     
-    def save_outline_to_db(self, outline_data: Dict[str, Any], db_session, outline_id: Optional[str] = None) -> Dict[str, Any]:
+    def save_outline_to_db(self, outline_data: Dict[str, Any], db_session, outline_id: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         将生成的大纲保存到数据库
         
@@ -120,6 +120,7 @@ class OutlineGenerator:
             outline_data: 大纲数据
             db_session: 数据库会话
             outline_id: 大纲ID（如果是更新现有大纲）
+            user_id: 用户ID（如果为空则表示系统预留大纲）
             
         Returns:
             Dict: 保存后的大纲数据
@@ -145,6 +146,7 @@ class OutlineGenerator:
                 # 创建新大纲
                 outline = Outline(
                     title=outline_data["title"],
+                    user_id=user_id,  # 设置用户ID
                     reference_status=ReferenceStatus.NOT_REFERENCED  # 使用枚举对象而不是枚举值
                 )
                 db_session.add(outline)
