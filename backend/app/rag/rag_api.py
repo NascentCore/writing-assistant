@@ -182,6 +182,7 @@ class RagAPI:
         self,
         kb_ids: List[str],
         question: str,
+        custom_prompt: Optional[str] = None,
         history: Optional[List[List[str]]] = None,
         streaming: bool = True,  # 默认开启流式返回
         networking: bool = False,

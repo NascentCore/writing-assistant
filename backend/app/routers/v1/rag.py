@@ -364,11 +364,22 @@ async def get_chat_sessions(
                 .order_by(desc(ChatMessage.id))\
                 .first()
             
+            first_message = db.query(ChatMessage)\
+                .filter(
+                    ChatMessage.session_id == session.session_id,
+                    ChatMessage.role == "user",
+                    ChatMessage.is_deleted == False
+                )\
+                .order_by(ChatMessage.id)\
+                .first()
+            
             session_data.append({
                 "session_id": session.session_id,
                 "session_type": session.session_type,
                 "last_message": last_message.content if last_message else None,
                 "last_message_time": last_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if last_message else None,
+                "first_message": first_message.content if first_message else None,
+                "first_message_time": first_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if first_message else None,
                 "created_at": session.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "updated_at": session.updated_at.strftime("%Y-%m-%d %H:%M:%S") if session.updated_at else None
             })
@@ -482,6 +493,21 @@ async def chat(
         ).first()
         if not chat_session:
             return APIResponse.error(message="会话不存在或无权访问")
+        
+        # 获取引用的文件
+        reference_files = db.query(RagFile).filter(
+            RagFile.file_id.in_(request.file_ids),
+            RagFile.user_id == current_user.user_id,
+            RagFile.is_deleted == False
+        ).all()
+        if len(reference_files) != len(request.file_ids):
+            logger.error(f"rag_chat 用户 {current_user.user_id} 引用的文件不存在或无权访问: {request.file_ids}")
+
+        # 获取引用的文件内容
+        custom_prompt = ''
+        for file in reference_files:
+            content_preview = file.content[:settings.RAG_CHAT_PER_FILE_MAX_LENGTH]
+            custom_prompt += f"文件名: {file.file_name}\n文件内容: {content_preview}\n\n"
 
         # 获取历史消息
         history_messages = db.query(ChatMessage).filter(
@@ -514,6 +540,7 @@ async def chat(
         response = rag_api.chat(
             kb_ids=kb_ids,
             question=request.question,
+            custom_prompt=custom_prompt,
             history=history,
             streaming=streaming,
             networking=settings.RAG_CHAT_NETWORKING,

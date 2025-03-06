@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     RAG_CHAT_HYBRID_SEARCH: bool = yaml_config.get("rag", {}).get("chat_hybrid_search", False)
     RAG_CHAT_API_CONTEXT_LENGTH: int = yaml_config.get("rag", {}).get("chat_api_context_length", 4096)
     RAG_CHAT_CHUNK_SIZE: int = yaml_config.get("rag", {}).get("chat_chunk_size", 800)
+    RAG_CHAT_PER_FILE_MAX_LENGTH: int = yaml_config.get("rag", {}).get("chat_per_file_max_length", 2000)
     class Config:
         case_sensitive = True
         env_file = ".env"
