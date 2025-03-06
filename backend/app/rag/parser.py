@@ -3,10 +3,13 @@ from docx import Document
 from app.config import settings
 import openai
 import aiofiles
+import pytesseract
+from pdf2image import convert_from_path
+import asyncio
 
 class FileParser:
     """文件解析器基类"""
-    async def content(self, file_path: str) -> str:
+    def content(self, file_path: str) -> str:
         raise NotImplementedError
 
     async def summary(self, content: str, length: str = "small") -> str:
@@ -59,8 +62,9 @@ class PDFEncryptedError(Exception):
     pass
 
 class PDFParser(FileParser):
-    """PDF文档解析器"""
-    async def content(self, file_path: str) -> str:
+    """PDF文档解析器，支持文本提取和OCR图像解析"""
+    def content(self, file_path: str) -> str:
+        text_content = []
         try:
             # 创建PDF reader对象
             pdf_reader = PyPDF2.PdfReader(file_path)
@@ -68,24 +72,49 @@ class PDFParser(FileParser):
             # 检查是否加密
             if pdf_reader.is_encrypted:
                 try:
-                    # 尝试用空密码解密（对于只有权限密码的PDF通常可行）
                     pdf_reader.decrypt('')
-                    
-                    # 尝试提取文本
-                    text_content = []
-                    for page in pdf_reader.pages:
-                        text_content.append(page.extract_text())
-                    return "\n".join(text_content)
-                except:
+                except Exception:
                     raise PDFEncryptedError("无法解析加密的PDF文件，请先解除文件加密后再上传")
-                
-            # 提取所有页面的文本
-            text_content = []
-            for page in pdf_reader.pages:
-                text_content.append(page.extract_text())
-                
+            
+            # 遍历所有页面
+            for i, page in enumerate(pdf_reader.pages):
+                page_text = page.extract_text()
+                # 如果页面文本有效，则使用提取的文本
+                if page_text and page_text.strip():
+                    text_content.append(page_text)
+                else:
+                    # 否则使用OCR：将当前页转换为图片，再识别文字
+                    try:
+                        # convert_from_path 的页码参数是 1-indexed
+                        images = convert_from_path(file_path, 
+                                                   first_page=i+1, 
+                                                   last_page=i+1, 
+                                                   dpi=300,                            
+                                                   fmt='jpeg',
+                                                   thread_count=4)
+                        if images:
+                            for image in images:
+                                # 优化图像处理（转换为灰度图提升OCR速度）
+                                image = image.convert('L')
+                                # 执行快速OCR
+                                ocr_text = pytesseract.image_to_string(
+                                    image,
+                                    lang='chi_sim',
+                                    config='--oem 1 --psm 6'
+                                )
+                                page_text += ocr_text + "\n"
+                            # # 使用 pytesseract 进行OCR，lang参数可根据需要调整
+                            # ocr_text = pytesseract.image_to_string(images[0], lang='chi_sim', config='--oem 1 --psm 6')
+                            # text_content.append(ocr_text)
+                            text_content.append(page_text)
+                        else:
+                            text_content.append("")
+                    except Exception:
+                        text_content.append("[OCR 解析失败]")
+            
             return "\n".join(text_content)
         except Exception as e:
+            # 针对加密相关异常的处理
             if "PyCryptodome is required for AES algorithm" in str(e):
                 raise PDFEncryptedError("无法解析加密的PDF文件，请先解除文件加密后再上传")
             elif "File has not been decrypted" in str(e):
@@ -95,7 +124,7 @@ class PDFParser(FileParser):
 
 class DocxParser(FileParser):
     """Word文档解析器"""
-    async def content(self, file_path: str) -> str:
+    def content(self, file_path: str) -> str:
         try:
             # 加载Word文档
             doc = Document(file_path)

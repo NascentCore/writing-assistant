@@ -9,7 +9,10 @@ from typing import List, Union, Optional, Dict, Any
 
 class DocumentParser:
     """文档解析器基类"""
-    def parse(self, file_path: str) -> Union[Document, str]:
+    def parse(self, file_path: str) -> str:
+        raise NotImplementedError
+
+    def parse_to_doc(self, file_path: str) -> Union[Document, str]:
         raise NotImplementedError
     
 class PDFEncryptedError(Exception):
@@ -53,7 +56,22 @@ class PDFParser(DocumentParser):
 
 class DocxParser(DocumentParser):
     """Word文档解析器"""
-    def parse(self, file_path: str) -> Document:
+    def parse(self, file_path: str) -> str:
+        try:
+            # 加载Word文档
+            doc = Document(file_path)
+            
+            # 提取所有段落的文本
+            text_content = []
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():  # 只添加非空段落
+                    text_content.append(paragraph.text)
+                    
+            return "\n".join(text_content)
+        except Exception as e:
+            raise Exception(f"Word文档解析错误: {str(e)}")
+
+    def parse_to_doc(self, file_path: str) -> Document:
         """
         解析Word文档，返回Document对象
         

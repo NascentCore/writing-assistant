@@ -1,6 +1,7 @@
 from app.migrations.add_user_id import run_migration as add_user_id
 from app.migrations.recreate_version_table import run_migration as recreate_version_table
 from app.migrations.add_system_config import run_migration as add_system_config
+from app.migrations.add_content_type_and_outline import run_migration as add_content_type_and_outline
 
 def run_all_migrations():
     """运行所有迁移"""
@@ -8,6 +9,7 @@ def run_all_migrations():
         add_user_id,
         recreate_version_table,
         add_system_config,
+        add_content_type_and_outline,
     ]
     
     for migration in migrations:

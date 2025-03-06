@@ -385,7 +385,7 @@ async def upload_files(
                 
                 result.append({
                     "file_id": file_id,
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "size": len(contents),
                     "content_type": file_format,
                     "path": str(file_location)
@@ -677,6 +677,8 @@ async def get_session_messages(
                         "message_id": msg.message_id,
                         "role": msg.role,
                         "content": msg.content,
+                        "content_type": msg.content_type,
+                        "outline_id": msg.outline_id,
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages

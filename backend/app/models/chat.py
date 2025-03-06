@@ -6,6 +6,10 @@ class ChatSessionType(Enum):
     WRITING = 1
     KNOWLEDGE_BASE = 2
 
+class ContentType(str, Enum):
+    TEXT = "text"
+    OUTLINE = "outline"
+
 class ChatSession(Base):
     """聊天会话记录表"""
     __tablename__ = "chat_sessions"
@@ -31,6 +35,8 @@ class ChatMessage(Base):
     question_id = Column(String(100), default="", comment="问题ID(用于回答的message)")
     role = Column(String(20), default="user", comment="消息角色")
     content = Column(Text, default="", comment="消息内容")
+    content_type = Column(String(20), default=ContentType.TEXT, comment="内容类型")
+    outline_id = Column(String(100), default="", comment="大纲ID")
     full_content = Column(Text(length=4294967295), default="", comment="完整消息内容")
     tokens = Column(Integer, default=0, comment="消息token数量")
     meta = Column(Text, default="", comment="额外元数据(温度、top_p等参数)")

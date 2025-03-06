@@ -113,8 +113,8 @@ class RagAPI:
             for file_path in files:
                 f = open(file_path, 'rb')
                 file_objects.append(f)
-                filename = os.path.basename(file_path)
-                files_list.append(("files", (filename, f, 'text/plain'))) 
+                file_name = os.path.basename(file_path)
+                files_list.append(("files", (file_name, f, 'text/plain'))) 
                 
             return self._make_request("POST", endpoint, data=data, files=files_list)
         finally:
