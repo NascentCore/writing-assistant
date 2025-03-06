@@ -69,6 +69,12 @@ const convertRoutesToMenuItems = (routes: RouteItem[]): MenuItem[] => {
   //     title: `最近对话${String(i + 1).padStart(2, '0')}`,
   //   })),
   // });
+  menuItems.push({
+    key: 'EditorPage',
+    icon: <Icon type="PersonalKnowledge" />,
+    title: '编辑器',
+    path: '/EditorPage',
+  });
 
   return menuItems;
 };

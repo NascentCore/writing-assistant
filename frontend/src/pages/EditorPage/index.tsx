@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '@/config';
 import { fetchWithAuth } from '@/utils/fetch';
+import { useNavigate } from '@umijs/max';
 import { useDebounceFn } from 'ahooks';
 import { AiEditor } from 'aieditor';
 import 'aieditor/dist/style.css';
@@ -30,6 +31,7 @@ function App() {
   const [currentDocId, setCurrentDocId] = useState<string | null>(() => {
     return localStorage.getItem(CURRENT_DOC_KEY) || null;
   });
+  const navigate = useNavigate();
 
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [outlineData, setOutlineData] = useState<OutlineNode[]>([]);
@@ -276,6 +278,9 @@ function App() {
           }}
         >
           <h1>售前方案写作助手</h1>
+          <Button style={{ marginLeft: 10 }} onClick={() => navigate(-1)}>
+            返回
+          </Button>
           <div className="header-buttons">
             <Button onClick={() => setShowFileModal(true)}> 文件上传</Button>
             <Button onClick={() => setShowAIChat(!showAIChat)}>AI对话</Button>
