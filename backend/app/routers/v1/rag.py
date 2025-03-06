@@ -657,7 +657,7 @@ async def upload_attachment(
             if not parser:
                 logger.error(f"upload_attachment 不支持解析的文件格式: {file_format}")
                 continue
-            content = await parser.content(file_location)
+            content = parser.content(file_location)
             if not content.strip():
                 logger.error(f"upload_attachment 解析文件 {file.filename} 时发生错误: 文件内容为空")
                 continue
@@ -676,7 +676,7 @@ async def upload_attachment(
                 if not parser:
                     logger.error(f"upload_attachment 不支持解析的文件格式: {file.file_ext}")
                     continue
-                content = await parser.content(file.file_path)
+                content = parser.content(file.file_path)
                 if not content.strip():
                     logger.error(f"upload_attachment 解析文件 {file.file_name} 时发生错误: 文件内容为空")
                     continue

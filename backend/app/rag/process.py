@@ -126,7 +126,7 @@ async def rag_content_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
                     continue
 
                 # 解析文件内容
-                content = await parser.content(rag_file.file_path)
+                content = parser.content(rag_file.file_path)
 
                 # 使用异步上下文管理器和事务上下文管理器更新数据库
                 async with get_async_db() as db:
