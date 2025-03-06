@@ -293,166 +293,40 @@ async def create_chat_session(
         logger.error(f"创建知识库会话失败: user_id={current_user.user_id}, error={str(e)}")
         return APIResponse.error(message=f"创建知识库会话失败: {str(e)}")
 
-@router.post("/chat", summary="知识库对话")
-async def chat(
-    request: ChatRequest,
+@router.delete("/chat/sessions/{session_id}", summary="删除知识库会话")
+async def delete_chat_session(
+    session_id: str = Path(..., description="会话ID"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
-        kb_ids = []
-        # 查询系统知识库
-        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
-        if kb:
-            kb_ids.append(kb.kb_id)
-        # 查询用户知识库
-        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
-                                                   RagKnowledgeBase.user_id == current_user.user_id, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
-        if kb:
-            kb_ids.append(kb.kb_id)
-        if not kb_ids:
-            logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到任何相关知识库")
-            return APIResponse.error(message="未找到相关知识库")
-
-        # 根据model_name获取模型
-        model = next((m for m in settings.LLM_MODELS if m["readable_model_name"] == request.model_name), None)
-        if not model:
-            logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到模型: {request.model_name}")
-            return APIResponse.error(message="请输入正确的模型名称")
-        
-        # session_id 验证
-        session_id = request.session_id
-        chat_session = db.query(ChatSession).filter(
+        # 验证会话是否存在且属于当前用户
+        session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
-            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
             ChatSession.user_id == current_user.user_id,
-            ChatSession.is_deleted == False
+            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
+            ChatSession.is_deleted.is_(False)  # 遵循 PEP 8
         ).first()
-        if not chat_session:
+        
+        if not session:
             return APIResponse.error(message="会话不存在或无权访问")
-
-        # 获取历史消息
-        history_messages = db.query(ChatMessage).filter(
+        
+        # 软删除会话
+        session.is_deleted = True
+        db.flush()  # 确保变更生效
+        
+        # 软删除该会话下的所有消息
+        db.query(ChatMessage).filter(
             ChatMessage.session_id == session_id,
-            ChatMessage.is_deleted == False
-        ).order_by(ChatMessage.id.desc()).limit(4).all()
-        # 拼装history
-        history_messages.reverse()
-        history = []
-        for i in range(len(history_messages) // 2):
-            question = history_messages[i * 2]
-            answer = history_messages[i * 2 + 1]
-            if question.question_id == answer.message_id:
-                history.append([question.content, answer.content])
+            ChatMessage.is_deleted.is_(False)
+        ).update({"is_deleted": True}, synchronize_session="fetch")
         
-        # 保存问题
-        question_message_id = f"msg-{shortuuid.uuid()}"
-        user_question = ChatMessage(
-            message_id=question_message_id,
-            session_id=session_id,
-            role="user",
-            content=request.question
-        )
-        db.add(user_question)
         db.commit()
-        
-        # 根据请求参数决定是否使用流式返回
-        streaming = request.streaming
-
-        response = rag_api.chat(
-            kb_ids=kb_ids,
-            question=request.question,
-            history=history,
-            streaming=streaming,
-            networking=settings.RAG_CHAT_NETWORKING,
-            product_source=settings.RAG_CHAT_PRODUCT_SOURCE,
-            rerank=settings.RAG_CHAT_RERANK,
-            only_need_search_results=settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
-            hybrid_search=settings.RAG_CHAT_HYBRID_SEARCH,
-            max_token=settings.RAG_CHAT_MAX_TOKENS,
-            api_base=model["base_url"],
-            api_key=model["api_key"],
-            model=model["model"],
-            api_context_length=settings.RAG_CHAT_API_CONTEXT_LENGTH,
-            chunk_size=settings.RAG_CHAT_CHUNK_SIZE,
-            top_p=settings.RAG_CHAT_TOP_P,
-            top_k=settings.RAG_CHAT_TOP_K,
-            temperature=settings.RAG_CHAT_TEMPERATURE,
-        )
-
-        if streaming:
-            async def generate():
-                try:
-                    assistant_content = ''
-                    for chunk in response:
-                        if chunk:
-                            response_text = chunk.get("response", "")
-                            # 构建新的响应格式
-                            new_chunk = {
-                                **chunk,  # 保留原有的所有字段
-                                "choices": [
-                                    {
-                                        "delta": {
-                                            "content": response_text,
-                                            "role": "assistant"
-                                        }
-                                    }
-                                ]
-                            }
-                            assistant_content += response_text
-                            yield f"data: {json.dumps(new_chunk, ensure_ascii=False)}\n\n"
-                    yield "data: [DONE]\n\n"
-                    # 流式响应结束后保存回答记录
-                    assistant_message = ChatMessage(
-                        message_id=f"msg-{shortuuid.uuid()}",
-                        session_id=session_id,
-                        question_id=question_message_id,
-                        role="assistant",
-                        content=assistant_content
-                    )
-                    db.add(assistant_message)
-                    db.commit()
-                except Exception as e:
-                    logger.exception("流式响应生成异常")
-                    error_msg = {"error": str(e)}
-                    yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
-                    yield "data: [DONE]\n\n"
-
-            return StreamingResponse(
-                generate(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "Transfer-Encoding": "chunked",
-                    "X-Session-ID": session_id
-                }
-            )
-        else:
-            if isinstance(response, dict) and response.get("code") == 200:
-                answer = response.get("history",[["", ""]])[0][1]
-                assistant_message = ChatMessage(
-                    message_id=f"msg-{shortuuid.uuid()}",
-                    session_id=session_id,
-                    question_id=question_message_id,
-                    role="assistant",
-                    content=answer
-                )
-                db.add(assistant_message)
-                db.commit() 
-                return APIResponse.success(
-                    message="对话成功",
-                    data=answer
-                )
-            else:
-                logger.error(f"RAG对话失败: user_id={current_user.user_id}, response={response}")
-                return APIResponse.error(message="对话失败")
-        
+        return APIResponse.success(message="会话删除成功")
+    
     except Exception as e:
-        logger.exception(f"知识库对话发生异常: {str(e)}")
-        return APIResponse.error(message=f"对话失败: {str(e)}")
+        db.rollback()  # 避免数据库处于不一致状态
+        return APIResponse.error(message=f"删除失败: {str(e)}")
 
 @router.get("/chat/sessions", summary="获取知识库会话列表")
 async def get_chat_sessions(
@@ -569,6 +443,169 @@ async def get_chat_session_detail(
         logger.error(f"获取知识库会话详情失败: {str(e)}")
         return APIResponse.error(message=f"获取知识库会话详情失败: {str(e)}")
 
+@router.post("/chat", summary="知识库对话")
+async def chat(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        kb_ids = []
+        # 查询系统知识库
+        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
+                                                   RagKnowledgeBase.is_deleted == False).first()
+        if kb:
+            kb_ids.append(kb.kb_id)
+        # 查询用户知识库
+        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
+                                                   RagKnowledgeBase.user_id == current_user.user_id, 
+                                                   RagKnowledgeBase.is_deleted == False).first()
+        if kb:
+            kb_ids.append(kb.kb_id)
+        if not kb_ids:
+            logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到任何相关知识库")
+            return APIResponse.error(message="未找到相关知识库")
+
+        # 根据model_name获取模型
+        model = next((m for m in settings.LLM_MODELS if m["readable_model_name"] == request.model_name), None)
+        if not model:
+            logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到模型: {request.model_name}")
+            return APIResponse.error(message="请输入正确的模型名称")
+        
+        # session_id 验证
+        session_id = request.session_id
+        chat_session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.is_deleted == False
+        ).first()
+        if not chat_session:
+            return APIResponse.error(message="会话不存在或无权访问")
+
+        # 获取历史消息
+        history_messages = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.is_deleted == False
+        ).order_by(ChatMessage.id.desc()).limit(4).all()
+        # 拼装history
+        history_messages.reverse()
+        history = []
+        for i in range(len(history_messages) // 2):
+            question = history_messages[i * 2]
+            answer = history_messages[i * 2 + 1]
+            if question.question_id == answer.message_id:
+                history.append([question.content, answer.content])
+        
+        # 保存问题
+        question_message_id = f"msg-{shortuuid.uuid()}"
+        user_question = ChatMessage(
+            message_id=question_message_id,
+            session_id=session_id,
+            role="user",
+            content=request.question
+        )
+        db.add(user_question)
+        db.commit()
+        
+        # 根据请求参数决定是否使用流式返回
+        streaming = request.streaming
+
+        response = rag_api.chat(
+            kb_ids=kb_ids,
+            question=request.question,
+            history=history,
+            streaming=streaming,
+            networking=settings.RAG_CHAT_NETWORKING,
+            product_source=settings.RAG_CHAT_PRODUCT_SOURCE,
+            rerank=settings.RAG_CHAT_RERANK,
+            only_need_search_results=settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
+            hybrid_search=settings.RAG_CHAT_HYBRID_SEARCH,
+            max_token=settings.RAG_CHAT_MAX_TOKENS,
+            api_base=model["base_url"],
+            api_key=model["api_key"],
+            model=model["model"],
+            api_context_length=settings.RAG_CHAT_API_CONTEXT_LENGTH,
+            chunk_size=settings.RAG_CHAT_CHUNK_SIZE,
+            top_p=settings.RAG_CHAT_TOP_P,
+            top_k=settings.RAG_CHAT_TOP_K,
+            temperature=settings.RAG_CHAT_TEMPERATURE,
+        )
+
+        if streaming:
+            async def generate():
+                try:
+                    assistant_content = ''
+                    for chunk in response:
+                        if chunk:
+                            response_text = chunk.get("response", "")
+                            if chunk.get("msg") == "success stream chat":
+                                continue
+                            # 构建新的响应格式
+                            new_chunk = {
+                                **chunk,  # 保留原有的所有字段
+                                "choices": [
+                                    {
+                                        "delta": {
+                                            "content": response_text,
+                                            "role": "assistant"
+                                        }
+                                    }
+                                ]
+                            }
+                            assistant_content += response_text
+                            yield f"data: {json.dumps(new_chunk, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    # 流式响应结束后保存回答记录
+                    assistant_message = ChatMessage(
+                        message_id=f"msg-{shortuuid.uuid()}",
+                        session_id=session_id,
+                        question_id=question_message_id,
+                        role="assistant",
+                        content=assistant_content
+                    )
+                    db.add(assistant_message)
+                    db.commit()
+                except Exception as e:
+                    logger.exception("流式响应生成异常")
+                    error_msg = {"error": str(e)}
+                    yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                generate(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Transfer-Encoding": "chunked",
+                    "X-Session-ID": session_id
+                }
+            )
+        else:
+            if isinstance(response, dict) and response.get("code") == 200:
+                answer = response.get("history",[["", ""]])[0][1]
+                assistant_message = ChatMessage(
+                    message_id=f"msg-{shortuuid.uuid()}",
+                    session_id=session_id,
+                    question_id=question_message_id,
+                    role="assistant",
+                    content=answer
+                )
+                db.add(assistant_message)
+                db.commit() 
+                return APIResponse.success(
+                    message="对话成功",
+                    data=answer
+                )
+            else:
+                logger.error(f"RAG对话失败: user_id={current_user.user_id}, response={response}")
+                return APIResponse.error(message="对话失败")
+        
+    except Exception as e:
+        logger.exception(f"知识库对话发生异常: {str(e)}")
+        return APIResponse.error(message=f"对话失败: {str(e)}")
+
 @router.post("/attachments", summary="知识库对话附件上传")
 async def upload_attachment(
     files: List[FastAPIUploadFile] = File(...),
@@ -657,7 +694,7 @@ async def upload_attachment(
             if not parser:
                 logger.error(f"upload_attachment 不支持解析的文件格式: {file_format}")
                 continue
-            content = parser.content(file_location)
+            content = await parser.async_content(file_location)
             if not content.strip():
                 logger.error(f"upload_attachment 解析文件 {file.filename} 时发生错误: 文件内容为空")
                 continue
@@ -676,7 +713,7 @@ async def upload_attachment(
                 if not parser:
                     logger.error(f"upload_attachment 不支持解析的文件格式: {file.file_ext}")
                     continue
-                content = parser.content(file.file_path)
+                content = await parser.async_content(file.file_path)
                 if not content.strip():
                     logger.error(f"upload_attachment 解析文件 {file.file_name} 时发生错误: 文件内容为空")
                     continue
