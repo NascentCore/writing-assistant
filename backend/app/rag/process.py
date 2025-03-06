@@ -86,7 +86,7 @@ async def get_rag_task():
                     
                     if next_status in queue_map:
                         await asyncio.wait_for(
-                            queue_map[next_status].put(file), 
+                            queue_map[next_status].put((file, 1)),
                             timeout=1.0
                         )
                         logger.info(f"get_rag_task 获取RAG文件任务: {file.file_id} {file.file_name} {file.status} -> {next_status}")
@@ -109,7 +109,7 @@ async def rag_content_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
         rag_file = None
         try:
             # 1. 从队列中获取任务
-            rag_file = await queue.get()
+            rag_file, retry_count = await queue.get()
             logger.info(f"rag_content_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
 
             # 2. 限制并发数处理任务
@@ -161,7 +161,7 @@ async def rag_summary_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
         rag_file = None
         try:
             # 1. 从队列中获取任务
-            rag_file = await queue.get()
+            rag_file, retry_count = await queue.get()
             logger.info(f"rag_summary_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
             
             # 2. 限制并发数处理任务
@@ -212,7 +212,7 @@ async def rag_upload_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
         rag_file = None
         try:
             # 1. 从队列中获取任务
-            rag_file = await queue.get()
+            rag_file, retry_count = await queue.get()
             logger.info(f"rag_upload_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}") 
             
             # 2. 限制并发数处理任务
@@ -259,7 +259,7 @@ async def rag_file_poll_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore)
     while True:
         rag_file = None
         try:
-            rag_file = await queue.get()
+            rag_file, retry_count = await queue.get()
             # logger.info(f"rag_file_poll_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
 
             async with semaphore:
@@ -270,14 +270,14 @@ async def rag_file_poll_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore)
                     await update_file_status(
                         rag_file.file_id,
                         RagFileStatus.FAILED,
-                        f"rag_file_poll_task 查询RAG解析进度失败: {resp.get('msg')}"
+                        f"rag_file_poll_task 查询RAG解析进度失败, msg: {resp.get('msg')}"
                     )
                     await asyncio.sleep(2)
                     continue
                 detail = details[0]
                 if detail.get("status") == "yellow" or detail.get("status") == "gray": # 黄色、灰色表示解析中
                     await asyncio.sleep(2)  # 等待2秒
-                    await queue.put(rag_file)  # 重新加入队列
+                    await queue.put((rag_file, 1))  # 重新加入队列
                 elif detail.get("status") == "green": # 绿色表示解析完成
                     await update_file_status(
                         rag_file.file_id,
@@ -298,14 +298,18 @@ async def rag_file_poll_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore)
                         f"rag_file_poll_task 文件RAG解析失败: {rag_file.file_id} 异常状态: {detail.get('status')}"
                     )
         except Exception as e:
-            logger.error(f"rag_file_poll_task 查询RAG解析进度时发生错误: {str(e)}")
             if rag_file:
-                await update_file_status(
-                    rag_file.file_id,
-                    RagFileStatus.FAILED,
-                    f"rag_file_poll_task 查询RAG解析进度时发生错误: {str(e)}"
-                )
-                await asyncio.sleep(1)
+                if retry_count < 6:
+                    logger.error(f"rag_file_poll_task 查询RAG解析进度时发生错误: {str(e)} retry_count: {retry_count}")
+                    await asyncio.sleep(10)
+                    await queue.put((rag_file, retry_count + 1))
+                else:
+                    await update_file_status(
+                        rag_file.file_id,
+                        RagFileStatus.FAILED,
+                        f"rag_file_poll_task 查询RAG解析进度时发生错误: {str(e)} retry_count: {retry_count}"
+                    )
+                    await asyncio.sleep(1)
         finally:
             if rag_file:
                 queue.task_done()
