@@ -4,6 +4,7 @@ import {
   // PlusCircleOutlined,
   PaperClipOutlined,
   SwapOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import type { AttachmentsProps } from '@ant-design/x';
 import { Attachments, Bubble, Sender, XProvider, XStream } from '@ant-design/x';
@@ -23,52 +24,6 @@ import ChatSessionList, { ChatMessage } from './components/ChatSessionList';
 import styles from './index.module.less';
 
 const md = markdownit({ html: true, breaks: true });
-
-// 定义消息渲染函数
-const messageRender = (
-  content: string,
-  props?: Record<string, unknown>,
-): React.ReactNode => {
-  const message = props?.['data-message'] as ChatMessage;
-  return (
-    <Flex vertical gap="small">
-      {/* 渲染消息内容 */}
-      <Typography>
-        <div dangerouslySetInnerHTML={{ __html: md.render(content) }} />
-      </Typography>
-
-      {/* 渲染关联文件 */}
-      {message?.files && message.files.length > 0 && (
-        <Flex
-          vertical
-          gap="small"
-          style={{
-            marginTop: 8,
-            background: '#f5f5f5',
-            padding: 8,
-            borderRadius: 4,
-          }}
-        >
-          <Typography.Text type="secondary">关联文件：</Typography.Text>
-          <Flex wrap="wrap" gap="small">
-            {message.files.map((file) => (
-              <Attachments.FileCard
-                key={file.file_id}
-                item={{
-                  uid: file.file_id,
-                  name: file.name,
-                  size: file.size,
-                  type: file.type,
-                  status: 'done',
-                }}
-              />
-            ))}
-          </Flex>
-        </Flex>
-      )}
-    </Flex>
-  );
-};
 
 const STORAGE_KEY = 'ai_chat_messages';
 const MODEL_STORAGE_KEY = 'ai_chat_model';
@@ -211,27 +166,82 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     [isNearBottom],
   );
 
-  // 处理会话切换
+  // 页面首次加载时滚动到底部
+  useEffect(() => {
+    // 使用 requestAnimationFrame 确保在DOM完全渲染后再滚动
+    const scrollToBottomImmediately = () => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
+          behavior: 'auto', // 使用 'auto' 而不是 'smooth' 以实现瞬间滚动
+        });
+      }
+    };
+
+    // 立即执行一次
+    scrollToBottomImmediately();
+
+    // 再次使用 requestAnimationFrame 确保在下一帧渲染后也执行滚动
+    // 这有助于解决某些情况下内容高度计算不准确的问题
+    requestAnimationFrame(() => {
+      requestAnimationFrame(scrollToBottomImmediately);
+    });
+
+    // 添加 resize 事件监听器，在窗口大小变化时也滚动到底部
+    const handleResize = () => {
+      scrollToBottomImmediately();
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  // 监听消息变化
+  useEffect(() => {
+    // 判断最后一条消息是否是用户发送的
+    const isUserMessage =
+      messages.length > 0 &&
+      messages[messages.length - 1].avatarType === 'user';
+
+    // 使用 requestAnimationFrame 确保在DOM更新后再滚动
+    requestAnimationFrame(() => {
+      scrollToBottom(isUserMessage);
+    });
+  }, [messages, scrollToBottom]);
+
+  // 处理会话切换，确保切换会话后也滚动到底部
   const handleSessionChange = useCallback(
     (sessionId: string, sessionMessages: ChatMessage[]) => {
       setActiveSessionId(sessionId);
       setMessages(sessionMessages);
 
-      // 滚动到底部
+      // 使用 requestAnimationFrame 确保在DOM更新后再滚动
+      // 延迟稍微长一点，确保内容已完全渲染
       setTimeout(() => {
-        scrollToBottom(false);
+        requestAnimationFrame(() => {
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTo({
+              top: scrollContainerRef.current.scrollHeight,
+              behavior: 'auto', // 使用 'auto' 实现瞬间滚动
+            });
+          }
+        });
       }, 100);
     },
     [scrollToBottom],
   );
 
   // 计算要显示的消息
-  const displayMessages = messages.map((msg) => ({
-    ...msg,
-    render: messageRender,
-    'data-message': msg, // 传递消息对象给渲染函数
-    loading: msg.loading, // 确保 loading 属性被传递给 Bubble 组件
-  }));
+  const displayMessages = messages.map((msg) => {
+    return {
+      ...msg,
+      files: msg.files, // 直接传递files属性给messageRender函数
+      loading: msg.loading, // 确保 loading 属性被传递给 Bubble 组件
+    };
+  });
 
   // 处理模型变更
   const handleModelChange = (value: ModelType) => {
@@ -243,6 +253,60 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   const handleRefreshSessions = useCallback((refreshFn: () => void) => {
     setRefreshSessionsList(() => refreshFn);
   }, []);
+
+  // 添加一个共享的messageRender函数
+  const sharedMessageRender = (
+    content: string,
+    avatarType: 'user' | 'assistant',
+  ) => {
+    // 查找当前消息
+    const currentMessage = messages.find(
+      (msg) => msg.content === content && msg.avatarType === avatarType,
+    );
+    const files = currentMessage?.files;
+    return (
+      <Flex vertical gap="small">
+        {/* 渲染消息内容 */}
+        <Typography>
+          <div
+            dangerouslySetInnerHTML={{
+              __html: md.render(content),
+            }}
+          />
+        </Typography>
+
+        {/* 只在用户消息中渲染关联文件 */}
+        {avatarType === 'user' && files && files.length > 0 && (
+          <Flex
+            vertical
+            gap="small"
+            style={{
+              marginTop: 8,
+              background: '#f5f5f5',
+              padding: 8,
+              borderRadius: 4,
+            }}
+          >
+            <Typography.Text type="secondary">关联文件：</Typography.Text>
+            <Flex wrap="wrap" gap="small">
+              {files.map((file) => (
+                <Attachments.FileCard
+                  key={file.file_id}
+                  item={{
+                    uid: file.file_id,
+                    name: file.name,
+                    size: file.size,
+                    type: file.type,
+                    status: 'done',
+                  }}
+                />
+              ))}
+            </Flex>
+          </Flex>
+        )}
+      </Flex>
+    );
+  };
 
   const headerNode = (
     <Sender.Header
@@ -265,7 +329,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           const formData = new FormData();
           formData.append('files', file);
           const xhr = new XMLHttpRequest();
-          xhr.open('POST', `${API_BASE_URL}/api/v1/rag/files?category=user`);
+          xhr.open('POST', `${API_BASE_URL}/api/v1/rag/attachments`);
           xhr.setRequestHeader(
             'authorization',
             `Bearer ${localStorage.getItem('token')}`,
@@ -321,11 +385,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           // 处理新完成上传的文件
           const completedFiles = fileList
             .filter((file) => {
-              return (
-                file.status === 'done' &&
-                file.response?.code === 200 &&
-                file.response?.data?.[0]
-              );
+              return file.status === 'done' && file.response?.code === 200;
             })
             .map((file) => {
               const fileData = file.response.data[0];
@@ -381,25 +441,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       });
     },
   }));
-
-  // 页面首次加载时滚动到底部
-  useEffect(() => {
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTo({
-        top: scrollContainerRef.current.scrollHeight,
-        behavior: 'auto',
-      });
-    }
-  }, []);
-
-  // 监听消息变化
-  useEffect(() => {
-    // 判断最后一条消息是否是用户发送的
-    const isUserMessage =
-      messages.length > 0 &&
-      messages[messages.length - 1].avatarType === 'user';
-    scrollToBottom(isUserMessage);
-  }, [messages]);
 
   // 处理 URL 参数变化
   useEffect(() => {
@@ -492,8 +533,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
         throw new Error('Stream response not available');
       }
 
-      // 创建一个新的消息对象用于累积内容
-      const assistantMessage = createMessage('', false, []); // 明确指定空文件数组
+      // 创建一个新的消息对象用于累积内容，不传递文件信息
+      const assistantMessage = createMessage('', false); // 不再传递用户消息中的文件信息
       setMessages((prev: ChatMessage[]) => [
         ...prev,
         {
@@ -517,14 +558,13 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
 
           if (data.choices?.[0]?.delta?.content) {
             const content = data.choices[0].delta.content;
-            // 更新最后一条消息的内容，保持文件信息不变
+            // 更新最后一条消息的内容，不保留文件信息
             setMessages((prev: ChatMessage[]) => {
               const newMessages = [...prev];
               const lastMessage = newMessages[newMessages.length - 1];
               newMessages[newMessages.length - 1] = {
                 ...lastMessage,
                 content: lastMessage.content + content,
-                files: lastMessage.files || [], // 保持文件信息
                 loading: false, // 收到第一个有效内容时就移除 loading 状态
               };
               return newMessages;
@@ -558,7 +598,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
         refreshSessionsList();
       }
     } catch (error) {
-      // 在发生错误时添加错误消息
+      // 在发生错误时添加错误消息，不包含文件信息
       const errorMessage = createMessage(
         '抱歉，处理您的请求时出现了错误。',
         false,
@@ -650,7 +690,32 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
               </div>
             </Flex>
             <div className={styles.scrollContainer} ref={scrollContainerRef}>
-              <Bubble.List items={displayMessages} />
+              <Bubble.List
+                items={displayMessages.map((msg) => ({
+                  ...msg,
+                  role: msg.avatarType === 'user' ? 'user' : 'assistant',
+                }))}
+                roles={{
+                  user: {
+                    placement: 'end',
+                    avatar: {
+                      icon: <UserOutlined />,
+                      style: { background: '#87d068' },
+                    },
+                    messageRender: (content: string) =>
+                      sharedMessageRender(content, 'user'),
+                  },
+                  assistant: {
+                    placement: 'start',
+                    avatar: {
+                      icon: <UserOutlined />,
+                      style: { background: '#fde3cf' },
+                    },
+                    messageRender: (content: string) =>
+                      sharedMessageRender(content, 'assistant'),
+                  },
+                }}
+              />
             </div>
             <div>
               <Sender
