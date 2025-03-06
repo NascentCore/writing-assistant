@@ -90,49 +90,51 @@ const Home: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>我是小标，你的标书写作助手</h1>
-        <p className={styles.subtitle}>
-          请告诉我你的具体需求，让我来帮你完成吧~
-        </p>
-      </div>
-
       {/* <Tabs defaultActiveKey="0" className={styles.tabs}>
         {tabs.map((tab, index) => (
           <TabPane tab={tab} key={index} />
         ))}
       </Tabs> */}
-
-      <Spin spinning={loading} tip="加载模板中...">
-        <div className={styles.cardGrid}>
-          {error ? (
-            <div className={styles.errorMessage}>{error}，请刷新页面重试</div>
-          ) : allCards.length > 0 ? (
-            allCards.map((card) => (
-              <div
-                key={card.id}
-                className={styles.card}
-                onClick={() => history.push(`/writing/${card.id}`)}
-              >
-                <div className={styles.cardIcon}>
-                  {card.icon.startsWith('<img') ? (
-                    <div dangerouslySetInnerHTML={{ __html: card.icon }} />
-                  ) : (
-                    card.icon
-                  )}
-                </div>
-                <div className={styles.cardContent}>
-                  <h3>{card.title}</h3>
-                  <p>{card.description}</p>
-                </div>
-                {card.tag && <div className={styles.cardTag}>{card.tag}</div>}
-              </div>
-            ))
-          ) : (
-            !loading && <div className={styles.emptyMessage}>暂无可用模板</div>
-          )}
+      <div style={{ marginBottom: 'auto' }}>
+        <div className={styles.header}>
+          <h1 className={styles.title}>我是小标，你的标书写作助手</h1>
+          <p className={styles.subtitle}>
+            请告诉我你的具体需求，让我来帮你完成吧~
+          </p>
         </div>
-      </Spin>
+        <Spin spinning={loading} tip="加载模板中...">
+          <div className={styles.cardGrid}>
+            {error ? (
+              <div className={styles.errorMessage}>{error}，请刷新页面重试</div>
+            ) : allCards.length > 0 ? (
+              allCards.map((card) => (
+                <div
+                  key={card.id}
+                  className={styles.card}
+                  onClick={() => history.push(`/writing/${card.id}`)}
+                >
+                  <div className={styles.cardIcon}>
+                    {card.icon.startsWith('<img') ? (
+                      <div dangerouslySetInnerHTML={{ __html: card.icon }} />
+                    ) : (
+                      card.icon
+                    )}
+                  </div>
+                  <div className={styles.cardContent}>
+                    <h3>{card.title}</h3>
+                    <p>{card.description}</p>
+                  </div>
+                  {card.tag && <div className={styles.cardTag}>{card.tag}</div>}
+                </div>
+              ))
+            ) : (
+              !loading && (
+                <div className={styles.emptyMessage}>暂无可用模板</div>
+              )
+            )}
+          </div>
+        </Spin>
+      </div>
 
       <div className={styles.inputArea}>
         <Sender
