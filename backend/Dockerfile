@@ -7,12 +7,20 @@ COPY app /app/
 COPY requirements.txt /app/
 
 # 安装必要的系统依赖
-RUN apk add --no-cache \
+RUN apk update && apk add --no-cache \
     tesseract-ocr \
     tesseract-ocr-data-chi_sim \
     poppler-utils \
     libstdc++ \
-    openblas
+    openblas \
+    build-base \
+    cmake \
+    ninja \
+    gcc \
+    g++ \
+    python3-dev \
+    libffi-dev \
+    musl-dev
 
 # 安装 Python 依赖
 RUN pip install --upgrade pip && \
