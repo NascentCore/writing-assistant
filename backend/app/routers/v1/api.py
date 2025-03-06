@@ -385,7 +385,7 @@ async def upload_files(
                 
                 result.append({
                     "file_id": file_id,
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "size": len(contents),
                     "content_type": file_format,
                     "path": str(file_location)

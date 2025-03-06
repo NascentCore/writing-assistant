@@ -1,23 +1,24 @@
+import json
 import logging
-from pathlib import Path as PathLib
-from typing import List, Optional, Dict, Any
 import shortuuid
-from fastapi import APIRouter, Depends, UploadFile as FastAPIUploadFile, File
-from fastapi.params import Body, Query, Path
+from pathlib import Path as PathLib
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, File, UploadFile as FastAPIUploadFile
+from fastapi.params import Body, Path, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
-from app.models.rag import RagKnowledgeBase, RagFile, RagKnowledgeBaseType, RagFileStatus
+from app.models.chat import ChatMessage, ChatSession, ChatSessionType
+from app.models.rag import RagFile, RagFileStatus, RagKnowledgeBase, RagKnowledgeBaseType
 from app.models.user import User
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from app.rag.parser import get_parser, get_file_format
 from app.rag.rag_api import rag_api
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
-from fastapi.responses import StreamingResponse
-import json
 
 logger = logging.getLogger("app")
 
@@ -118,7 +119,7 @@ async def upload_files(
                 file_format = get_file_format(str(file_location))
                 result.append({
                     "file_id": file_id,
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "size": len(contents),
                     "content_type": file_format,
                     "path": str(file_location)
@@ -622,7 +623,7 @@ async def upload_attachment(
                 file_format = get_file_format(str(file_location))
                 result.append({
                     "file_id": file_id,
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "size": len(contents),
                     "content_type": file_format,
                 })
@@ -666,7 +667,7 @@ async def upload_attachment(
         for file in existing_files:
             result.append({
                 "file_id": file.file_id,
-                "filename": file.file_name,
+                "file_name": file.file_name,
                 "size": file.file_size,
                 "content_type": file.file_ext,
             })
