@@ -9,7 +9,6 @@ COPY requirements.txt /app/
 # 安装OCR依赖
 RUN apk add --no-cache \
     tesseract-ocr \
-    tesseract-ocr-data \
     tesseract-ocr-data-chi_sim \
     poppler-utils \
     opencv \
