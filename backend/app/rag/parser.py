@@ -5,10 +5,11 @@ import openai
 import aiofiles
 import pytesseract
 from pdf2image import convert_from_path
+import asyncio
 
 class FileParser:
     """文件解析器基类"""
-    async def content(self, file_path: str) -> str:
+    def content(self, file_path: str) -> str:
         raise NotImplementedError
 
     async def summary(self, content: str, length: str = "small") -> str:
@@ -123,7 +124,7 @@ class PDFParser(FileParser):
 
 class DocxParser(FileParser):
     """Word文档解析器"""
-    async def content(self, file_path: str) -> str:
+    def content(self, file_path: str) -> str:
         try:
             # 加载Word文档
             doc = Document(file_path)
