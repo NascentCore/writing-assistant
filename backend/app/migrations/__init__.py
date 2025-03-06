@@ -2,6 +2,7 @@ from app.migrations.add_user_id import run_migration as add_user_id
 from app.migrations.recreate_version_table import run_migration as recreate_version_table
 from app.migrations.add_system_config import run_migration as add_system_config
 from app.migrations.add_content_type_and_outline import run_migration as add_content_type_and_outline
+from app.migrations.add_template_variables import run_migration as add_template_variables
 
 def run_all_migrations():
     """运行所有迁移"""
@@ -10,6 +11,7 @@ def run_all_migrations():
         recreate_version_table,
         add_system_config,
         add_content_type_and_outline,
+        add_template_variables,
     ]
     
     for migration in migrations:

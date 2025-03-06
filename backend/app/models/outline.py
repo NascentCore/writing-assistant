@@ -40,7 +40,6 @@ class Outline(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(100), nullable=True, index=True, comment="用户ID，为空表示系统预留大纲")
-
     title = Column(String(255), nullable=False, comment="大纲标题")
     reference_status = Column(Enum(ReferenceStatus), nullable=False, default=ReferenceStatus.NOT_REFERENCED, comment="引用状态")
     created_at = Column(DateTime, default=datetime.now)
@@ -187,6 +186,7 @@ class WritingTemplate(Base):
 
     id = Column(String(36, collation='utf8mb4_bin'), primary_key=True, default=generate_uuid, index=True)
     show_name = Column(String(255), nullable=False, comment="模板显示名称")
+    description = Column(Text, nullable=True, comment="大纲描述")
     value = Column(Text, nullable=False, comment="模板内容")
     is_default = Column(Boolean, default=False, comment="是否默认模板")
     has_steps = Column(Boolean, default=False, comment="是否分步骤")
