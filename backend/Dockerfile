@@ -6,14 +6,25 @@ WORKDIR /app
 COPY app /app/
 COPY requirements.txt /app/
 
-# 安装 Python 依赖
-RUN pip install -r /app/requirements.txt
-
-# 安装OCR依赖
-RUN apk add --no-cache \
+# 安装必要的系统依赖
+RUN apk update && apk add --no-cache \
     tesseract-ocr \
     tesseract-ocr-data-chi_sim \
-    poppler-utils
+    poppler-utils \
+    libstdc++ \
+    openblas \
+    build-base \
+    cmake \
+    ninja \
+    gcc \
+    g++ \
+    python3-dev \
+    libffi-dev \
+    musl-dev
+
+# 安装 Python 依赖
+RUN pip install --upgrade pip && \
+    pip install -r /app/requirements.txt
 
 # 复制 Nginx 配置（如有定制需求）
 COPY nginx.conf /etc/nginx/http.d/default.conf
