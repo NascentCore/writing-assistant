@@ -123,8 +123,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
         setModels(response.models);
         // 如果没有选中的模型，默认选择第一个
         if (!selectedModel && response.models.length > 0) {
-          setSelectedModel(response.models[0].id);
-          localStorage.setItem(MODEL_STORAGE_KEY, response.models[0].id);
+          setSelectedModel(response.models[0].name);
+          localStorage.setItem(MODEL_STORAGE_KEY, response.models[0].name);
         }
       } catch (error) {}
     };
@@ -620,7 +620,19 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       setItems([]);
     }
   };
+  const handleSelectedModel = (selectedModel: string) => {
+    console.log('models', models);
+    if (models.length === 0) {
+      return '';
+    }
 
+    // 判断下selectedModel是否在models中
+    const model = models.find((model) => model.name === selectedModel);
+    if (model) {
+      return selectedModel;
+    }
+    return models[0].name;
+  };
   return (
     <div className={styles.container}>
       <XProvider>
@@ -671,7 +683,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                 </div>
                 <Select
                   size="small"
-                  value={selectedModel}
+                  value={handleSelectedModel(selectedModel)}
                   onChange={handleModelChange}
                   popupMatchSelectWidth={false}
                   prefix={<SwapOutlined />}

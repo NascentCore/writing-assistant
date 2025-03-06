@@ -111,7 +111,7 @@ const ConversationsList = React.memo(
         items={items}
         activeKey={activeKey}
         onActiveChange={onActiveChange}
-        menu={menu}
+        // menu={menu}
         // groupable
       />
     );
@@ -370,12 +370,6 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
         .replace(/`(.*?)`/g, '$1') // 去除行内代码
         .replace(/#+\s(.*)/g, '$1') // 去除标题
         .replace(/\n/g, ' '); // 替换换行为空格
-
-      // 截断过长的内容
-      if (plainText.length > 30) {
-        plainText = plainText.substring(0, 30) + '...';
-      }
-
       return plainText;
     },
     [],
