@@ -32,8 +32,7 @@ const LoginPage: React.FC = () => {
         localStorage.setItem('token', response.access_token);
         localStorage.setItem('username', values.username);
         localStorage.setItem('admin', response.admin.toString());
-
-        history.push('/');
+        window.location.href = '/';
       }
     } catch (error) {
       messageApi.error('登录失败，请稍后重试');

@@ -1,5 +1,4 @@
 import { fetchWithAuthNew } from '@/utils/fetch';
-import { history } from '@umijs/max';
 import { Spin, message } from 'antd';
 import React, { useEffect, useState } from 'react';
 import CustomerSender from './components/Sender';
@@ -13,12 +12,14 @@ interface WritingCard {
   description: string;
   icon: string;
   tag?: string;
+  value?: string;
 }
 
 // 模板接口类型
 interface Template {
   id: string;
   show_name: string;
+  description: string;
   value: string;
   is_default: boolean;
   background_url: string;
@@ -45,6 +46,8 @@ const Home: React.FC = () => {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedTemplateValue, setSelectedTemplateValue] =
+    useState<string>('');
 
   // 获取模板列表
   useEffect(() => {
@@ -78,15 +81,23 @@ const Home: React.FC = () => {
   const templateCards: WritingCard[] = templates.map((template) => ({
     id: template.id,
     title: template.show_name,
-    description: template.value,
+    description: template.description,
     icon: template.background_url
       ? `<img src="${template.background_url}" alt="${template.show_name}" style="width: 24px; height: 24px;" />`
       : '📄',
     tag: template.has_steps ? '分步骤' : undefined,
+    value: template.value,
   }));
 
   // 合并静态写作类型和模板卡片
   const allCards = [...writingTypes, ...templateCards];
+
+  // 处理卡片点击事件
+  const handleCardClick = (card: WritingCard) => {
+    if (card.value) {
+      setSelectedTemplateValue(card.value);
+    }
+  };
 
   return (
     <div className={styles.container}>
@@ -111,7 +122,7 @@ const Home: React.FC = () => {
                 <div
                   key={card.id}
                   className={styles.card}
-                  onClick={() => history.push(`/writing/${card.id}`)}
+                  onClick={() => handleCardClick(card)}
                 >
                   <div className={styles.cardIcon}>
                     {card.icon.startsWith('<img') ? (
@@ -138,6 +149,7 @@ const Home: React.FC = () => {
 
       <div className={styles.inputArea}>
         <CustomerSender
+          value={selectedTemplateValue}
           onMessageSent={(message) => {
             console.log('发送消息:', message);
             // 这里可以添加处理消息的逻辑
