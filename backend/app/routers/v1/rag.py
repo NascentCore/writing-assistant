@@ -32,6 +32,7 @@ class ChatRequest(BaseModel):
     model_name: str = Field(description="模型名称")
     session_id: str = Field(description="会话ID")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
+    files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
     streaming: Optional[bool] = Field(default=True, description="是否使用流式返回")
 
     class Config:
@@ -440,6 +441,7 @@ async def get_chat_session_detail(
                         "message_id": msg.message_id,
                         "role": msg.role,
                         "content": msg.content,
+                        "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages
@@ -509,18 +511,23 @@ async def chat(
             content_preview = file.content[:settings.RAG_CHAT_PER_FILE_MAX_LENGTH]
             custom_prompt += f"文件名: {file.file_name}\n文件内容: {content_preview}\n\n"
 
-        # 获取历史消息
-        history_messages = db.query(ChatMessage).filter(
+        # 获取最近的2条大模型回答
+        recent_answers = db.query(ChatMessage).filter(
             ChatMessage.session_id == session_id,
+            ChatMessage.role == "assistant",
             ChatMessage.is_deleted == False
-        ).order_by(ChatMessage.id.desc()).limit(4).all()
-        # 拼装history
-        history_messages.reverse()
+        ).order_by(ChatMessage.id.desc()).limit(2).all()
+        
         history = []
-        for i in range(len(history_messages) // 2):
-            question = history_messages[i * 2]
-            answer = history_messages[i * 2 + 1]
-            if question.question_id == answer.message_id:
+        recent_answers.reverse()
+        for answer in recent_answers:
+            question = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session_id,
+                ChatMessage.message_id == answer.question_id,
+                ChatMessage.role == "user",
+                ChatMessage.is_deleted == False
+            ).first()
+            if question:
                 history.append([question.content, answer.content])
         
         # 保存问题
@@ -529,10 +536,38 @@ async def chat(
             message_id=question_message_id,
             session_id=session_id,
             role="user",
-            content=request.question
+            content=request.question,
+            meta=json.dumps({
+                "files": request.files
+            })
         )
         db.add(user_question)
         db.commit()
+
+        logger.info(json.dumps({
+            "session_id": session_id,
+            "message_id": question_message_id,
+            "user_id": current_user.user_id,
+            "kb_ids": kb_ids,
+            "question": request.question,
+            "custom_prompt": custom_prompt,
+            "history": history,
+            "streaming": request.streaming,
+            "networking": settings.RAG_CHAT_NETWORKING,
+            "product_source": settings.RAG_CHAT_PRODUCT_SOURCE,
+            "rerank": settings.RAG_CHAT_RERANK,
+            "only_need_search_results": settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
+            "hybrid_search": settings.RAG_CHAT_HYBRID_SEARCH,
+            "max_token": settings.RAG_CHAT_MAX_TOKENS,
+            "api_base": model['base_url'],
+            "api_key": model['api_key'],
+            "model": model['model'],
+            "api_context_length": settings.RAG_CHAT_API_CONTEXT_LENGTH,
+            "chunk_size": settings.RAG_CHAT_CHUNK_SIZE,
+            "top_p": settings.RAG_CHAT_TOP_P,
+            "top_k": settings.RAG_CHAT_TOP_K,
+            "temperature": settings.RAG_CHAT_TEMPERATURE
+        }, ensure_ascii=False))
         
         # 根据请求参数决定是否使用流式返回
         streaming = request.streaming
