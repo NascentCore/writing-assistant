@@ -227,7 +227,7 @@ class OutlineGenerator:
             # 递归构建返回数据
             def build_paragraph_data(paragraph):
                 data = {
-                    "id": paragraph.id,
+                    "id": str(paragraph.id),
                     "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
                     "title": paragraph.title,
                     "description": paragraph.description,

@@ -68,7 +68,7 @@ class GenerateOutlineRequest(BaseModel):
     outline_id: Optional[str] = Field(None, description="大纲ID，如果提供则直接返回对应大纲")
     prompt: Optional[str] = Field(None, description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
-    readable_model_name: Optional[str] = Field(None, description="模型")
+    model_name: Optional[str] = Field(None, description="模型")
 
 
 class WebLinkUpdate(BaseModel):
@@ -254,7 +254,7 @@ async def generate_outline(
         # 构建响应数据
         def build_paragraph_data(paragraph):
             data = {
-                "id": paragraph.id,
+                "id": str(paragraph.id),
                 "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
                 "title": paragraph.title,
                 "description": paragraph.description,
@@ -268,16 +268,16 @@ async def generate_outline(
             
             # 只有1级段落才有引用
             if paragraph.level == 1:
+                data["references"] = []
                 # 获取引用
                 references = db.query(Reference).filter(
                     Reference.sub_paragraph_id == paragraph.id
                 ).all()
                 
                 if references:
-                    data["references"] = []
                     for ref in references:
                         ref_data = {
-                            "id": ref.id,
+                            "id": str(ref.id),
                             "type": ref.type,
                             "is_selected": ref.is_selected
                         }
@@ -290,7 +290,7 @@ async def generate_outline(
                             
                             if web_link:
                                 ref_data["web_link"] = {
-                                    "id": web_link.id,
+                                    "id": str(web_link.id),
                                     "url": web_link.url,
                                     "title": web_link.title,
                                     "summary": web_link.summary,
@@ -391,7 +391,7 @@ async def generate_outline(
             file_ids=request.file_ids or [],
             session_id=session_id,
             assistant_message_id=assistant_message_id,
-            readable_model_name=request.readable_model_name
+            readable_model_name=request.model_name
         ))
         
         loop.close()
@@ -796,7 +796,7 @@ async def get_outline(
     # 递归构建段落数据
     def build_paragraph_data(paragraph):
         data = {
-            "id": paragraph.id,
+            "id": str(paragraph.id),
             "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
             "title": paragraph.title,
             "description": paragraph.description,
@@ -814,7 +814,7 @@ async def get_outline(
             # 从缓存中获取引用
             for ref in references_dict.get(paragraph.id, []):
                 ref_data = {
-                    "id": ref.id,
+                    "id": str(ref.id),
                     "type": ref.type,
                     "is_selected": ref.is_selected
                 }
@@ -824,7 +824,7 @@ async def get_outline(
                     web_link = weblinks_dict.get(ref.id)
                     if web_link:
                         ref_data["web_link"] = {
-                            "id": web_link.id,
+                            "id": str(web_link.id),
                             "url": web_link.url,
                             "title": web_link.title,
                             "summary": web_link.summary,
@@ -849,7 +849,7 @@ async def get_outline(
     
     # 构建响应数据
     response_data = {
-        "id": outline.id,
+        "id": str(outline.id),
         "title": outline.title,
         "markdown_content": outline.markdown_content,
         "sub_paragraphs": [
@@ -866,7 +866,7 @@ class GenerateFullContentRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="会话ID")
     prompt: Optional[str] = Field(None, description="直接生成模式下的写作提示")
     file_ids: Optional[List[str]] = Field(None, description="直接生成模式下的参考文件ID列表")
-    readable_model_name: Optional[str] = Field(None, description="模型")
+    model_name: Optional[str] = Field(None, description="模型")
 
 
 @router.post("/content/generate")
@@ -1193,7 +1193,7 @@ async def get_templates(
         outlines = {}
         if all_outline_ids:
             outline_records = db.query(Outline).filter(Outline.id.in_(all_outline_ids)).all()
-            outlines = {str(outline.id): {"id": outline.id, "title": outline.title} for outline in outline_records}
+            outlines = {str(outline.id): {"id": str(outline.id), "title": outline.title} for outline in outline_records}
         
         # 构建响应数据
         response_data = {
@@ -1209,7 +1209,7 @@ async def get_templates(
                     "variables": template.variables,
                     "created_at": template.created_at.isoformat(),
                     "updated_at": template.updated_at.isoformat(),
-                    "outlines": [outlines.get(str(outline_id), {"id": outline_id, "title": "未知大纲"}) 
+                    "outlines": [outlines.get(str(outline_id), {"id": str(outline_id), "title": "未知大纲"}) 
                                 for outline_id in (template.default_outline_ids or [])],
                     "has_steps": template.has_steps
                 }
@@ -1466,8 +1466,8 @@ async def get_chat_session_detail(
                         "role": msg.role,
                         "content": msg.content,
                         "content_type": msg.content_type,
-                        "document_id": msg.document_id,
-                        "outline_id": msg.outline_id,
+                        "document_id": str(msg.document_id) if msg.document_id else "",
+                        "outline_id": str(msg.outline_id) if msg.outline_id else "",
                         "task_id": msg.task_id,
                         "task_status": msg.task_status,
                         "task_result": msg.task_result,
