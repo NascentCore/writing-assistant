@@ -1,6 +1,6 @@
 import { API_BASE_URL } from '@/config';
 import { fetchWithAuth } from '@/utils/fetch';
-import { useLocation, useNavigate } from '@umijs/max';
+import { useNavigate } from '@umijs/max';
 import { useDebounceFn } from 'ahooks';
 import { AiEditor } from 'aieditor';
 import 'aieditor/dist/style.css';
@@ -8,6 +8,7 @@ import { Button, Empty, Modal } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AIChat from './components/AIChat';
+import DocumentList from './components/DocumentList';
 import ExportBtnGroup from './components/ExportBtn';
 import FileUpload from './components/FileUpload';
 import OutLine from './components/OutLine';
@@ -27,25 +28,9 @@ interface OutlineNode extends DataNode {
 function App() {
   const divRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<AiEditor | null>(null);
-  const location = useLocation();
-
-  // 从 URL 查询参数中获取 document_id
-  const getDocumentIdFromQuery = () => {
-    const query = new URLSearchParams(location.search);
-    const documentId = query.get('document_id');
-    return documentId;
-  };
-
   const [currentDocId, setCurrentDocId] = useState<string | null>(() => {
-    // 优先从 URL 查询参数中获取 document_id
-    const docIdFromQuery = getDocumentIdFromQuery();
-    if (docIdFromQuery) {
-      return docIdFromQuery;
-    }
-    // 如果 URL 查询参数中没有 document_id，则从 localStorage 中获取
     return localStorage.getItem(CURRENT_DOC_KEY) || null;
   });
-
   const navigate = useNavigate();
 
   const [showVersionHistory, setShowVersionHistory] = useState(false);
@@ -247,28 +232,18 @@ function App() {
     };
   }, [currentDocId, loadDocumentContent]);
 
-  // 监听 URL 查询参数变化，更新 currentDocId
-  useEffect(() => {
-    const docIdFromQuery = getDocumentIdFromQuery();
-    if (docIdFromQuery && docIdFromQuery !== currentDocId) {
-      setCurrentDocId(docIdFromQuery);
-    }
-  }, [location.search]);
-
   // 监听 currentDocId 变化，保存到 localStorage
   useEffect(() => {
-    // 只有当 currentDocId 不是从 URL 查询参数中获取的时候，才保存到 localStorage
-    const docIdFromQuery = getDocumentIdFromQuery();
-    if (currentDocId && currentDocId !== docIdFromQuery) {
+    if (currentDocId) {
       localStorage.setItem(CURRENT_DOC_KEY, currentDocId);
-    } else if (!currentDocId) {
+    } else {
       localStorage.removeItem(CURRENT_DOC_KEY);
       if (editorRef.current) {
         editorRef.current.destroy();
         editorRef.current = null;
       }
     }
-  }, [currentDocId, location.search]);
+  }, [currentDocId]);
 
   // 添加键盘事件监听
   useEffect(() => {
@@ -307,7 +282,7 @@ function App() {
             返回
           </Button>
           <div className="header-buttons">
-            {/* <Button onClick={() => setShowFileModal(true)}> 文件上传</Button> */}
+            <Button onClick={() => setShowFileModal(true)}> 文件上传</Button>
             <Button onClick={() => setShowAIChat(!showAIChat)}>AI对话</Button>
             <ExportBtnGroup editorRef={editorRef} />
             {currentDocId && (
@@ -381,7 +356,7 @@ function App() {
             </div>
             <div className="aie-main">
               <div className="aie-directory-content">
-                {/* <div className="aie-directory">
+                <div className="aie-directory">
                   <div
                     style={{ background: '#fff', padding: 20, marginTop: 18 }}
                   >
@@ -395,7 +370,7 @@ function App() {
                       }}
                     />
                   </div>
-                </div> */}
+                </div>
               </div>
               <div className="aie-container-panel">
                 {currentDocId ? (

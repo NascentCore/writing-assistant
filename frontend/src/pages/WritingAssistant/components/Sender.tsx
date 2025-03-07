@@ -1,16 +1,13 @@
 import { API_BASE_URL } from '@/config';
-import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
+import { fetchWithAuthNew } from '@/utils/fetch';
 import {
   CloudUploadOutlined,
+  FileOutlined,
   PaperClipOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
-import {
-  Attachments,
-  XProvider,
-  Sender as XSender,
-  XStream,
-} from '@ant-design/x';
+import { Attachments, XProvider, Sender as XSender } from '@ant-design/x';
+import { history } from '@umijs/max';
 import { Badge, Button, Flex, GetRef, Select, message } from 'antd';
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import styles from './Sender.module.less';
@@ -27,6 +24,9 @@ interface FileItem {
 interface SenderProps {
   onMessageSent?: (message: string) => void;
   value?: string;
+  selectedOutlineId?: number | null;
+  outlines?: { id: number; title: string }[] | null;
+  has_steps?: boolean;
 }
 
 interface Model {
@@ -36,7 +36,13 @@ interface Model {
 }
 
 const Sender = forwardRef<any, SenderProps>(
-  ({ onMessageSent, value: initialValue }) => {
+  ({
+    onMessageSent,
+    value: initialValue,
+    selectedOutlineId: initialOutlineId,
+    outlines = [],
+    has_steps = false,
+  }) => {
     const [value, setValue] = useState(initialValue || '');
     const [items, setItems] = useState<any[]>([]);
     const [open, setOpen] = useState(false);
@@ -45,6 +51,9 @@ const Sender = forwardRef<any, SenderProps>(
     const [selectedModel, setSelectedModel] = useState<string>(() => {
       return localStorage.getItem('ai_chat_model') || '';
     });
+    const [selectedOutlineId, setSelectedOutlineId] = useState<number | null>(
+      initialOutlineId || null,
+    );
 
     const attachmentsRef = useRef<GetRef<typeof Attachments>>(null);
     const senderRef = useRef<GetRef<typeof XSender>>(null);
@@ -66,16 +75,23 @@ const Sender = forwardRef<any, SenderProps>(
       fetchModels();
     }, []);
 
-    // 当 initialValue 变化时更新内部状态
+    // 当 initialValue 或 initialOutlineId 变化时更新内部状态
     useEffect(() => {
       if (initialValue) {
         setValue(initialValue);
       }
-    }, [initialValue]);
+      if (initialOutlineId !== undefined) {
+        setSelectedOutlineId(initialOutlineId);
+      }
+    }, [initialValue, initialOutlineId]);
 
     const handleModelChange = (value: string) => {
       setSelectedModel(value);
       localStorage.setItem('ai_chat_model', value);
+    };
+
+    const handleOutlineChange = (value: number) => {
+      setSelectedOutlineId(value);
     };
 
     const headerNode = (
@@ -199,7 +215,12 @@ const Sender = forwardRef<any, SenderProps>(
 
       try {
         // 构建请求数据
-        const requestData = {
+        const requestData: {
+          model_name: string;
+          file_ids: string[];
+          prompt: string;
+          outline_id?: number;
+        } = {
           model_name: selectedModel,
           file_ids: selectedFiles
             .filter(
@@ -209,9 +230,13 @@ const Sender = forwardRef<any, SenderProps>(
                 file.type === 'doc',
             )
             .map((file) => file.file_id),
-          question: value,
-          stream: true,
+          prompt: value,
         };
+
+        // 如果选择了大纲，添加到请求数据中
+        if (selectedOutlineId) {
+          requestData.outline_id = selectedOutlineId;
+        }
 
         // 调用回调函数
         onMessageSent?.(value);
@@ -222,51 +247,28 @@ const Sender = forwardRef<any, SenderProps>(
         setSelectedFiles([]);
         setItems([]);
 
+        // 根据has_steps选择不同的API路径
+        const apiPath = has_steps
+          ? '/api/v1/writing/outlines/generate'
+          : '/api/v1/writing/content/generate';
+
         // 发送请求
-        const response = await fetchWithAuthStream(
-          '/api/v1/rag/chat',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestData),
-          },
-          true,
+        const response = await fetchWithAuthNew(apiPath, {
+          method: 'POST',
+          data: requestData,
+        });
+        history.push(
+          `/WritingHistory?task_id=${
+            response.task_id
+          }&id=${response.session_id.replace('chat-', '')}`,
         );
-
-        if (!response.ok || !response.body) {
-          throw new Error('Stream response not available');
-        }
-
-        // 处理流式响应
-        for await (const chunk of XStream({
-          readableStream: response.body,
-        })) {
-          try {
-            let data;
-            if (typeof chunk.data === 'string') {
-              data = JSON.parse(chunk.data);
-            } else {
-              data = chunk.data;
-            }
-
-            if (data.choices?.[0]?.delta?.content) {
-              const content = data.choices[0].delta.content;
-              // 这里可以添加处理响应内容的逻辑
-              console.log(content);
-            }
-          } catch (error) {
-            console.error('处理响应数据出错:', error);
-          }
-        }
+        console.log('response', response);
       } catch (error) {
         console.error('发送消息失败:', error);
         message.error('发送消息失败，请稍后重试');
       }
     };
     const handleSelectedModel = (selectedModel: string) => {
-      console.log('models', models);
       if (models.length === 0) {
         return '';
       }
@@ -287,25 +289,59 @@ const Sender = forwardRef<any, SenderProps>(
               align="center"
               className={styles.modelSelector}
             >
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <div style={{ fontSize: '16px', fontWeight: 500 }}>模型：</div>
-                <Select
-                  size="small"
-                  value={handleSelectedModel(selectedModel)}
-                  onChange={handleModelChange}
-                  popupMatchSelectWidth={false}
-                  prefix={<SwapOutlined />}
-                >
-                  {models.map((model) => (
-                    <Select.Option
-                      key={model.id}
-                      value={model.name}
-                      title={model.description}
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: '16px' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <div style={{ fontSize: '16px', fontWeight: 500 }}>
+                    模型：
+                  </div>
+                  <Select
+                    size="small"
+                    value={handleSelectedModel(selectedModel)}
+                    onChange={handleModelChange}
+                    popupMatchSelectWidth={false}
+                    prefix={<SwapOutlined />}
+                  >
+                    {models.map((model) => (
+                      <Select.Option
+                        key={model.id}
+                        value={model.name}
+                        title={model.description}
+                      >
+                        {model.name}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </div>
+
+                {outlines && outlines.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 500 }}>
+                      大纲：
+                    </div>
+                    <Select
+                      size="small"
+                      value={selectedOutlineId}
+                      onChange={handleOutlineChange}
+                      popupMatchSelectWidth={false}
+                      placeholder="选择大纲"
+                      allowClear
+                      prefix={<FileOutlined />}
+                      style={{ minWidth: '120px' }}
                     >
-                      {model.name}
-                    </Select.Option>
-                  ))}
-                </Select>
+                      {outlines.map((outline) => (
+                        <Select.Option
+                          key={outline.id}
+                          value={outline.id}
+                          title={outline.title}
+                        >
+                          {outline.title}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
               </div>
             </Flex>
             <XSender

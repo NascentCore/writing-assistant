@@ -27,7 +27,6 @@ const md = markdownit({ html: true, breaks: true });
 
 const STORAGE_KEY = 'ai_chat_messages';
 const MODEL_STORAGE_KEY = 'ai_chat_model';
-const SESSION_STORAGE_KEY = 'current_chat_session_id';
 
 // 定义模型接口类型
 interface Model {
@@ -61,6 +60,8 @@ const createMessage = (
   files,
 });
 
+const DEFAULT_MESSAGE = createMessage('你好，我是你的AI助手', false);
+
 interface AIChatProps {
   setShowAIChat: (show: boolean) => void;
 }
@@ -79,16 +80,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
 
   // 会话历史相关状态
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-
-  // 根据 URL 参数初始化消息状态
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const query = new URLSearchParams(location.search);
-    const sessionIdFromUrl = query.get('id');
-    return sessionIdFromUrl
-      ? []
-      : [createMessage('你好，我是你的AI助手', false)];
-  });
-
+  // 会话消息状态，用于存储当前会话的所有消息
+  const [messages, setMessages] = useState<ChatMessage[]>([DEFAULT_MESSAGE]);
   // 刷新会话列表的函数
   const [refreshSessionsList, setRefreshSessionsList] = useState<
     (() => void) | null
@@ -109,8 +102,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   useEffect(() => {
     if (
       messages.length === 1 &&
-      messages[0].content ===
-        createMessage('你好，我是你的AI助手', false).content
+      messages[0].content === DEFAULT_MESSAGE.content
     ) {
       localStorage.removeItem(STORAGE_KEY);
     } else {
@@ -142,16 +134,13 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   // 创建新会话
   const createNewSession = useCallback(() => {
     setActiveSessionId(null);
-    setMessages([createMessage('你好，我是你的AI助手', false)]);
+    setMessages([DEFAULT_MESSAGE]);
     setSelectedFiles([]);
     setValue('');
 
-    // 清除localStorage中保存的会话ID
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-
-    // 清除 URL 中的会话 ID 参数
-    history.push('/AiChat');
-  }, []);
+    // 更新URL，移除会话ID参数
+    history.push('/WritingHistory');
+  }, [history]);
 
   // 添加一个函数来检查是否在底部附近
   const isNearBottom = useCallback(() => {
@@ -229,9 +218,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       setActiveSessionId(sessionId);
       setMessages(sessionMessages);
 
-      // 保存当前会话ID到localStorage
-      localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-
       // 使用 requestAnimationFrame 确保在DOM更新后再滚动
       // 延迟稍微长一点，确保内容已完全渲染
       setTimeout(() => {
@@ -279,35 +265,61 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     },
   }));
 
-  // 处理 URL 参数变化
+  // 初始化时检查URL中是否有会话ID
   useEffect(() => {
     const query = new URLSearchParams(location.search);
     const sessionIdFromUrl = query.get('id');
 
-    // 如果 URL 中没有会话 ID，则创建新会话
+    // 如果URL中没有会话ID，且当前有活动会话，则创建新会话
+    // 注意：如果URL中没有会话ID，但没有活动会话，则由ChatSessionList组件负责选择第一个会话
     if (!sessionIdFromUrl && activeSessionId !== null) {
       createNewSession();
     }
-
-    // 不在这里处理会话 ID 存在的情况，由 ChatSessionList 组件负责
   }, [location.search, activeSessionId, createNewSession]);
 
-  // 初始化时检查localStorage中是否有保存的会话ID
-  useEffect(() => {
-    const query = new URLSearchParams(location.search);
-    const sessionIdFromUrl = query.get('id');
+  // 处理生成长文档
+  const handleGenerateLongDocument = async (currentMessage: ChatMessage) => {
+    console.log('currentMessage', currentMessage);
 
-    // 如果URL中没有会话ID，但localStorage中有保存的会话ID
-    if (!sessionIdFromUrl && !activeSessionId) {
-      const savedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (savedSessionId) {
-        // 从savedSessionId中提取不带前缀的ID部分
-        const sessionIdWithoutPrefix = savedSessionId.replace('chat-', '');
-        // 更新URL，添加会话ID参数
-        history.push(`/AiChat?id=${sessionIdWithoutPrefix}`);
+    try {
+      // 使用antd的message组件显示提示
+
+      // 发送生成长文档请求
+      const response = await fetchWithAuthNew<{
+        task_id: string;
+        session_id: string;
+      }>('/api/v1/writing/content/generate', {
+        method: 'POST',
+        data: {
+          outline_id: currentMessage.outline_id,
+          session_id: activeSessionId,
+        },
+      });
+
+      if (response && 'task_id' in response) {
+        // 添加一条新消息表示任务已创建
+        const newMessage = createMessage(
+          '长文档生成任务已创建，正在处理中...',
+          false,
+        );
+
+        // 设置任务状态为处理中
+        newMessage.status = 'processing';
+
+        setMessages((prev: ChatMessage[]) => [...prev, newMessage]);
+
+        // 更新URL，添加task_id参数，触发轮询
+        const sessionIdWithoutPrefix =
+          activeSessionId?.replace('chat-', '') || '';
+        history.push(
+          `/WritingHistory?id=${sessionIdWithoutPrefix}&task_id=${response.task_id}`,
+        );
       }
+    } catch (error) {
+      console.error('生成长文档失败', error);
+      message.error('生成长文档失败');
     }
-  }, [location.search, activeSessionId, history]);
+  };
 
   const handleSubmit = async () => {
     if (!value.trim()) return;
@@ -334,15 +346,10 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           // 设置活动会话ID
           setActiveSessionId(currentSessionId);
 
-          // 保存会话ID到localStorage
-          if (currentSessionId) {
-            localStorage.setItem(SESSION_STORAGE_KEY, currentSessionId);
-          }
-
           // 更新路由，添加会话ID参数
           // 使用非空断言，因为我们已经检查了 sessionResponse.session_id 存在
           const sessionIdWithoutPrefix = currentSessionId!.replace('chat-', '');
-          history.push(`/AiChat?id=${sessionIdWithoutPrefix}`);
+          history.push(`/WritingHistory?id=${sessionIdWithoutPrefix}`);
         }
       } catch (error) {
         console.error('创建会话失败:', error);
@@ -510,7 +517,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
             onSessionChange={handleSessionChange}
             onCreateNewSession={createNewSession}
             activeSessionId={activeSessionId}
-            defaultMessage={createMessage('你好，我是你的AI助手', false)}
+            defaultMessage={DEFAULT_MESSAGE}
             refreshSessions={handleRefreshSessions}
           />
 
@@ -537,6 +544,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                 backdropFilter: 'blur(8px)',
                 WebkitBackdropFilter: 'blur(8px)',
                 marginBottom: 12,
+                display: 'none',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -594,13 +602,68 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                       return (
                         <Flex vertical gap="small">
                           {/* 渲染消息内容 */}
-                          <Typography>
+                          <Typography
+                            style={{
+                              display:
+                                currentMessage?.avatarType === 'user'
+                                  ? 'block'
+                                  : 'none',
+                            }}
+                          >
                             <div
                               dangerouslySetInnerHTML={{
                                 __html: md.render(String(bubble.content || '')),
                               }}
                             />
+                            {/* <div>{currentMessage?.status}</div> */}
                           </Typography>
+
+                          {/* 显示任务状态提示 */}
+                          {!isUser && currentMessage?.status && (
+                            <div style={{ marginTop: 8 }}>
+                              {currentMessage.status === 'pending' ||
+                              currentMessage.status === 'processing' ? (
+                                <Typography.Text type="secondary">
+                                  <span style={{ color: '#1677ff' }}>
+                                    处理中...
+                                  </span>
+                                </Typography.Text>
+                              ) : currentMessage.status === 'completed' ? (
+                                <Typography.Text type="success">
+                                  处理完成
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    onClick={() => {
+                                      history.push(
+                                        `/EditorPage?document_id=${currentMessage.document_id}`,
+                                      );
+                                    }}
+                                  >
+                                    查看结果
+                                  </Button>
+                                  {currentMessage.content_type ===
+                                    'outline' && (
+                                    <Button
+                                      type="link"
+                                      size="small"
+                                      onClick={() =>
+                                        handleGenerateLongDocument(
+                                          currentMessage,
+                                        )
+                                      }
+                                    >
+                                      生成长文档
+                                    </Button>
+                                  )}
+                                </Typography.Text>
+                              ) : currentMessage.status === 'failed' ? (
+                                <Typography.Text type="danger">
+                                  处理失败: {currentMessage.error || '未知错误'}
+                                </Typography.Text>
+                              ) : null}
+                            </div>
+                          )}
 
                           {/* 只在用户消息中渲染关联文件 */}
                           {isUser &&
@@ -642,7 +705,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                 }}
               />
             </div>
-            <div>
+            <div style={{ display: 'none' }}>
               <Sender
                 ref={senderRef}
                 style={{

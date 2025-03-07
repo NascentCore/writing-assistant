@@ -1,9 +1,10 @@
 import { fetchWithAuthNew } from '@/utils/fetch';
-import { Spin, message } from 'antd';
+import { FieldTimeOutlined } from '@ant-design/icons';
+import { history } from '@umijs/max';
+import { Button, Spin, message } from 'antd';
 import React, { useEffect, useState } from 'react';
 import CustomerSender from './components/Sender';
 import styles from './index.less';
-
 // const { TabPane } = Tabs;
 
 interface WritingCard {
@@ -13,6 +14,7 @@ interface WritingCard {
   icon: string;
   tag?: string;
   value?: string;
+  outlines?: { id: number; title: string }[] | null;
 }
 
 // 模板接口类型
@@ -27,7 +29,7 @@ interface Template {
   variables: any;
   created_at: string;
   updated_at: string;
-  outline_ids: string[] | null;
+  outlines: { id: number; title: string }[] | null;
   has_steps: boolean;
 }
 
@@ -48,6 +50,13 @@ const Home: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedTemplateValue, setSelectedTemplateValue] =
     useState<string>('');
+  const [selectedOutlineId, setSelectedOutlineId] = useState<number | null>(
+    null,
+  );
+  const [selectedOutlines, setSelectedOutlines] = useState<
+    { id: number; title: string }[] | null
+  >(null);
+  const [hasSteps, setHasSteps] = useState<boolean>(false);
 
   // 获取模板列表
   useEffect(() => {
@@ -57,7 +66,7 @@ const Home: React.FC = () => {
       try {
         // fetchWithAuthNew 直接返回 data 部分
         const data = await fetchWithAuthNew<TemplateResponse>(
-          '/api/v1/templates?page=1&page_size=10',
+          '/api/v1/writing/templates?page=1&page_size=10',
         );
         if (data && 'templates' in data) {
           setTemplates(data.templates);
@@ -87,6 +96,7 @@ const Home: React.FC = () => {
       : '📄',
     tag: template.has_steps ? '分步骤' : undefined,
     value: template.value,
+    outlines: template.outlines,
   }));
 
   // 合并静态写作类型和模板卡片
@@ -94,13 +104,37 @@ const Home: React.FC = () => {
 
   // 处理卡片点击事件
   const handleCardClick = (card: WritingCard) => {
+    console.log('点击卡片:', card);
     if (card.value) {
       setSelectedTemplateValue(card.value);
     }
+
+    // 如果模板有大纲，选择第一个大纲并保存大纲列表
+    if (card.outlines && card.outlines.length > 0) {
+      console.log('设置大纲:', card.outlines);
+      setSelectedOutlineId(card.outlines[0].id);
+      setSelectedOutlines(card.outlines);
+    } else {
+      setSelectedOutlineId(null);
+      setSelectedOutlines(null);
+    }
+
+    // 设置是否分步骤
+    console.log('设置分步骤:', card.tag === '分步骤');
+    setHasSteps(card.tag === '分步骤');
   };
 
   return (
     <div className={styles.container}>
+      <div>
+        <Button
+          style={{ float: 'right' }}
+          icon={<FieldTimeOutlined style={{ fontSize: 18 }} />}
+          onClick={async () => {
+            history.push('/WritingHistory');
+          }}
+        />
+      </div>
       {/* <Tabs defaultActiveKey="0" className={styles.tabs}>
         {tabs.map((tab, index) => (
           <TabPane tab={tab} key={index} />
@@ -150,6 +184,9 @@ const Home: React.FC = () => {
       <div className={styles.inputArea}>
         <CustomerSender
           value={selectedTemplateValue}
+          selectedOutlineId={selectedOutlineId}
+          outlines={selectedOutlines}
+          has_steps={hasSteps}
           onMessageSent={(message) => {
             console.log('发送消息:', message);
             // 这里可以添加处理消息的逻辑

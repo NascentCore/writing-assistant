@@ -21,6 +21,7 @@ interface RouteItem {
   hideInMenu?: boolean;
   redirect?: string;
   icon?: React.ReactNode;
+  menuRender?: boolean;
 }
 
 interface MenuItem {
@@ -69,12 +70,12 @@ const convertRoutesToMenuItems = (routes: RouteItem[]): MenuItem[] => {
   //     title: `最近对话${String(i + 1).padStart(2, '0')}`,
   //   })),
   // });
-  menuItems.push({
-    key: 'EditorPage',
-    icon: <Icon type="PersonalKnowledge" />,
-    title: '编辑器',
-    path: '/EditorPage',
-  });
+  // menuItems.push({
+  //   key: 'EditorPage',
+  //   icon: <Icon type="PersonalKnowledge" />,
+  //   title: '编辑器',
+  //   path: '/EditorPage',
+  // });
 
   return menuItems;
 };
@@ -136,7 +137,7 @@ const Layout: React.FC = () => {
 
   // 检查当前路由是否需要隐藏菜单
   const currentRoute = routes.find((route) => route.path === location.pathname);
-  if (currentRoute?.hideInMenu) {
+  if (currentRoute?.menuRender === false) {
     return <Outlet />;
   }
 

@@ -7,19 +7,15 @@ export const routes = [
     name: '登录',
     path: '/Login',
     component: './Login',
-    hideInMenu: true,
+    hideInMenu: true, // 隐藏菜单栏
+    menuRender: false, //菜单栏存在，但是该路由不在菜单栏中显示
   },
   {
     name: '注册',
     path: '/Register',
     component: './Register',
     hideInMenu: true,
-  },
-  {
-    name: '编辑器',
-    path: '/EditorPage',
-    component: './EditorPage',
-    hideInMenu: true,
+    menuRender: false,
   },
   {
     name: '写作助手',
@@ -41,5 +37,17 @@ export const routes = [
     name: 'AI对话',
     path: '/AiChat',
     component: './AiChat',
+  },
+  {
+    name: '历史记录',
+    path: '/WritingHistory',
+    component: './WritingHistory',
+    hideInMenu: true,
+  },
+  {
+    name: '编辑器',
+    path: '/EditorPage',
+    component: './EditorPage',
+    menuRender: false,
   },
 ];
