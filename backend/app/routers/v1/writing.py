@@ -1033,7 +1033,7 @@ async def generate_content(
             session_id=session_id,
             message_id=message_id,
             assistant_message_id=assistant_message_id,
-            readable_model_name=request.readable_model_name
+            readable_model_name=request.model_name
         ))
         
         loop.close()
