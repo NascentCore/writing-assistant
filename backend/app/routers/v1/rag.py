@@ -516,7 +516,7 @@ async def chat(
             ChatMessage.session_id == session_id,
             ChatMessage.role == "assistant",
             ChatMessage.is_deleted == False
-        ).order_by(ChatMessage.id.desc()).limit(2).all()
+        ).order_by(ChatMessage.id.desc()).limit(settings.RAG_CHAT_HISTORY_SIZE).all()
         
         history = []
         recent_answers.reverse()
