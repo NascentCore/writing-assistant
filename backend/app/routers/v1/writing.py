@@ -347,6 +347,18 @@ async def generate_outline(
         content_type=ContentType.TEXT,
     )
     db.add(user_message)
+
+    # 创建助手的回答消息（任务进行中状态）
+    assistant_message_id = shortuuid.uuid()
+    assistant_message = ChatMessage(
+        message_id=assistant_message_id,
+        session_id=session_id,
+        role="assistant",
+        content="正在生成大纲，请稍候...",
+        content_type=ContentType.TEXT,
+        task_status=TaskStatus.PENDING.value
+    )
+    db.add(assistant_message)
     
     # 创建任务记录
     task_id = f"task-{shortuuid.uuid()}"[:22]
@@ -378,7 +390,8 @@ async def generate_outline(
             prompt=request.prompt,
             file_ids=request.file_ids or [],
             session_id=session_id,
-            readable_model_name=request.model_computed_fields
+            assistant_message_id=assistant_message_id,
+            readable_model_name=request.readable_model_name
         ))
         
         loop.close()
@@ -393,7 +406,7 @@ async def generate_outline(
     })
 
 
-async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str],  session_id: str, readable_model_name: Optional[str] = None):
+async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str], session_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
     """异步处理大纲生成任务"""
     # 创建新的数据库会话
     db = next(get_db())
@@ -406,6 +419,14 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
             return
         
         task.status = TaskStatus.PROCESSING
+        
+        # 更新助手消息状态为处理中
+        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+        if assistant_message:
+            assistant_message.task_status = TaskStatus.PROCESSING.value
+            assistant_message.task_id = task_id
+            assistant_message.content = "正在生成大纲，请稍候..."
+        
         db.commit()
         
         # 从task.params中获取user_id
@@ -433,14 +454,25 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
         )
         
         # 创建助手的回答消息
-        assistant_message = ChatMessage(
-            message_id=shortuuid.uuid(),
-            session_id=session_id,
-            role="assistant",
-            content_type=ContentType.OUTLINE,
-            outline_id=saved_outline["id"]
-        )
-        db.add(assistant_message)
+        if assistant_message:
+            # 更新之前创建的助手消息
+            assistant_message.content_type = ContentType.OUTLINE
+            assistant_message.outline_id = saved_outline["id"]
+            assistant_message.task_status = TaskStatus.COMPLETED.value
+            assistant_message.task_result = json.dumps({"outline_id": saved_outline["id"]})
+        else:
+            # 如果之前的消息不存在，创建新消息
+            assistant_message = ChatMessage(
+                message_id=shortuuid.uuid(),
+                session_id=session_id,
+                role="assistant",
+                content_type=ContentType.OUTLINE,
+                outline_id=saved_outline["id"],
+                task_status=TaskStatus.COMPLETED.value,
+                task_id=task_id,
+                task_result=json.dumps({"outline_id": saved_outline["id"]})
+            )
+            db.add(assistant_message)
         
         # 更新任务状态为完成
         task.status = TaskStatus.COMPLETED
@@ -453,10 +485,15 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
         if task:
             task.status = TaskStatus.FAILED
             task.error = str(e)
-            db.commit()
         
-        print(f"生成大纲任务失败: {str(e)}")
-    
+        # 更新助手消息状态为失败
+        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+        if assistant_message:
+            assistant_message.task_status = TaskStatus.FAILED.value
+            assistant_message.content = f"生成大纲失败: {str(e)}"
+        
+        db.commit()
+        
     finally:
         db.close()
 
@@ -909,6 +946,19 @@ async def generate_content(
     )
     db.add(chat_message)
     
+    # 创建助手的回答消息（任务进行中状态）
+    assistant_message_id = shortuuid.uuid()
+    assistant_message = ChatMessage(
+        message_id=assistant_message_id,
+        session_id=session_id,
+        question_id=message_id,
+        role="assistant",
+        content="正在生成全文，请稍候...",
+        content_type=ContentType.TEXT,
+        task_status=TaskStatus.PENDING.value
+    )
+    db.add(assistant_message)
+    
     # 创建任务记录，确保ID不超过22位
     task_id = f"task-{shortuuid.uuid()}"[:22]
     task = Task(
@@ -940,6 +990,7 @@ async def generate_content(
             file_ids=request.file_ids or [],
             session_id=session_id,
             message_id=message_id,
+            assistant_message_id=assistant_message_id,
             readable_model_name=request.readable_model_name
         ))
         
@@ -955,7 +1006,7 @@ async def generate_content(
     })
 
 
-async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, readable_model_name: Optional[str] = None):
+async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
     """异步处理全文生成任务"""
     # 创建新的数据库会话
     db = next(get_db())
@@ -968,11 +1019,26 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
             return
         
         task.status = TaskStatus.PROCESSING
+        
+        # 更新助手消息状态为处理中
+        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+        if assistant_message:
+            assistant_message.task_status = TaskStatus.PROCESSING.value
+            assistant_message.task_id = task_id
+            assistant_message.content = "正在生成全文，请稍候..."
+        
         db.commit()
         
         # 从task.params中获取user_id
         task_params = task.params
         user_id = task_params.get("user_id")
+        
+        # 获取文件内容
+        file_contents = []
+        for file_id in file_ids:
+            file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
+            if file and file.content:
+                file_contents.append(file.content)
         
         # 初始化大纲生成器
         outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
@@ -984,13 +1050,6 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
                 full_content = outline_generator.generate_full_content(outline_id, db)
             else:
                 # 直接生成模式
-                # 获取文件内容
-                file_contents = []
-                for file_id in file_ids:
-                    file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
-                    if file and file.content:
-                        file_contents.append(file.content)
-                
                 # 调用直接生成方法
                 full_content = outline_generator.generate_content_directly(
                     prompt=prompt,
@@ -1011,20 +1070,33 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
             )
             db.add(document)
             
-
             # 创建AI回复消息
             ai_message_id = f"msg-{shortuuid.uuid()}"[:22]
-            ai_message = ChatMessage(
-                message_id=ai_message_id,
-                session_id=session_id,
-                question_id=message_id,
-                role="assistant",
-                content="",
-                content_type=ContentType.DOCUMENT,
-                document_id=doc_id,
-                full_content={"outline_id": doc_id}  # 只保存文档ID和标题
-            )
-            db.add(ai_message)
+            
+            # 如果存在之前创建的助手消息，则更新它
+            if assistant_message:
+                assistant_message.content = ""
+                assistant_message.content_type = ContentType.DOCUMENT
+                assistant_message.document_id = doc_id
+                assistant_message.task_status = TaskStatus.COMPLETED.value
+                assistant_message.task_result = json.dumps({"doc_id": doc_id})
+                assistant_message.full_content = json.dumps({"doc_id": doc_id})
+            else:
+                # 如果之前的消息不存在，创建新消息
+                assistant_message = ChatMessage(
+                    message_id=ai_message_id,
+                    session_id=session_id,
+                    question_id=message_id,
+                    role="assistant",
+                    content="",
+                    content_type=ContentType.DOCUMENT,
+                    document_id=doc_id,
+                    task_status=TaskStatus.COMPLETED.value,
+                    task_id=task_id,
+                    task_result=json.dumps({"doc_id": doc_id}),
+                    full_content=json.dumps({"doc_id": doc_id})
+                )
+                db.add(assistant_message)
             
             # 更新任务状态为完成
             task.status = TaskStatus.COMPLETED
@@ -1035,8 +1107,13 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
             # 更新任务状态为失败
             task.status = TaskStatus.FAILED
             task.error = str(e)
+            
+            # 更新助手消息状态为失败
+            if assistant_message:
+                assistant_message.task_status = TaskStatus.FAILED.value
+                assistant_message.content = f"生成全文失败: {str(e)}"
+            
             db.commit()
-            print(f"生成全文时出错: {str(e)}")
             
     except Exception as e:
         print(f"处理全文生成任务时出错: {str(e)}")
@@ -1302,6 +1379,15 @@ async def get_chat_sessions(
                 .order_by(ChatMessage.id)\
                 .first()
             
+            # 查询未完成的任务
+            unfinished_tasks = db.query(Task).filter(
+                Task.session_id == session.session_id,
+                Task.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING])
+            ).all()
+            
+            # 提取未完成任务的ID
+            unfinished_task_ids = [task.id for task in unfinished_tasks]
+            
             session_data.append({
                 "session_id": session.session_id,
                 "session_type": session.session_type,
@@ -1310,7 +1396,8 @@ async def get_chat_sessions(
                 "first_message": first_message.content if first_message else None,
                 "first_message_time": first_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if first_message else None,
                 "created_at": session.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                "updated_at": session.updated_at.strftime("%Y-%m-%d %H:%M:%S") if session.updated_at else None
+                "updated_at": session.updated_at.strftime("%Y-%m-%d %H:%M:%S") if session.updated_at else None,
+                "unfinished_task_ids": unfinished_task_ids
             })
         
         return APIResponse.success(
@@ -1381,6 +1468,9 @@ async def get_chat_session_detail(
                         "content_type": msg.content_type,
                         "document_id": msg.document_id,
                         "outline_id": msg.outline_id,
+                        "task_id": msg.task_id,
+                        "task_status": msg.task_status,
+                        "task_result": msg.task_result,
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
