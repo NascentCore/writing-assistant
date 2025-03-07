@@ -7,3 +7,7 @@ AFTER session_id;
 ALTER TABLE chat_messages
 ADD COLUMN content_type VARCHAR(20) DEFAULT 'text' COMMENT '内容类型' after full_content,
 ADD COLUMN outline_id VARCHAR(100) DEFAULT '' COMMENT '大纲ID' after content_type;
+
+# 2025-03-07 消息表增加文档ID
+ALTER TABLE chat_messages
+ADD COLUMN document_id VARCHAR(100) DEFAULT '' COMMENT '文档ID' after outline_id;
