@@ -1,4 +1,4 @@
-FROM python:3.10-alpine
+FROM sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app-backend:d4aac26
 
 WORKDIR /app
 
@@ -7,13 +7,8 @@ COPY app /app/
 COPY requirements.txt /app/
 
 # 安装 Python 依赖
-RUN pip install -r /app/requirements.txt
-
-# 安装OCR依赖
-RUN apk add --no-cache \
-    tesseract-ocr \
-    tesseract-ocr-data-chi_sim \
-    poppler-utils
+RUN pip install --upgrade pip && \
+    pip install -r /app/requirements.txt
 
 # 复制 Nginx 配置（如有定制需求）
 COPY nginx.conf /etc/nginx/http.d/default.conf

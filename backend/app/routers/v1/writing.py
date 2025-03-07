@@ -762,6 +762,7 @@ class TemplateBase(BaseModel):
     show_name: str = Field(..., description="模板显示名称")
     value: str = Field(..., description="模板内容")
     is_default: bool = Field(False, description="是否默认模板")
+    description: Optional[str] = Field(None, description="模板描述")
     has_steps: bool = Field(False, description="是否分步骤")
     background_url: Optional[str] = Field(None, description="背景图片URL")
     template_type: WritingTemplateType = Field(WritingTemplateType.OTHER, description="模板类型")
@@ -827,6 +828,7 @@ async def get_templates(
                     "show_name": template.show_name,
                     "value": template.value,
                     "is_default": template.is_default,
+                    "description": template.description,
                     "background_url": template.background_url,
                     "template_type": template.template_type,
                     "variables": template.variables,
@@ -874,6 +876,7 @@ async def create_template(
             id=shortuuid.uuid(),
             show_name=template.show_name,
             value=template.value,
+            description=template.description,
             is_default=template.is_default,
             has_steps=template.has_steps,
             background_url=template.background_url,

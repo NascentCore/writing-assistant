@@ -1,3 +1,4 @@
+import asyncio
 import PyPDF2
 from docx import Document
 from app.config import settings
@@ -5,11 +6,19 @@ import openai
 import aiofiles
 import pytesseract
 from pdf2image import convert_from_path
-import asyncio
+import time
+import logging
+import cv2
+import numpy as np
+
+logger = logging.getLogger(__name__)
 
 class FileParser:
     """文件解析器基类"""
     def content(self, file_path: str) -> str:
+        raise NotImplementedError
+
+    async def async_content(self, file_path: str) -> str:
         raise NotImplementedError
 
     async def summary(self, content: str, length: str = "small") -> str:
@@ -62,66 +71,97 @@ class PDFEncryptedError(Exception):
     pass
 
 class PDFParser(FileParser):
-    """PDF文档解析器，支持文本提取和OCR图像解析"""
-    def content(self, file_path: str) -> str:
-        text_content = []
+    """PDF文档解析器，支持文本提取和OCR图像解析（并发优化版）"""
+    
+    def preprocess_image(self, image):
+        """对OCR图片进行预处理"""
+        img = np.array(image)
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return binary
+
+    async def ocr_page(self, file_path: str, page_number: int) -> str:
+        """并发OCR解析单页PDF"""
         try:
-            # 创建PDF reader对象
+            # 转换PDF页为图片（在独立线程中执行）
+            convert_start = time.time()
+            images = await asyncio.to_thread(
+                convert_from_path, file_path, first_page=page_number, last_page=page_number, dpi=300, fmt='jpeg', thread_count=4
+            )
+            logger.debug(f"第{page_number}页PDF转图片耗时: {time.time() - convert_start:.2f}秒")
+
+            if not images:
+                logger.warning(f"第{page_number}页转换图片失败")
+                return ""
+
+            # 进行OCR识别
+            ocr_start = time.time()
+            ocr_tasks = [
+                asyncio.to_thread(self.ocr_image, image) for image in images
+            ]
+            ocr_texts = await asyncio.gather(*ocr_tasks)
+            ocr_time = time.time() - ocr_start
+            logger.debug(f"第{page_number}页OCR总耗时: {ocr_time:.2f}秒")
+
+            return "\n".join(ocr_texts)
+        except Exception as e:
+            logger.error(f"第{page_number}页OCR解析失败: {str(e)}")
+            return "[OCR 解析失败]"
+
+    def ocr_image(self, image):
+        """对单张图片进行OCR"""
+        processed_image = self.preprocess_image(image)
+        ocr_text = pytesseract.image_to_string(
+            processed_image, lang='chi_sim', config='--oem 3 --psm 4'
+        )
+        return ''.join(ocr_text.split())
+
+    def content(self, file_path: str) -> str:
+        """同步方法，通过运行异步方法实现"""
+        return asyncio.run(self.async_content(file_path))
+    
+    async def async_content(self, file_path: str) -> str:
+        """异步解析PDF文本和OCR"""
+        start_time = time.time()
+        text_content = []
+
+        try:
+            # 读取PDF
             pdf_reader = PyPDF2.PdfReader(file_path)
-            
+
             # 检查是否加密
             if pdf_reader.is_encrypted:
                 try:
                     pdf_reader.decrypt('')
                 except Exception:
                     raise PDFEncryptedError("无法解析加密的PDF文件，请先解除文件加密后再上传")
-            
-            # 遍历所有页面
-            for i, page in enumerate(pdf_reader.pages):
+
+            total_pages = len(pdf_reader.pages)
+            logger.debug(f"PDF总页数: {total_pages}")
+
+            # 遍历PDF页面，提取文本或OCR
+            tasks = []
+            for i, page in enumerate(pdf_reader.pages, start=1):
                 page_text = page.extract_text()
-                # 如果页面文本有效，则使用提取的文本
                 if page_text and page_text.strip():
                     text_content.append(page_text)
+                    logger.debug(f"第{i}页文本提取成功")
                 else:
-                    # 否则使用OCR：将当前页转换为图片，再识别文字
-                    try:
-                        # convert_from_path 的页码参数是 1-indexed
-                        images = convert_from_path(file_path, 
-                                                   first_page=i+1, 
-                                                   last_page=i+1, 
-                                                   dpi=300,                            
-                                                   fmt='jpeg',
-                                                   thread_count=4)
-                        if images:
-                            for image in images:
-                                # 优化图像处理（转换为灰度图提升OCR速度）
-                                image = image.convert('L')
-                                # 执行快速OCR
-                                ocr_text = pytesseract.image_to_string(
-                                    image,
-                                    lang='chi_sim',
-                                    config='--oem 1 --psm 6'
-                                )
-                                page_text += ocr_text + "\n"
-                            # # 使用 pytesseract 进行OCR，lang参数可根据需要调整
-                            # ocr_text = pytesseract.image_to_string(images[0], lang='chi_sim', config='--oem 1 --psm 6')
-                            # text_content.append(ocr_text)
-                            text_content.append(page_text)
-                        else:
-                            text_content.append("")
-                    except Exception:
-                        text_content.append("[OCR 解析失败]")
-            
+                    # 创建异步OCR任务
+                    tasks.append(self.ocr_page(file_path, i))
+
+            # 并行执行OCR任务
+            if tasks:
+                ocr_results = await asyncio.gather(*tasks)
+                text_content.extend(ocr_results)
+
+            total_time = time.time() - start_time
+            logger.info(f"PDF解析完成，{file_path}，共{total_pages}页，耗时: {total_time:.2f}秒")
+
             return "\n".join(text_content)
         except Exception as e:
-            # 针对加密相关异常的处理
-            if "PyCryptodome is required for AES algorithm" in str(e):
-                raise PDFEncryptedError("无法解析加密的PDF文件，请先解除文件加密后再上传")
-            elif "File has not been decrypted" in str(e):
-                raise PDFEncryptedError("无法解析加密的PDF文件，请先解除文件加密后再上传")
-            else:
-                raise Exception(f"PDF解析错误: {str(e)}")
-
+            raise Exception(f"PDF解析错误: {str(e)}")
+    
 class DocxParser(FileParser):
     """Word文档解析器"""
     def content(self, file_path: str) -> str:
@@ -138,6 +178,9 @@ class DocxParser(FileParser):
             return "\n".join(text_content)
         except Exception as e:
             raise Exception(f"Word文档解析错误: {str(e)}")
+    
+    async def async_content(self, file_path: str) -> str:
+        return await asyncio.to_thread(self.content, file_path)
 
 def get_parser(file_type: str) -> FileParser:
     """
