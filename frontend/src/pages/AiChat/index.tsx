@@ -27,6 +27,7 @@ const md = markdownit({ html: true, breaks: true });
 
 const STORAGE_KEY = 'ai_chat_messages';
 const MODEL_STORAGE_KEY = 'ai_chat_model';
+const SESSION_STORAGE_KEY = 'current_chat_session_id';
 
 // 定义模型接口类型
 interface Model {
@@ -138,6 +139,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     setSelectedFiles([]);
     setValue('');
 
+    // 清除localStorage中保存的会话ID
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+
     // 清除 URL 中的会话 ID 参数
     history.push('/AiChat');
   }, []);
@@ -218,6 +222,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       setActiveSessionId(sessionId);
       setMessages(sessionMessages);
 
+      // 保存当前会话ID到localStorage
+      localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+
       // 使用 requestAnimationFrame 确保在DOM更新后再滚动
       // 延迟稍微长一点，确保内容已完全渲染
       setTimeout(() => {
@@ -278,6 +285,23 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     // 不在这里处理会话 ID 存在的情况，由 ChatSessionList 组件负责
   }, [location.search, activeSessionId, createNewSession]);
 
+  // 初始化时检查localStorage中是否有保存的会话ID
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const sessionIdFromUrl = query.get('id');
+
+    // 如果URL中没有会话ID，但localStorage中有保存的会话ID
+    if (!sessionIdFromUrl && !activeSessionId) {
+      const savedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (savedSessionId) {
+        // 从savedSessionId中提取不带前缀的ID部分
+        const sessionIdWithoutPrefix = savedSessionId.replace('chat-', '');
+        // 更新URL，添加会话ID参数
+        history.push(`/AiChat?id=${sessionIdWithoutPrefix}`);
+      }
+    }
+  }, [location.search, activeSessionId, history]);
+
   const handleSubmit = async () => {
     if (!value.trim()) return;
 
@@ -302,6 +326,11 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           currentSessionId = sessionResponse.session_id;
           // 设置活动会话ID
           setActiveSessionId(currentSessionId);
+
+          // 保存会话ID到localStorage
+          if (currentSessionId) {
+            localStorage.setItem(SESSION_STORAGE_KEY, currentSessionId);
+          }
 
           // 更新路由，添加会话ID参数
           // 使用非空断言，因为我们已经检查了 sessionResponse.session_id 存在
