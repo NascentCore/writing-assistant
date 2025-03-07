@@ -315,19 +315,61 @@ async def generate_outline(
             
             return data
         
-        response_data = {
-            "id": outline.id,
-            "title": outline.title,
-            "markdown_content": outline.markdown_content,
-            "sub_paragraphs": [
-                build_paragraph_data(para) for para in db.query(SubParagraph).filter(
-                    SubParagraph.outline_id == outline.id,
-                    SubParagraph.parent_id == None
-                ).all()
-            ]
-        }
         
-        return APIResponse.success(message="获取大纲成功", data=response_data)
+        # 创建聊天会话
+        session_id = f"chat-{shortuuid.uuid()}"[:22]
+        chat_session = ChatSession(
+            session_id=session_id,
+            session_type=ChatSessionType.WRITING,
+            user_id=current_user.user_id,
+        )
+        db.add(chat_session)
+        
+        # 创建用户的提问消息
+        user_message = ChatMessage(
+            message_id=shortuuid.uuid(),
+            session_id=session_id,
+            role="user",
+            content=request.prompt or f"获取大纲: {outline.title}",
+            content_type=ContentType.TEXT,
+        )
+        db.add(user_message)
+        
+        # 创建助手的回答消息
+        assistant_message_id = shortuuid.uuid()
+        assistant_message = ChatMessage(
+            message_id=assistant_message_id,
+            session_id=session_id,
+            role="assistant",
+            content_type=ContentType.OUTLINE,
+            outline_id=str(outline.id),
+            task_status=TaskStatus.COMPLETED.value
+        )
+        db.add(assistant_message)
+        
+        # 创建任务记录
+        task_id = f"task-{shortuuid.uuid()}"[:22]
+        task = Task(
+            id=task_id,
+            type=TaskType.GENERATE_OUTLINE,
+            status=TaskStatus.COMPLETED,
+            session_id=session_id,
+            params={
+                "user_id": current_user.user_id,
+                "outline_id": str(outline.id)
+            },
+            result={"outline_id": str(outline.id)}
+        )
+        db.add(task)
+        
+        # 提交事务
+        db.commit()
+        
+        # 返回任务ID和会话ID
+        return APIResponse.success(message="大纲获取成功", data={
+            "task_id": task_id,
+            "session_id": session_id
+        })
     
     # 创建聊天会话
     session_id = f"chat-{shortuuid.uuid()}"[:22]
