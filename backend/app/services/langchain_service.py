@@ -361,23 +361,28 @@ class OutlineGenerator:
                 # 创建链
                 chain = prompt_template | self.llm
                 
-                # 执行链
-                result = chain.invoke({})
-                
-                # 提取内容
-                content = result.content if hasattr(result, 'content') else str(result)
-                
-                # 添加到全文内容
-                full_content["content"].append({
-                    "id": para.id,
-                    "title": para.title,
-                    "content": content,
-                    "count_style": para.count_style.value,
-                    "level": para.level
-                })
-                
-                # 添加到markdown
-                markdown_content += f"## {para.title}\n\n{content}\n\n"
+                try:
+                    # 执行链
+                    result = chain.invoke({})
+                    
+                    # 提取内容
+                    content = result.content if hasattr(result, 'content') else str(result)
+                    
+                    # 添加到全文内容
+                    full_content["content"].append({
+                        "id": para.id,
+                        "title": para.title,
+                        "content": content,
+                        "count_style": para.count_style.value,
+                        "level": para.level
+                    })
+                    
+                    # 添加到markdown
+                    markdown_content += f"## {para.title}\n\n{content}\n\n"
+                except Exception as e:
+                    logger.error(f"生成段落内容时出错: {str(e)}")
+                    # 如果某个段落生成失败，继续生成其他段落
+                    continue
                 
                 # 递归生成子段落的标题结构
                 def add_child_headings(parent_id, current_level=3):
@@ -409,7 +414,7 @@ class OutlineGenerator:
             
         except Exception as e:
             logger.error(f"生成全文内容时出错: {str(e)}")
-            raise 
+            raise
 
     def generate_content_directly(self, prompt: str, file_contents: List[str] = None) -> Dict[str, Any]:
         """
@@ -454,42 +459,47 @@ class OutlineGenerator:
             # 创建链
             chain = prompt_template | self.llm
 
-            # 执行链
-            result = chain.invoke({
-                "prompt": prompt,
-                "file_context": file_context
-            })
-
-            # 提取内容
-            markdown_content = result.content if hasattr(result, 'content') else str(result)
-
-            # 解析markdown内容，提取标题和章节
-            # 提取文章标题（第一个一级标题）
-            title_match = re.search(r'^#\s+(.+)$', markdown_content, re.MULTILINE)
-            title = title_match.group(1) if title_match else "生成的文章"
-
-            # 提取所有章节（二级标题及其内容）
-            sections = []
-            section_pattern = r'^##\s+(.+)\n(.*?)(?=##|\Z)'
-            for match in re.finditer(section_pattern, markdown_content, re.MULTILINE | re.DOTALL):
-                section_title = match.group(1).strip()
-                section_content = match.group(2).strip()
-                sections.append({
-                    "id": len(sections) + 1,  # 简单的自增ID
-                    "title": section_title,
-                    "content": section_content,
-                    "count_style": "medium",  # 默认使用medium长度
-                    "level": 1  # 所有章节都作为一级段落
+            try:
+                # 执行链
+                result = chain.invoke({
+                    "prompt": prompt,
+                    "file_context": file_context
                 })
 
-            # 构建返回数据
-            result = {
-                "title": title,
-                "content": sections,
-                "markdown": markdown_content,
-                "html": markdown.markdown(markdown_content, extensions=['extra'])
-            }
-            return result
+                # 提取内容
+                markdown_content = result.content if hasattr(result, 'content') else str(result)
+
+                # 解析markdown内容，提取标题和章节
+                # 提取文章标题（第一个一级标题）
+                title_match = re.search(r'^#\s+(.+)$', markdown_content, re.MULTILINE)
+                title = title_match.group(1) if title_match else "生成的文章"
+
+                # 提取所有章节（二级标题及其内容）
+                sections = []
+                section_pattern = r'^##\s+(.+)\n(.*?)(?=##|\Z)'
+                for match in re.finditer(section_pattern, markdown_content, re.MULTILINE | re.DOTALL):
+                    section_title = match.group(1).strip()
+                    section_content = match.group(2).strip()
+                    sections.append({
+                        "id": len(sections) + 1,  # 简单的自增ID
+                        "title": section_title,
+                        "content": section_content,
+                        "count_style": "medium",  # 默认使用medium长度
+                        "level": 1  # 所有章节都作为一级段落
+                    })
+
+                # 构建返回数据
+                result = {
+                    "title": title,
+                    "content": sections,
+                    "markdown": markdown_content,
+                    "html": markdown.markdown(markdown_content, extensions=['extra'])
+                }
+                return result
+
+            except Exception as e:
+                logger.error(f"生成文章内容时出错: {str(e)}")
+                raise
 
         except Exception as e:
             logger.error(f"直接生成文章内容时出错: {str(e)}")
