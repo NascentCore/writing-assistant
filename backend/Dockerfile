@@ -1,26 +1,10 @@
-FROM python:3.10-alpine
+FROM sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app-backend:d4aac26
 
 WORKDIR /app
 
 # 复制 Python 应用和依赖
 COPY app /app/
 COPY requirements.txt /app/
-
-# 安装必要的系统依赖
-RUN apk update && apk add --no-cache \
-    tesseract-ocr \
-    tesseract-ocr-data-chi_sim \
-    poppler-utils \
-    libstdc++ \
-    openblas \
-    build-base \
-    cmake \
-    ninja \
-    gcc \
-    g++ \
-    python3-dev \
-    libffi-dev \
-    musl-dev
 
 # 安装 Python 依赖
 RUN pip install --upgrade pip && \
