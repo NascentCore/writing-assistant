@@ -2,7 +2,7 @@ from enum import Enum
 import logging
 import shortuuid
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Path, UploadFile as FastAPIUploadFile, File, logger
+from fastapi import APIRouter, Depends, Path, UploadFile as FastAPIUploadFile, File, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -68,6 +68,7 @@ class GenerateOutlineRequest(BaseModel):
     outline_id: Optional[str] = Field(None, description="大纲ID，如果提供则直接返回对应大纲")
     prompt: Optional[str] = Field(None, description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
+    readable_model_name: Optional[str] = Field(None, description="模型")
 
 
 class WebLinkUpdate(BaseModel):
@@ -142,6 +143,7 @@ async def generate_outline(
         outline_id: 大纲ID，如果提供则直接返回对应大纲
         prompt: 写作提示
         file_ids: 文件ID列表
+        readable_model_name: 模型
 
     Returns:
         task_id: 任务ID
@@ -375,7 +377,8 @@ async def generate_outline(
             task_id=task_id,
             prompt=request.prompt,
             file_ids=request.file_ids or [],
-            session_id=session_id
+            session_id=session_id,
+            readable_model_name=request.model_computed_fields
         ))
         
         loop.close()
@@ -390,7 +393,7 @@ async def generate_outline(
     })
 
 
-async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str],  session_id: str):
+async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str],  session_id: str, readable_model_name: Optional[str] = None):
     """异步处理大纲生成任务"""
     # 创建新的数据库会话
     db = next(get_db())
@@ -417,7 +420,7 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
                 file_contents.append(file.content)
         
         # 初始化大纲生成器
-        outline_generator = OutlineGenerator()
+        outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
         # 调用大模型生成结构化大纲
         outline_data = outline_generator.generate_outline(prompt, file_contents)
@@ -826,6 +829,7 @@ class GenerateFullContentRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="会话ID")
     prompt: Optional[str] = Field(None, description="直接生成模式下的写作提示")
     file_ids: Optional[List[str]] = Field(None, description="直接生成模式下的参考文件ID列表")
+    readable_model_name: Optional[str] = Field(None, description="模型")
 
 
 @router.post("/content/generate")
@@ -845,7 +849,7 @@ async def generate_content(
             - session_id: 会话ID（可选，如果不提供则创建新的）
             - prompt: 写作提示（直接生成模式下必需）
             - file_ids: 参考文件ID列表（可选）
-        
+            - readable_model_name: 模型（可选）
     Returns:
         task_id: 任务ID
         session_id: 会话ID
@@ -935,7 +939,8 @@ async def generate_content(
             prompt=request.prompt,
             file_ids=request.file_ids or [],
             session_id=session_id,
-            message_id=message_id
+            message_id=message_id,
+            readable_model_name=request.readable_model_name
         ))
         
         loop.close()
@@ -950,7 +955,7 @@ async def generate_content(
     })
 
 
-async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str):
+async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, readable_model_name: Optional[str] = None):
     """异步处理全文生成任务"""
     # 创建新的数据库会话
     db = next(get_db())
@@ -970,7 +975,7 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
         user_id = task_params.get("user_id")
         
         # 初始化大纲生成器
-        outline_generator = OutlineGenerator()
+        outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
         # 根据模式生成内容
         try:
@@ -1023,7 +1028,7 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
             
             # 更新任务状态为完成
             task.status = TaskStatus.COMPLETED
-            task.result = json.dumps(result_content, ensure_ascii=False)
+            task.result = {"doc_id": doc_id}
             db.commit()
             
         except Exception as e:
@@ -1194,6 +1199,7 @@ async def create_template(
 @router.post("/outlines/parse")
 async def parse_outline(
     file: FastAPIUploadFile = File(...),
+    readable_model_name: Optional[str] = Query(None, description="模型"),
     db: Session = Depends(get_db)
 ):
     """
@@ -1201,7 +1207,7 @@ async def parse_outline(
     
     Args:
         file: Word文档文件(.doc或.docx)
-        
+        readable_model_name: 模型（可选）
     Returns:
         id: 大纲ID
         title: 大纲标题
@@ -1228,7 +1234,7 @@ async def parse_outline(
         outline_data = parser.get_outline_structure(doc)
         
         # 初始化大纲生成器
-        outline_generator = OutlineGenerator()
+        outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
         # 保存到数据库
         saved_outline = outline_generator.save_outline_to_db(
@@ -1354,6 +1360,15 @@ async def get_chat_session_detail(
             .offset((page - 1) * page_size)\
             .limit(page_size)\
             .all()
+        
+        # 查询未完成的任务
+        unfinished_tasks = db.query(Task).filter(
+            Task.session_id == session_id,
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING])
+        ).all()
+        
+        # 提取未完成任务的ID
+        unfinished_task_ids = [task.id for task in unfinished_tasks]
             
         return APIResponse.success(
             data={
@@ -1373,7 +1388,8 @@ async def get_chat_session_detail(
                 ],
                 "page": page,
                 "page_size": page_size,
-                "pages": pages
+                "pages": pages,
+                "unfinished_task_ids": unfinished_task_ids
             }
         )
         
