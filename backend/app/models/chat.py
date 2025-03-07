@@ -1,5 +1,6 @@
 from sqlalchemy import Enum, Column, Integer, SmallInteger, String, Text, DateTime, Boolean
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.database import Base
 
 class ChatSessionType(Enum):
@@ -9,6 +10,7 @@ class ChatSessionType(Enum):
 class ContentType(str, Enum):
     TEXT = "text"
     OUTLINE = "outline"
+    DOCUMENT = "document"
 
 class ChatSession(Base):
     """聊天会话记录表"""
@@ -23,6 +25,7 @@ class ChatSession(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="最后更新时间")
     is_deleted = Column(Boolean, default=False, comment="是否删除")
+    tasks = relationship("Task", back_populates="session", foreign_keys="Task.session_id")
 
     
 class ChatMessage(Base):
@@ -37,6 +40,7 @@ class ChatMessage(Base):
     content = Column(Text, default="", comment="消息内容")
     content_type = Column(String(20), default=ContentType.TEXT, comment="内容类型")
     outline_id = Column(String(100), default="", comment="大纲ID")
+    document_id = Column(String(100), default="", comment="文档ID")
     full_content = Column(Text(length=4294967295), default="", comment="完整消息内容")
     tokens = Column(Integer, default=0, comment="消息token数量")
     meta = Column(Text, default="", comment="额外元数据(温度、top_p等参数)")
