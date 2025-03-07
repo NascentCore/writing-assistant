@@ -207,6 +207,7 @@ class RagAPI:
         Args:
             kb_ids: 知识库ID列表
             question: 问题内容
+            custom_prompt: 自定义提示
             history: 历史对话记录，格式为[[question1, answer1], [question2, answer2], ...]
             streaming: 是否使用流式返回
             networking: 是否使用联网功能
@@ -234,6 +235,7 @@ class RagAPI:
             "kb_ids": kb_ids,
             "history": history or [],
             "question": question,
+            "custom_prompt": custom_prompt,
             "streaming": streaming,  # 添加streaming参数
             "networking": networking,
             "product_source": product_source,
