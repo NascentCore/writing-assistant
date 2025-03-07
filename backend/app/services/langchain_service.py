@@ -16,12 +16,25 @@ logger = logging.getLogger(__name__)
 class OutlineGenerator:
     """使用LangChain调用大模型生成结构化大纲"""
     
-    def __init__(self):
+    def __init__(self,readable_model_name: Optional[str] = None):
         # 初始化LLM
+        if readable_model_name:
+            model_config = next(
+                (model for model in settings.LLM_MODELS if model.get("readable_model_name") == readable_model_name),
+                settings.LLM_MODELS[0]  # 如果没有找到匹配的，则使用第一个模型
+            )
+            model = model_config["model"]   
+            api_key = model_config["api_key"]
+            base_url = model_config["base_url"]
+        else:
+            model = settings.LLM_MODELS[0]["model"]
+            api_key = settings.LLM_MODELS[0]["api_key"]
+            base_url = settings.LLM_MODELS[0]["base_url"]
+        
         self.llm = ChatOpenAI(
-            model=settings.LLM_MODELS[0]["model"],
-            openai_api_key=settings.LLM_MODELS[0]["api_key"],
-            openai_api_base=settings.LLM_MODELS[0]["base_url"],
+            model=model,
+            openai_api_key=api_key,
+            openai_api_base=base_url,
             temperature=0.7,
         )
         
@@ -214,7 +227,7 @@ class OutlineGenerator:
             # 递归构建返回数据
             def build_paragraph_data(paragraph):
                 data = {
-                    "id": paragraph.id,
+                    "id": str(paragraph.id),
                     "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
                     "title": paragraph.title,
                     "description": paragraph.description,

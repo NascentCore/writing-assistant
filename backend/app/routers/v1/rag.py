@@ -19,6 +19,7 @@ from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from app.rag.parser import get_parser, get_file_format
 from app.rag.rag_api import rag_api
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
+from app.models.task import Task, TaskStatus
 
 logger = logging.getLogger("app")
 
@@ -419,8 +420,23 @@ async def get_chat_session_detail(
         if not session:
             return APIResponse.error(message="会话不存在或无权访问")
         
-        # 查询消息
-        query = db.query(ChatMessage).filter(
+        # 查询消息 - 只选择数据库中存在的字段
+        query = db.query(
+            ChatMessage.id,
+            ChatMessage.message_id,
+            ChatMessage.session_id,
+            ChatMessage.question_id,
+            ChatMessage.role,
+            ChatMessage.content,
+            ChatMessage.content_type,
+            ChatMessage.outline_id,
+            ChatMessage.full_content,
+            ChatMessage.tokens,
+            ChatMessage.meta,
+            ChatMessage.created_at,
+            ChatMessage.updated_at,
+            ChatMessage.is_deleted
+        ).filter(
             ChatMessage.session_id == session_id,
             ChatMessage.is_deleted == False
         )
@@ -432,6 +448,15 @@ async def get_chat_session_detail(
             .offset((page - 1) * page_size)\
             .limit(page_size)\
             .all()
+        
+        # 查询未完成的任务
+        unfinished_tasks = db.query(Task).filter(
+            Task.session_id == session_id,
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING])
+        ).all()
+        
+        # 提取未完成任务的ID
+        unfinished_task_ids = [task.id for task in unfinished_tasks]
             
         return APIResponse.success(
             data={
@@ -441,6 +466,8 @@ async def get_chat_session_detail(
                         "message_id": msg.message_id,
                         "role": msg.role,
                         "content": msg.content,
+                        "content_type": msg.content_type if hasattr(msg, 'content_type') else "text",
+                        "outline_id": msg.outline_id if hasattr(msg, 'outline_id') else "",
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
@@ -448,7 +475,8 @@ async def get_chat_session_detail(
                 ],
                 "page": page,
                 "page_size": page_size,
-                "pages": pages
+                "pages": pages,
+                "unfinished_task_ids": unfinished_task_ids
             }
         )
         

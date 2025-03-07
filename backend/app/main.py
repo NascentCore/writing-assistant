@@ -129,7 +129,7 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["users"])  # ä¿®æ
 app.include_router(prompt.router, prefix="/api/v1", tags=["prompt"])
 app.include_router(document.router, prefix="/api/v1", tags=["document"])
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
-app.include_router(writing.router, prefix="/api/v1", tags=["writing"])
+app.include_router(writing.router, prefix="/api/v1/writing", tags=["writing"])
 
 @app.get("/")
 async def root():

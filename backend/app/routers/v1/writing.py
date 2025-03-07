@@ -1,12 +1,17 @@
 from enum import Enum
+import logging
 import shortuuid
 from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile as FastAPIUploadFile, File
+from fastapi import APIRouter, Depends, Path, UploadFile as FastAPIUploadFile, File, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 import os
+import asyncio
+import concurrent.futures
+import json
 
-from app.schemas.response import APIResponse
+from app.schemas.response import APIResponse, PaginationData
 from app.database import get_db
 from app.services import OutlineGenerator
 from app.models.upload_file import UploadFile
@@ -17,7 +22,7 @@ from app.models.outline import (
     CountStyle, 
     WritingTemplate, 
     WritingTemplateType, 
-    Reference, 
+    Reference,
     WebLink,
     ReferenceType as ModelReferenceType,
     generate_uuid
@@ -28,9 +33,15 @@ from app.parser import DocxParser
 from app.auth import get_current_user
 from app.models.user import User
 from app.utils.outline import build_paragraph_key
+from app.models.task import Task, TaskStatus, TaskType
+from app.models.document import Document, DocumentVersion
 
+logger = logging.getLogger("app")
 
 router = APIRouter()
+
+# 创建线程池执行器
+executor = concurrent.futures.ThreadPoolExecutor()
 
 # 枚举类型
 class CountStyle(str, Enum):
@@ -57,6 +68,7 @@ class GenerateOutlineRequest(BaseModel):
     outline_id: Optional[str] = Field(None, description="大纲ID，如果提供则直接返回对应大纲")
     prompt: Optional[str] = Field(None, description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
+    model_name: Optional[str] = Field(None, description="模型")
 
 
 class WebLinkUpdate(BaseModel):
@@ -125,17 +137,17 @@ async def generate_outline(
     current_user: User = Depends(get_current_user)
 ):
     """
-    生成大纲
+    异步生成大纲
 
     Args:
         outline_id: 大纲ID，如果提供则直接返回对应大纲
         prompt: 写作提示
         file_ids: 文件ID列表
+        readable_model_name: 模型
 
     Returns:
-        id: 大纲ID
-        title: 大纲标题
-        sub_paragraphs: 子段落列表
+        task_id: 任务ID
+        session_id: 会话ID
     """
     
     # 如果提供了outline_id，直接返回对应大纲
@@ -242,7 +254,7 @@ async def generate_outline(
         # 构建响应数据
         def build_paragraph_data(paragraph):
             data = {
-                "id": paragraph.id,
+                "id": str(paragraph.id),
                 "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
                 "title": paragraph.title,
                 "description": paragraph.description,
@@ -256,16 +268,16 @@ async def generate_outline(
             
             # 只有1级段落才有引用
             if paragraph.level == 1:
+                data["references"] = []
                 # 获取引用
                 references = db.query(Reference).filter(
                     Reference.sub_paragraph_id == paragraph.id
                 ).all()
                 
                 if references:
-                    data["references"] = []
                     for ref in references:
                         ref_data = {
-                            "id": ref.id,
+                            "id": str(ref.id),
                             "type": ref.type,
                             "is_selected": ref.is_selected
                         }
@@ -278,7 +290,7 @@ async def generate_outline(
                             
                             if web_link:
                                 ref_data["web_link"] = {
-                                    "id": web_link.id,
+                                    "id": str(web_link.id),
                                     "url": web_link.url,
                                     "title": web_link.title,
                                     "summary": web_link.summary,
@@ -303,44 +315,64 @@ async def generate_outline(
             
             return data
         
-        response_data = {
-            "id": outline.id,
-            "title": outline.title,
-            "markdown_content": outline.markdown_content,
-            "sub_paragraphs": [
-                build_paragraph_data(para) for para in db.query(SubParagraph).filter(
-                    SubParagraph.outline_id == outline.id,
-                    SubParagraph.parent_id == None
-                ).all()
-            ]
-        }
         
-        return APIResponse.success(message="获取大纲成功", data=response_data)
-    
-    # 获取文件内容
-    file_contents = []
-    if request.file_ids:
-        for file_id in request.file_ids:
-            file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
-            if file and file.content:
-                file_contents.append(file.content)
-    
-    # 初始化大纲生成器
-    # TODO(dg): 需要可以配置模型
-    outline_generator = OutlineGenerator()
-    
-    # 调用大模型生成结构化大纲
-    outline_data = outline_generator.generate_outline(request.prompt, file_contents)
-    
-    # 保存到数据库
-    saved_outline = outline_generator.save_outline_to_db(
-        outline_data=outline_data,
-        db_session=db,
-        user_id=current_user.user_id
-    )
+        # 创建聊天会话
+        session_id = f"chat-{shortuuid.uuid()}"[:22]
+        chat_session = ChatSession(
+            session_id=session_id,
+            session_type=ChatSessionType.WRITING,
+            user_id=current_user.user_id,
+        )
+        db.add(chat_session)
+        
+        # 创建用户的提问消息
+        user_message = ChatMessage(
+            message_id=shortuuid.uuid(),
+            session_id=session_id,
+            role="user",
+            content=request.prompt or f"获取大纲: {outline.title}",
+            content_type=ContentType.TEXT,
+        )
+        db.add(user_message)
+        
+        # 创建助手的回答消息
+        assistant_message_id = shortuuid.uuid()
+        assistant_message = ChatMessage(
+            message_id=assistant_message_id,
+            session_id=session_id,
+            role="assistant",
+            content_type=ContentType.OUTLINE,
+            outline_id=str(outline.id),
+            task_status=TaskStatus.COMPLETED.value
+        )
+        db.add(assistant_message)
+        
+        # 创建任务记录
+        task_id = f"task-{shortuuid.uuid()}"[:22]
+        task = Task(
+            id=task_id,
+            type=TaskType.GENERATE_OUTLINE,
+            status=TaskStatus.COMPLETED,
+            session_id=session_id,
+            params={
+                "user_id": current_user.user_id,
+                "outline_id": str(outline.id)
+            },
+            result={"outline_id": str(outline.id)}
+        )
+        db.add(task)
+        
+        # 提交事务
+        db.commit()
+        
+        # 返回任务ID和会话ID
+        return APIResponse.success(message="大纲获取成功", data={
+            "task_id": task_id,
+            "session_id": session_id
+        })
     
     # 创建聊天会话
-    session_id = shortuuid.uuid()
+    session_id = f"chat-{shortuuid.uuid()}"[:22]
     chat_session = ChatSession(
         session_id=session_id,
         session_type=ChatSessionType.WRITING,
@@ -357,22 +389,196 @@ async def generate_outline(
         content_type=ContentType.TEXT,
     )
     db.add(user_message)
-    
-    # 创建助手的回答消息
+
+    # 创建助手的回答消息（任务进行中状态）
+    assistant_message_id = shortuuid.uuid()
     assistant_message = ChatMessage(
-        message_id=shortuuid.uuid(),
+        message_id=assistant_message_id,
         session_id=session_id,
         role="assistant",
-        content_type=ContentType.OUTLINE,
-        outline_id=saved_outline["id"]
+        content="正在生成大纲，请稍候...",
+        content_type=ContentType.TEXT,
+        task_status=TaskStatus.PENDING.value
     )
     db.add(assistant_message)
     
+    # 创建任务记录
+    task_id = f"task-{shortuuid.uuid()}"[:22]
+    task = Task(
+        id=task_id,
+        type=TaskType.GENERATE_OUTLINE,
+        status=TaskStatus.PENDING,
+        session_id=session_id,
+        params={
+            "user_id": current_user.user_id,
+            "prompt": request.prompt,
+            "file_ids": request.file_ids or []
+        }
+    )
+    db.add(task)
+    
     # 提交事务
     db.commit()
-    saved_outline["session_id"] = session_id
     
-    return APIResponse.success(message="大纲生成成功", data=saved_outline)
+    # 使用线程池运行异步任务，避免阻塞当前事件循环
+    def run_async_task():
+        # 创建新的事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # 在新的事件循环中运行异步任务
+        loop.run_until_complete(process_outline_generation(
+            task_id=task_id,
+            prompt=request.prompt,
+            file_ids=request.file_ids or [],
+            session_id=session_id,
+            assistant_message_id=assistant_message_id,
+            readable_model_name=request.model_name
+        ))
+        
+        loop.close()
+    
+    # 在线程池中启动任务
+    executor.submit(run_async_task)
+    
+    # 立即返回响应，不等待异步任务完成
+    return APIResponse.success(message="大纲生成任务已创建", data={
+        "task_id": task_id,
+        "session_id": session_id
+    })
+
+
+async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str], session_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
+    """异步处理大纲生成任务"""
+    # 创建新的数据库会话
+    db = next(get_db())
+    
+    try:
+        # 更新任务状态为处理中
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            print(f"任务 {task_id} 不存在")
+            return
+        
+        task.status = TaskStatus.PROCESSING
+        
+        # 更新助手消息状态为处理中
+        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+        if assistant_message:
+            assistant_message.task_status = TaskStatus.PROCESSING.value
+            assistant_message.task_id = task_id
+            assistant_message.content = "正在生成大纲，请稍候..."
+        
+        db.commit()
+        
+        # 从task.params中获取user_id
+        task_params = task.params
+        user_id = task_params.get("user_id")
+        
+        # 获取文件内容
+        file_contents = []
+        for file_id in file_ids:
+            file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
+            if file and file.content:
+                file_contents.append(file.content)
+        
+        # 初始化大纲生成器
+        outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
+        
+        # 调用大模型生成结构化大纲
+        outline_data = outline_generator.generate_outline(prompt, file_contents)
+        
+        # 保存到数据库
+        saved_outline = outline_generator.save_outline_to_db(
+            outline_data=outline_data,
+            db_session=db,
+            user_id=user_id
+        )
+        
+        # 创建助手的回答消息
+        if assistant_message:
+            # 更新之前创建的助手消息
+            assistant_message.content_type = ContentType.OUTLINE
+            assistant_message.outline_id = saved_outline["id"]
+            assistant_message.task_status = TaskStatus.COMPLETED.value
+            assistant_message.task_result = json.dumps({"outline_id": saved_outline["id"]})
+        else:
+            # 如果之前的消息不存在，创建新消息
+            assistant_message = ChatMessage(
+                message_id=shortuuid.uuid(),
+                session_id=session_id,
+                role="assistant",
+                content_type=ContentType.OUTLINE,
+                outline_id=saved_outline["id"],
+                task_status=TaskStatus.COMPLETED.value,
+                task_id=task_id,
+                task_result=json.dumps({"outline_id": saved_outline["id"]})
+            )
+            db.add(assistant_message)
+        
+        # 更新任务状态为完成
+        task.status = TaskStatus.COMPLETED
+        task.result = {"outline_id": saved_outline["id"]}
+        db.commit()
+        
+    except Exception as e:
+        # 更新任务状态为失败
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if task:
+            task.status = TaskStatus.FAILED
+            task.error = str(e)
+        
+        # 更新助手消息状态为失败
+        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+        if assistant_message:
+            assistant_message.task_status = TaskStatus.FAILED.value
+            assistant_message.content = f"生成大纲失败: {str(e)}"
+        
+        db.commit()
+        
+    finally:
+        db.close()
+
+
+@router.get("/tasks/{task_id}")
+async def get_task_status(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取任务状态
+    
+    Args:
+        task_id: 任务ID
+        
+    Returns:
+        id: 任务ID
+        type: 任务类型
+        status: 任务状态 PENDING, PROCESSING, COMPLETED, FAILED
+        created_at: 创建时间
+        updated_at: 更新时间
+        result: 任务结果
+        error: 错误信息
+    """
+    task = db.query(Task).filter(
+        Task.id == task_id,
+    ).first()
+    
+    if not task:
+        return APIResponse.error(message=f"未找到ID为{task_id}的任务")
+    
+    response_data = {
+        "id": task.id,
+        "type": task.type.value,
+        "status": task.status.value,
+        "created_at": task.created_at.isoformat(),
+        "updated_at": task.updated_at.isoformat(),
+        "result": task.result,
+        "error": task.error
+    }
+    
+    return APIResponse.success(message="获取任务状态成功", data=response_data)
 
 
 @router.put("/outlines/{outline_id}")
@@ -632,7 +838,7 @@ async def get_outline(
     # 递归构建段落数据
     def build_paragraph_data(paragraph):
         data = {
-            "id": paragraph.id,
+            "id": str(paragraph.id),
             "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
             "title": paragraph.title,
             "description": paragraph.description,
@@ -650,7 +856,7 @@ async def get_outline(
             # 从缓存中获取引用
             for ref in references_dict.get(paragraph.id, []):
                 ref_data = {
-                    "id": ref.id,
+                    "id": str(ref.id),
                     "type": ref.type,
                     "is_selected": ref.is_selected
                 }
@@ -660,7 +866,7 @@ async def get_outline(
                     web_link = weblinks_dict.get(ref.id)
                     if web_link:
                         ref_data["web_link"] = {
-                            "id": web_link.id,
+                            "id": str(web_link.id),
                             "url": web_link.url,
                             "title": web_link.title,
                             "summary": web_link.summary,
@@ -685,7 +891,7 @@ async def get_outline(
     
     # 构建响应数据
     response_data = {
-        "id": outline.id,
+        "id": str(outline.id),
         "title": outline.title,
         "markdown_content": outline.markdown_content,
         "sub_paragraphs": [
@@ -699,63 +905,262 @@ async def get_outline(
 
 class GenerateFullContentRequest(BaseModel):
     outline_id: Optional[str] = Field(None, description="大纲ID，如果为空则直接生成全文")
+    session_id: Optional[str] = Field(None, description="会话ID")
     prompt: Optional[str] = Field(None, description="直接生成模式下的写作提示")
     file_ids: Optional[List[str]] = Field(None, description="直接生成模式下的参考文件ID列表")
+    model_name: Optional[str] = Field(None, description="模型")
 
 
 @router.post("/content/generate")
 async def generate_content(
     request: GenerateFullContentRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
-    生成全文，支持两种模式：
+    异步生成全文，支持两种模式：
     1. 基于大纲生成：提供 outline_id
     2. 直接生成：提供 prompt 和可选的 file_ids
     
     Args:
         request: 请求体，包含：
             - outline_id: 大纲ID（可选）
+            - session_id: 会话ID（可选，如果不提供则创建新的）
             - prompt: 写作提示（直接生成模式下必需）
             - file_ids: 参考文件ID列表（可选）
-        
+            - readable_model_name: 模型（可选）
     Returns:
-        title: 文章标题
-        content: 文章内容列表，每个元素包含标题和内容
-        markdown: Markdown格式的完整文章
+        task_id: 任务ID
+        session_id: 会话ID
     """
-    # 初始化大纲生成器
-    outline_generator = OutlineGenerator()
+    # 验证请求参数
+    if not request.outline_id and not request.prompt:
+        return APIResponse.error(message="必须提供大纲ID或写作提示")
+    
+    # 创建或使用现有会话ID
+    session_id = request.session_id
+    if not session_id:
+        # 生成会话ID
+        session_id = f"chat-{shortuuid.uuid()}"[:22]
+    elif len(session_id) > 22:
+        # 如果提供的会话ID超过22位，截取前22位
+        session_id = session_id[:22]
+    
+    # 创建或更新聊天会话
+    chat_session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id
+    ).first()
+    
+    if not chat_session:
+        # 创建新的聊天会话
+        chat_session = ChatSession(
+            session_id=session_id,
+            session_type=ChatSessionType.WRITING,
+            user_id=current_user.user_id
+        )
+        db.add(chat_session)
+    
+    # 创建聊天消息
+    message_content = ""
+    if request.outline_id:
+        # 如果是从大纲生成，保存固定消息
+        message_content = "请基于大纲生成全文"
+        # 获取大纲信息
+        outline = db.query(Outline).filter(Outline.id == request.outline_id).first()
+        if outline:
+            outline_id = outline.id
+        else:
+            outline_id = ""
+    else:
+        # 如果是直接生成，保存prompt
+        message_content = request.prompt
+        outline_id = ""
+    
+    # 创建用户消息
+    message_id = f"msg-{shortuuid.uuid()}"[:22]
+    chat_message = ChatMessage(
+        message_id=message_id,
+        session_id=session_id,
+        role="user",
+        content=message_content,
+        content_type=ContentType.TEXT,
+        outline_id=outline_id
+    )
+    db.add(chat_message)
+    
+    # 创建助手的回答消息（任务进行中状态）
+    assistant_message_id = shortuuid.uuid()
+    assistant_message = ChatMessage(
+        message_id=assistant_message_id,
+        session_id=session_id,
+        question_id=message_id,
+        role="assistant",
+        content="正在生成全文，请稍候...",
+        content_type=ContentType.TEXT,
+        task_status=TaskStatus.PENDING.value
+    )
+    db.add(assistant_message)
+    
+    # 创建任务记录，确保ID不超过22位
+    task_id = f"task-{shortuuid.uuid()}"[:22]
+    task = Task(
+        id=task_id,
+        type=TaskType.GENERATE_CONTENT,
+        status=TaskStatus.PENDING,
+        session_id=session_id,
+        params={
+            "user_id": current_user.user_id,
+            "outline_id": request.outline_id,
+            "prompt": request.prompt,
+            "file_ids": request.file_ids or []
+        }
+    )
+    db.add(task)
+    db.commit()
+    
+    # 启动异步任务
+    def run_async_task():
+        # 创建新的事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # 在新的事件循环中运行异步任务
+        loop.run_until_complete(process_content_generation(
+            task_id=task_id,
+            outline_id=request.outline_id,
+            prompt=request.prompt,
+            file_ids=request.file_ids or [],
+            session_id=session_id,
+            message_id=message_id,
+            assistant_message_id=assistant_message_id,
+            readable_model_name=request.readable_model_name
+        ))
+        
+        loop.close()
+    
+    # 在线程池中启动任务
+    executor.submit(run_async_task)
+    
+    # 立即返回响应，不等待异步任务完成
+    return APIResponse.success(message="全文生成任务已创建", data={
+        "task_id": task_id,
+        "session_id": session_id
+    })
+
+
+async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
+    """异步处理全文生成任务"""
+    # 创建新的数据库会话
+    db = next(get_db())
     
     try:
-        if request.outline_id:
-            # 基于大纲生成模式
-            full_content = outline_generator.generate_full_content(request.outline_id, db)
-        else:
-            # 直接生成模式
-            if not request.prompt:
-                return APIResponse.error(message="直接生成模式下必须提供写作提示")
-            
-            # 获取文件内容
-            file_contents = []
-            if request.file_ids:
-                for file_id in request.file_ids:
-                    file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
-                    if file and file.content:
-                        file_contents.append(file.content)
-            
-            # 调用直接生成方法
-            full_content = outline_generator.generate_content_directly(
-                prompt=request.prompt,
-                file_contents=file_contents
-            )
+        # 更新任务状态为处理中
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            print(f"任务 {task_id} 不存在")
+            return
         
-        return APIResponse.success(message="全文生成成功", data=full_content)
-    except ValueError as e:
-        return APIResponse.error(message=str(e))
+        task.status = TaskStatus.PROCESSING
+        
+        # 更新助手消息状态为处理中
+        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+        if assistant_message:
+            assistant_message.task_status = TaskStatus.PROCESSING.value
+            assistant_message.task_id = task_id
+            assistant_message.content = "正在生成全文，请稍候..."
+        
+        db.commit()
+        
+        # 从task.params中获取user_id
+        task_params = task.params
+        user_id = task_params.get("user_id")
+        
+        # 获取文件内容
+        file_contents = []
+        for file_id in file_ids:
+            file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
+            if file and file.content:
+                file_contents.append(file.content)
+        
+        # 初始化大纲生成器
+        outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
+        
+        # 根据模式生成内容
+        try:
+            if outline_id:
+                # 基于大纲生成模式
+                full_content = outline_generator.generate_full_content(outline_id, db)
+            else:
+                # 直接生成模式
+                # 调用直接生成方法
+                full_content = outline_generator.generate_content_directly(
+                    prompt=prompt,
+                    file_contents=file_contents
+                )
+            
+            # 保存HTML内容到documents表
+            doc_id = f"doc-{shortuuid.uuid()}"[:22]
+            title = full_content.get("title", "无标题文档")
+            html_content = full_content.get("html", "")
+            
+            # 创建文档记录
+            document = Document(
+                doc_id=doc_id,
+                title=title,
+                content=html_content,
+                user_id=user_id  # 使用传入的user_id
+            )
+            db.add(document)
+            
+            # 创建AI回复消息
+            ai_message_id = f"msg-{shortuuid.uuid()}"[:22]
+            
+            # 如果存在之前创建的助手消息，则更新它
+            if assistant_message:
+                assistant_message.content = ""
+                assistant_message.content_type = ContentType.DOCUMENT
+                assistant_message.document_id = doc_id
+                assistant_message.task_status = TaskStatus.COMPLETED.value
+                assistant_message.task_result = json.dumps({"doc_id": doc_id})
+                assistant_message.full_content = json.dumps({"doc_id": doc_id})
+            else:
+                # 如果之前的消息不存在，创建新消息
+                assistant_message = ChatMessage(
+                    message_id=ai_message_id,
+                    session_id=session_id,
+                    question_id=message_id,
+                    role="assistant",
+                    content="",
+                    content_type=ContentType.DOCUMENT,
+                    document_id=doc_id,
+                    task_status=TaskStatus.COMPLETED.value,
+                    task_id=task_id,
+                    task_result=json.dumps({"doc_id": doc_id}),
+                    full_content=json.dumps({"doc_id": doc_id})
+                )
+                db.add(assistant_message)
+            
+            # 更新任务状态为完成
+            task.status = TaskStatus.COMPLETED
+            task.result = {"doc_id": doc_id}
+            db.commit()
+            
+        except Exception as e:
+            # 更新任务状态为失败
+            task.status = TaskStatus.FAILED
+            task.error = str(e)
+            
+            # 更新助手消息状态为失败
+            if assistant_message:
+                assistant_message.task_status = TaskStatus.FAILED.value
+                assistant_message.content = f"生成全文失败: {str(e)}"
+            
+            db.commit()
+            
     except Exception as e:
-        return APIResponse.error(message=f"生成全文时出错: {str(e)}")
-
+        print(f"处理全文生成任务时出错: {str(e)}")
+    finally:
+        db.close()
 
 
 class TemplateBase(BaseModel):
@@ -820,6 +1225,18 @@ async def get_templates(
                         .limit(page_size) \
                         .all()
         
+        # 收集所有大纲ID
+        all_outline_ids = []
+        for template in templates:
+            if template.default_outline_ids:
+                all_outline_ids.extend(template.default_outline_ids)
+        
+        # 查询所有相关大纲
+        outlines = {}
+        if all_outline_ids:
+            outline_records = db.query(Outline).filter(Outline.id.in_(all_outline_ids)).all()
+            outlines = {str(outline.id): {"id": str(outline.id), "title": outline.title} for outline in outline_records}
+        
         # 构建响应数据
         response_data = {
             "templates": [
@@ -834,7 +1251,8 @@ async def get_templates(
                     "variables": template.variables,
                     "created_at": template.created_at.isoformat(),
                     "updated_at": template.updated_at.isoformat(),
-                    "outline_ids": template.default_outline_ids,
+                    "outlines": [outlines.get(str(outline_id), {"id": str(outline_id), "title": "未知大纲"}) 
+                                for outline_id in (template.default_outline_ids or [])],
                     "has_steps": template.has_steps
                 }
                 for template in templates
@@ -900,6 +1318,7 @@ async def create_template(
 @router.post("/outlines/parse")
 async def parse_outline(
     file: FastAPIUploadFile = File(...),
+    readable_model_name: Optional[str] = Query(None, description="模型"),
     db: Session = Depends(get_db)
 ):
     """
@@ -907,7 +1326,7 @@ async def parse_outline(
     
     Args:
         file: Word文档文件(.doc或.docx)
-        
+        readable_model_name: 模型（可选）
     Returns:
         id: 大纲ID
         title: 大纲标题
@@ -934,7 +1353,7 @@ async def parse_outline(
         outline_data = parser.get_outline_structure(doc)
         
         # 初始化大纲生成器
-        outline_generator = OutlineGenerator()
+        outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
         # 保存到数据库
         saved_outline = outline_generator.save_outline_to_db(
@@ -956,3 +1375,191 @@ async def parse_outline(
                 print(f"清理临时文件失败: {str(e)}")  # 记录错误但不影响主流程
 
 
+
+@router.get("/chat/sessions", summary="获取写作会话列表")
+async def get_chat_sessions(
+    page: int = 1,
+    page_size: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 构建基础查询
+        query = db.query(ChatSession).filter(
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.session_type == ChatSessionType.WRITING,
+            ChatSession.is_deleted == False
+        )
+        
+        # 获取总记录数
+        total = query.count()
+        pages = (total + page_size - 1) // page_size
+        
+        # 分页查询会话
+        sessions = query.order_by(desc(ChatSession.id))\
+            .offset((page - 1) * page_size)\
+            .limit(page_size)\
+            .all()
+        
+        # 获取每个会话的最后一条消息
+        session_data = []
+        for session in sessions:
+            last_message = db.query(ChatMessage)\
+                .filter(
+                    ChatMessage.session_id == session.session_id,
+                    ChatMessage.is_deleted == False
+                )\
+                .order_by(desc(ChatMessage.id))\
+                .first()
+            
+            first_message = db.query(ChatMessage)\
+                .filter(
+                    ChatMessage.session_id == session.session_id,
+                    ChatMessage.role == "user",
+                    ChatMessage.is_deleted == False
+                )\
+                .order_by(ChatMessage.id)\
+                .first()
+            
+            # 查询未完成的任务
+            unfinished_tasks = db.query(Task).filter(
+                Task.session_id == session.session_id,
+                Task.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING])
+            ).all()
+            
+            # 提取未完成任务的ID
+            unfinished_task_ids = [task.id for task in unfinished_tasks]
+            
+            session_data.append({
+                "session_id": session.session_id,
+                "session_type": session.session_type,
+                "last_message": last_message.content if last_message else None,
+                "last_message_time": last_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if last_message else None,
+                "first_message": first_message.content if first_message else None,
+                "first_message_time": first_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if first_message else None,
+                "created_at": session.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": session.updated_at.strftime("%Y-%m-%d %H:%M:%S") if session.updated_at else None,
+                "unfinished_task_ids": unfinished_task_ids
+            })
+        
+        return APIResponse.success(
+            message="获取知识库会话列表成功",
+            data=PaginationData(
+                list=session_data,
+                total=total,
+                page=page,
+                page_size=page_size,
+                total_pages=pages
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"获取知识库会话列表失败: {str(e)}")
+        return APIResponse.error(message=f"获取知识库会话列表失败: {str(e)}")
+
+@router.get("/chat/sessions/{session_id}", summary="获取写作会话详情")
+async def get_chat_session_detail(
+    session_id: str = Path(..., description="会话ID"),
+    page: int = 1,
+    page_size: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 验证会话是否存在且属于当前用户
+        session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.session_type == ChatSessionType.WRITING,
+            ChatSession.is_deleted == False
+        ).first()
+        if not session:
+            return APIResponse.error(message="会话不存在或无权访问")
+        
+        # 查询消息
+        query = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.is_deleted == False
+        )
+        
+        total = query.count()
+        pages = (total + page_size - 1) // page_size
+        
+        messages = query.order_by(ChatMessage.id)\
+            .offset((page - 1) * page_size)\
+            .limit(page_size)\
+            .all()
+        
+        # 查询未完成的任务
+        unfinished_tasks = db.query(Task).filter(
+            Task.session_id == session_id,
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING])
+        ).all()
+        
+        # 提取未完成任务的ID
+        unfinished_task_ids = [task.id for task in unfinished_tasks]
+            
+        return APIResponse.success(
+            data={
+                "total": total,
+                "items": [
+                    {
+                        "message_id": msg.message_id,
+                        "role": msg.role,
+                        "content": msg.content,
+                        "content_type": msg.content_type,
+                        "document_id": str(msg.document_id) if msg.document_id else "",
+                        "outline_id": str(msg.outline_id) if msg.outline_id else "",
+                        "task_id": msg.task_id,
+                        "task_status": msg.task_status,
+                        "task_result": msg.task_result,
+                        "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
+                        "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    for msg in messages
+                ],
+                "page": page,
+                "page_size": page_size,
+                "pages": pages,
+                "unfinished_task_ids": unfinished_task_ids
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"获取知识库会话详情失败: {str(e)}")
+        return APIResponse.error(message=f"获取知识库会话详情失败: {str(e)}")
+
+@router.delete("/chat/sessions/{session_id}", summary="删除写作会话")
+async def delete_chat_session(
+    session_id: str = Path(..., description="会话ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 验证会话是否存在且属于当前用户
+        session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.user_id == current_user.user_id,
+            ChatSession.session_type == ChatSessionType.WRITING,
+            ChatSession.is_deleted.is_(False)  # 遵循 PEP 8
+        ).first()
+        
+        if not session:
+            return APIResponse.error(message="会话不存在或无权访问")
+        
+        # 软删除会话
+        session.is_deleted = True
+        db.flush()  # 确保变更生效
+        
+        # 软删除该会话下的所有消息
+        db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.is_deleted.is_(False)
+        ).update({"is_deleted": True}, synchronize_session="fetch")
+        
+        db.commit()
+        return APIResponse.success(message="会话删除成功")
+    
+    except Exception as e:
+        db.rollback()  # 避免数据库处于不一致状态
+        return APIResponse.error(message=f"删除失败: {str(e)}")
