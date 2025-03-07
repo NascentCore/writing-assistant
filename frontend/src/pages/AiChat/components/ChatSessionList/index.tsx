@@ -1,6 +1,5 @@
 import { fetchWithAuthNew } from '@/utils/fetch';
-import { DeleteOutlined, EditOutlined } from '@ant-design/icons';
-import { Conversations } from '@ant-design/x';
+import { DeleteOutlined } from '@ant-design/icons';
 import { history, useLocation } from '@umijs/max';
 import { Button, Empty, Spin, Typography, message } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -10,8 +9,8 @@ import styles from './index.module.less';
 interface SessionItem {
   session_id: string;
   session_type: number;
-  last_message: string;
-  last_message_time: string;
+  first_message: string;
+  first_message_time: string;
   created_at: string;
   updated_at: string;
 }
@@ -99,21 +98,53 @@ const ConversationsList = React.memo(
     items,
     activeKey,
     onActiveChange,
-    menu,
+    onDeleteSession,
   }: {
     items: any[];
     activeKey?: string;
     onActiveChange: (key: string) => void;
-    menu: (session: { key: string }) => any;
+    onDeleteSession: (sessionId: string) => void;
   }) => {
+    // 自定义渲染会话项，添加删除按钮
+    const renderItem = (item: any, isActive: boolean) => {
+      const handleDelete = (e: React.MouseEvent) => {
+        e.stopPropagation(); // 阻止事件冒泡
+        onDeleteSession(item.key);
+      };
+
+      return (
+        <div
+          className={`${styles.sessionItem} ${
+            isActive ? styles.activeSession : ''
+          }`}
+        >
+          <div
+            className={styles.sessionContent}
+            onClick={() => onActiveChange(item.key)}
+          >
+            <div className={styles.sessionLabel}>{item.label}</div>
+            <div className={styles.sessionDescription}>{item.description}</div>
+          </div>
+          <Button
+            type="text"
+            size="small"
+            icon={<DeleteOutlined />}
+            danger
+            className={styles.deleteButton}
+            onClick={handleDelete}
+          />
+        </div>
+      );
+    };
+
     return (
-      <Conversations
-        items={items}
-        activeKey={activeKey}
-        onActiveChange={onActiveChange}
-        // menu={menu}
-        // groupable
-      />
+      <div className={styles.customSessionList}>
+        {items.map((item) => (
+          <div key={item.key} className={styles.sessionItemWrapper}>
+            {renderItem(item, item.key === activeKey)}
+          </div>
+        ))}
+      </div>
     );
   },
 );
@@ -246,20 +277,58 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       try {
-        // TODO: 实现删除会话的接口调用
-        console.log('删除会话:', sessionId);
-        // 可以添加实际的删除会话接口调用
-        // await fetchWithAuthNew(`/api/v1/rag/chat/sessions/${sessionId}`, {
-        //   method: 'DELETE',
-        // });
+        // 调用删除会话的接口
+        await fetchWithAuthNew(`/api/v1/rag/chat/sessions/${sessionId}`, {
+          method: 'DELETE',
+        });
+
         message.success('会话删除成功');
+
+        // 判断是否删除的是当前选中的会话
+        if (sessionId === activeSessionId) {
+          // 找到当前会话在列表中的索引
+          const currentIndex = sessions.findIndex(
+            (session) => session.session_id === sessionId,
+          );
+
+          if (currentIndex !== -1) {
+            // 确定要选择的下一个会话
+            let nextSessionIndex;
+
+            // 如果当前会话是第一个，选择下一个会话
+            if (currentIndex === 0) {
+              nextSessionIndex = sessions.length > 1 ? 1 : -1;
+            } else {
+              // 否则选择上一个会话
+              nextSessionIndex = currentIndex - 1;
+            }
+
+            // 如果有可选择的会话
+            if (nextSessionIndex >= 0 && nextSessionIndex < sessions.length) {
+              const nextSession = sessions[nextSessionIndex];
+              // 切换到下一个会话
+              handleSessionChange(nextSession.session_id);
+            } else {
+              // 如果没有其他会话了，创建新会话
+              onCreateNewSession();
+            }
+          }
+        }
+
         // 标记需要刷新会话列表
         setNeedRefresh(true);
       } catch (error) {
+        console.error('删除会话失败', error);
         message.error('删除会话失败');
       }
     },
-    [setNeedRefresh],
+    [
+      activeSessionId,
+      sessions,
+      handleSessionChange,
+      onCreateNewSession,
+      setNeedRefresh,
+    ],
   );
 
   // 初始化加载会话历史
@@ -375,43 +444,15 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
     [],
   );
 
-  // 会话操作菜单配置
-  const sessionMenuConfig = useCallback(
-    (session: { key: string }) => ({
-      items: [
-        {
-          label: '重命名',
-          key: 'rename',
-          icon: <EditOutlined />,
-        },
-        {
-          label: '删除',
-          key: 'delete',
-          icon: <DeleteOutlined />,
-          danger: true,
-        },
-      ],
-      onClick: (menuInfo: { key: string }) => {
-        if (menuInfo.key === 'delete') {
-          handleDeleteSession(session.key);
-        } else if (menuInfo.key === 'rename') {
-          // TODO: 实现重命名功能
-          message.info(`重命名会话: ${session.key}`);
-        }
-      },
-    }),
-    [handleDeleteSession],
-  );
-
-  // 将会话数据转换为 Conversations 组件需要的格式
+  // 将会话数据转换为组件需要的格式
   const conversationItems = React.useMemo(
     () =>
       sessions
         .filter((session) => session && session.session_id) // 过滤掉无效的会话
         .map((session) => {
           // 确保时间戳有效
-          const messageTime = session.last_message_time
-            ? new Date(session.last_message_time)
+          const messageTime = session.first_message_time
+            ? new Date(session.first_message_time)
             : new Date();
           const isToday =
             messageTime.toLocaleDateString() ===
@@ -419,11 +460,11 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
 
           return {
             key: session.session_id,
-            label: formatMessageContent(session.last_message),
+            label: formatMessageContent(session.first_message),
             timestamp: messageTime.getTime(),
             // group: isToday ? '今天' : messageTime.toLocaleDateString(),
             group: isToday ? '今天' : '过去',
-            description: formatDateTime(session.last_message_time || ''),
+            description: formatDateTime(session.first_message_time || ''),
           };
         }),
     [sessions, formatMessageContent, formatDateTime],
@@ -495,7 +536,7 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
               items={conversationItems}
               activeKey={activeSessionId || undefined}
               onActiveChange={handleSessionChange}
-              menu={sessionMenuConfig}
+              onDeleteSession={handleDeleteSession}
             />
             <LoadMoreButton
               hasMore={hasMore}
