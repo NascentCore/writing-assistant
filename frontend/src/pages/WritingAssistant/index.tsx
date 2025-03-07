@@ -2,7 +2,7 @@ import { fetchWithAuthNew } from '@/utils/fetch';
 import { history } from '@umijs/max';
 import { Spin, message } from 'antd';
 import React, { useEffect, useState } from 'react';
-import Sender from './components/Sender';
+import CustomerSender from './components/Sender';
 import styles from './index.less';
 
 // const { TabPane } = Tabs;
@@ -137,7 +137,7 @@ const Home: React.FC = () => {
       </div>
 
       <div className={styles.inputArea}>
-        <Sender
+        <CustomerSender
           onMessageSent={(message) => {
             console.log('发送消息:', message);
             // 这里可以添加处理消息的逻辑

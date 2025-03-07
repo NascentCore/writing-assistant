@@ -254,183 +254,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     setRefreshSessionsList(() => refreshFn);
   }, []);
 
-  // 添加一个共享的messageRender函数
-  const sharedMessageRender = (
-    content: string,
-    avatarType: 'user' | 'assistant',
-  ) => {
-    // 查找当前消息
-    const currentMessage = messages.find(
-      (msg) => msg.content === content && msg.avatarType === avatarType,
-    );
-    const files = currentMessage?.files;
-    return (
-      <Flex vertical gap="small">
-        {/* 渲染消息内容 */}
-        <Typography>
-          <div
-            dangerouslySetInnerHTML={{
-              __html: md.render(content),
-            }}
-          />
-        </Typography>
-
-        {/* 只在用户消息中渲染关联文件 */}
-        {avatarType === 'user' && files && files.length > 0 && (
-          <Flex
-            vertical
-            gap="small"
-            style={{
-              marginTop: 8,
-              background: '#f5f5f5',
-              padding: 8,
-              borderRadius: 4,
-            }}
-          >
-            <Typography.Text type="secondary">关联文件：</Typography.Text>
-            <Flex wrap="wrap" gap="small">
-              {files.map((file) => (
-                <Attachments.FileCard
-                  key={file.file_id}
-                  item={{
-                    uid: file.file_id,
-                    name: file.name,
-                    size: file.size,
-                    type: file.type,
-                    status: 'done',
-                  }}
-                />
-              ))}
-            </Flex>
-          </Flex>
-        )}
-      </Flex>
-    );
-  };
-
-  const headerNode = (
-    <Sender.Header
-      title="附件"
-      open={open}
-      onOpenChange={setOpen}
-      styles={{
-        content: {
-          padding: 0,
-        },
-      }}
-      forceRender
-    >
-      <Attachments
-        accept=".doc,.docx,.pdf"
-        multiple
-        ref={attachmentsRef}
-        beforeUpload={() => true}
-        customRequest={({ file, onSuccess, onError, onProgress }) => {
-          const formData = new FormData();
-          formData.append('files', file);
-          const xhr = new XMLHttpRequest();
-          xhr.open('POST', `${API_BASE_URL}/api/v1/rag/attachments`);
-          xhr.setRequestHeader(
-            'authorization',
-            `Bearer ${localStorage.getItem('token')}`,
-          );
-
-          // 添加进度监听
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-              const percent = Math.round((event.loaded / event.total) * 100);
-              onProgress?.({ percent });
-            }
-          };
-
-          xhr.onload = () => {
-            if (xhr.status === 200) {
-              try {
-                const response = JSON.parse(xhr.responseText);
-                if (response.code !== 200) {
-                  onError?.(new Error('上传失败'));
-                  return;
-                }
-                onSuccess?.(response);
-              } catch (e) {
-                onError?.(new Error('解析响应失败'));
-              }
-            } else {
-              onError?.(new Error('上传失败'));
-            }
-          };
-          xhr.onerror = () => {
-            onError?.(new Error('网络错误'));
-          };
-          xhr.send(formData);
-        }}
-        items={items}
-        onChange={({ fileList }) => {
-          setItems(fileList);
-
-          // 更新 selectedFiles，移除已经不在 fileList 中的文件
-          setSelectedFiles((prev) =>
-            prev.filter((file) =>
-              fileList.some(
-                (f) => f.response?.data?.[0]?.file_id === file.file_id,
-              ),
-            ),
-          );
-
-          // 当文件列表为空时，自动关闭 Header
-          if (fileList.length === 0) {
-            setOpen(false);
-          }
-
-          // 处理新完成上传的文件
-          const completedFiles = fileList
-            .filter((file) => {
-              return file.status === 'done' && file.response?.code === 200;
-            })
-            .map((file) => {
-              const fileData = file.response.data[0];
-              return {
-                file_id: fileData.file_id,
-                name: fileData.name || file.name,
-                size: fileData.size || file.size || 0,
-                type: fileData.content_type || '',
-                status: 1,
-                created_at: new Date().toISOString(),
-                percent: 100,
-              };
-            });
-
-          if (completedFiles.length > 0) {
-            // 更新 selectedFiles，但要避免重复添加
-            setSelectedFiles((prev) => {
-              const existingIds = new Set(prev.map((f) => f.file_id));
-              const newFiles = completedFiles.filter(
-                (f) => !existingIds.has(f.file_id),
-              );
-              // 如果有新文件上传完成，自动打开 Header
-              if (newFiles.length > 0) {
-                setOpen(true);
-              }
-              return [...prev, ...newFiles];
-            });
-          }
-        }}
-        placeholder={(type) =>
-          type === 'drop'
-            ? {
-                title: '拖拽文件到这里',
-              }
-            : {
-                icon: <CloudUploadOutlined />,
-                title: '上传文件',
-                description: '点击或拖拽文件到此区域上传',
-              }
-        }
-        getDropContainer={() => senderRef.current?.nativeElement}
-      />
-    </Sender.Header>
-  );
-
   // 暴露添加文件的方法
   useImperativeHandle(ref, () => ({
     addSelectedFile: (file: FileItem) => {
@@ -498,6 +321,14 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       question: string;
       stream: boolean;
       session_id?: string;
+      files?: {
+        file_id: string;
+        name: string;
+        size: number;
+        type: string;
+        status: number;
+        created_at: string;
+      }[];
     } = {
       model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
       file_ids: selectedFiles
@@ -508,6 +339,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
         .map((file) => file.file_id),
       question: value,
       stream: true,
+      // 添加 messages 字段，包含当前消息和关联的文件信息
+      files: selectedFiles.length > 0 ? selectedFiles : undefined,
     };
 
     // 只有当 currentSessionId 不为 null 时才添加到请求数据中
@@ -621,7 +454,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     }
   };
   const handleSelectedModel = (selectedModel: string) => {
-    console.log('models', models);
     if (models.length === 0) {
       return '';
     }
@@ -707,25 +539,70 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                   ...msg,
                   role: msg.avatarType === 'user' ? 'user' : 'assistant',
                 }))}
-                roles={{
-                  user: {
-                    placement: 'end',
+                roles={(bubble) => {
+                  // 根据 bubble 的 role 返回不同的配置
+                  const isUser = bubble.role === 'user';
+
+                  return {
+                    placement: isUser ? 'end' : 'start',
                     avatar: {
                       icon: <UserOutlined />,
-                      style: { background: '#87d068' },
+                      style: { background: isUser ? '#87d068' : '#fde3cf' },
                     },
-                    messageRender: (content: string) =>
-                      sharedMessageRender(content, 'user'),
-                  },
-                  assistant: {
-                    placement: 'start',
-                    avatar: {
-                      icon: <UserOutlined />,
-                      style: { background: '#fde3cf' },
+                    messageRender: () => {
+                      // 使用 bubble.key 查找对应的消息
+                      const currentMessage = messages.find(
+                        (msg) => msg.key === bubble.key,
+                      );
+
+                      return (
+                        <Flex vertical gap="small">
+                          {/* 渲染消息内容 */}
+                          <Typography>
+                            <div
+                              dangerouslySetInnerHTML={{
+                                __html: md.render(String(bubble.content || '')),
+                              }}
+                            />
+                          </Typography>
+
+                          {/* 只在用户消息中渲染关联文件 */}
+                          {isUser &&
+                            currentMessage?.files &&
+                            currentMessage.files.length > 0 && (
+                              <Flex
+                                vertical
+                                gap="small"
+                                style={{
+                                  marginTop: 8,
+                                  background: '#f5f5f5',
+                                  padding: 8,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Typography.Text type="secondary">
+                                  关联文件：
+                                </Typography.Text>
+                                <Flex wrap="wrap" gap="small">
+                                  {currentMessage.files.map((file) => (
+                                    <Attachments.FileCard
+                                      key={file.file_id}
+                                      item={{
+                                        uid: file.file_id,
+                                        name: file.name,
+                                        size: file.size,
+                                        type: file.type,
+                                        status: 'done',
+                                      }}
+                                    />
+                                  ))}
+                                </Flex>
+                              </Flex>
+                            )}
+                        </Flex>
+                      );
                     },
-                    messageRender: (content: string) =>
-                      sharedMessageRender(content, 'assistant'),
-                  },
+                  };
                 }}
               />
             </div>
@@ -735,7 +612,144 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                 style={{
                   marginTop: 12,
                 }}
-                header={headerNode}
+                header={
+                  <Sender.Header
+                    title="附件"
+                    open={open}
+                    onOpenChange={setOpen}
+                    styles={{
+                      content: {
+                        padding: 0,
+                      },
+                    }}
+                    forceRender
+                  >
+                    <Attachments
+                      accept=".doc,.docx,.pdf"
+                      multiple
+                      ref={attachmentsRef}
+                      beforeUpload={() => true}
+                      customRequest={({
+                        file,
+                        onSuccess,
+                        onError,
+                        onProgress,
+                      }) => {
+                        const formData = new FormData();
+                        formData.append('files', file);
+                        const xhr = new XMLHttpRequest();
+                        xhr.open(
+                          'POST',
+                          `${API_BASE_URL}/api/v1/rag/attachments`,
+                        );
+                        xhr.setRequestHeader(
+                          'authorization',
+                          `Bearer ${localStorage.getItem('token')}`,
+                        );
+
+                        // 添加进度监听
+                        xhr.upload.onprogress = (event) => {
+                          if (event.lengthComputable) {
+                            const percent = Math.round(
+                              (event.loaded / event.total) * 100,
+                            );
+                            onProgress?.({ percent });
+                          }
+                        };
+
+                        xhr.onload = () => {
+                          if (xhr.status === 200) {
+                            try {
+                              const response = JSON.parse(xhr.responseText);
+                              if (response.code !== 200) {
+                                onError?.(new Error('上传失败'));
+                                return;
+                              }
+                              onSuccess?.(response);
+                            } catch (e) {
+                              onError?.(new Error('解析响应失败'));
+                            }
+                          } else {
+                            onError?.(new Error('上传失败'));
+                          }
+                        };
+                        xhr.onerror = () => {
+                          onError?.(new Error('网络错误'));
+                        };
+                        xhr.send(formData);
+                      }}
+                      items={items}
+                      onChange={({ fileList }) => {
+                        setItems(fileList);
+
+                        // 更新 selectedFiles，移除已经不在 fileList 中的文件
+                        setSelectedFiles((prev) =>
+                          prev.filter((file) =>
+                            fileList.some(
+                              (f) =>
+                                f.response?.data?.[0]?.file_id === file.file_id,
+                            ),
+                          ),
+                        );
+
+                        // 当文件列表为空时，自动关闭 Header
+                        if (fileList.length === 0) {
+                          setOpen(false);
+                        }
+
+                        // 处理新完成上传的文件
+                        const completedFiles = fileList
+                          .filter((file) => {
+                            return (
+                              file.status === 'done' &&
+                              file.response?.code === 200
+                            );
+                          })
+                          .map((file) => {
+                            const fileData = file.response.data[0];
+                            return {
+                              file_id: fileData.file_id,
+                              name: fileData.name || file.name,
+                              size: fileData.size || file.size || 0,
+                              type: fileData.content_type || '',
+                              status: 1,
+                              created_at: new Date().toISOString(),
+                              percent: 100,
+                            };
+                          });
+
+                        if (completedFiles.length > 0) {
+                          // 更新 selectedFiles，但要避免重复添加
+                          setSelectedFiles((prev) => {
+                            const existingIds = new Set(
+                              prev.map((f) => f.file_id),
+                            );
+                            const newFiles = completedFiles.filter(
+                              (f) => !existingIds.has(f.file_id),
+                            );
+                            // 如果有新文件上传完成，自动打开 Header
+                            if (newFiles.length > 0) {
+                              setOpen(true);
+                            }
+                            return [...prev, ...newFiles];
+                          });
+                        }
+                      }}
+                      placeholder={(type) =>
+                        type === 'drop'
+                          ? {
+                              title: '拖拽文件到这里',
+                            }
+                          : {
+                              icon: <CloudUploadOutlined />,
+                              title: '上传文件',
+                              description: '点击或拖拽文件到此区域上传',
+                            }
+                      }
+                      getDropContainer={() => senderRef.current?.nativeElement}
+                    />
+                  </Sender.Header>
+                }
                 value={value}
                 prefix={
                   <Badge dot={!open && selectedFiles.length > 0}>
