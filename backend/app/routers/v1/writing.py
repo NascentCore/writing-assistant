@@ -30,10 +30,10 @@ from app.models.outline import (
 )
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType, ContentType
 from app.config import Settings
-from app.parser import DocxParser
+from app.parser import DocxParser, MarkdownParser
 from app.auth import get_current_user
 from app.models.user import User
-from app.utils.outline import build_paragraph_key
+from app.utils.outline import build_paragraph_key, build_paragraph_response
 from app.models.task import Task, TaskStatus, TaskType
 from app.models.document import Document, DocumentVersion
 
@@ -252,70 +252,37 @@ async def generate_outline(
         for parent_id in siblings_dict:
             siblings_dict[parent_id].sort()
             
-        # 构建响应数据
-        def build_paragraph_data(paragraph):
-            data = {
-                "id": str(paragraph.id),
-                "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
-                "title": paragraph.title,
-                "description": paragraph.description,
-                "level": paragraph.level,
-                "reference_status": ReferenceStatus(paragraph.reference_status).value
-            }
+        # 递归构建段落树
+        def build_paragraph_tree(parent_id=None):
+            result = []
+            children_ids = siblings_dict.get(parent_id, [])
             
-            # 只有1级段落才有count_style
-            if paragraph.level == 1 and paragraph.count_style:
-                data["count_style"] = paragraph.count_style.value
-            
-            # 只有1级段落才有引用
-            if paragraph.level == 1:
-                data["references"] = []
-                # 获取引用
-                references = db.query(Reference).filter(
-                    Reference.sub_paragraph_id == paragraph.id
-                ).all()
+            for para_id in children_ids:
+                paragraph = paragraphs_dict[para_id]
+                # 使用build_paragraph_response构建数据
+                data = build_paragraph_response(
+                    paragraph, 
+                    siblings_dict, 
+                    paragraphs_dict, 
+                    {}, 
+                    ReferenceStatus
+                )
                 
-                if references:
-                    for ref in references:
-                        ref_data = {
-                            "id": str(ref.id),
-                            "type": ref.type,
-                            "is_selected": ref.is_selected
-                        }
-                        
-                        # 如果是网页链接类型，获取WebLink信息
-                        if ref.type == ModelReferenceType.WEB_LINK.value:
-                            web_link = db.query(WebLink).filter(
-                                WebLink.reference_id == ref.id
-                            ).first()
-                            
-                            if web_link:
-                                ref_data["web_link"] = {
-                                    "id": str(web_link.id),
-                                    "url": web_link.url,
-                                    "title": web_link.title,
-                                    "summary": web_link.summary,
-                                    "icon_url": web_link.icon_url,
-                                    "content_count": web_link.content_count,
-                                    "content": web_link.content
-                                }
-                        
-                        data["references"].append(ref_data)
-                else:
-                    data["references"] = []
+                # 递归处理子段落
+                children = build_paragraph_tree(para_id)
+                if children:
+                    data["children"] = children
+                
+                result.append(data)
             
-            # 获取子段落
-            children = db.query(SubParagraph).filter(
-                SubParagraph.parent_id == paragraph.id
-            ).all()
-            
-            if children:
-                data["children"] = [build_paragraph_data(child) for child in children]
-            else:
-                data["children"] = []
-            
-            return data
+            return result
         
+        # 构建响应
+        response_data = {
+            "id": outline.id,
+            "title": outline.title,
+            "sub_paragraphs": build_paragraph_tree()
+        }
         
         # 创建聊天会话
         session_id = f"chat-{shortuuid.uuid()}"[:22]
@@ -907,89 +874,37 @@ async def get_outline(
     for parent_id in siblings_dict:
         siblings_dict[parent_id].sort()
     
-    # 一次性获取所有引用
-    all_references = db.query(Reference).filter(
-        Reference.sub_paragraph_id.in_([p.id for p in all_paragraphs])
-    ).all()
-    references_dict = {}  # paragraph_id -> [references]
-    for ref in all_references:
-        if ref.sub_paragraph_id not in references_dict:
-            references_dict[ref.sub_paragraph_id] = []
-        references_dict[ref.sub_paragraph_id].append(ref)
+    # 递归构建段落树
+    def build_paragraph_tree(parent_id=None):
+        result = []
+        children_ids = siblings_dict.get(parent_id, [])
+        
+        for para_id in children_ids:
+            paragraph = paragraphs_dict[para_id]
+            # 使用build_paragraph_response构建数据
+            data = build_paragraph_response(
+                paragraph, 
+                siblings_dict, 
+                paragraphs_dict, 
+                {}, 
+                ReferenceStatus
+            )
+            
+            # 递归处理子段落
+            children = build_paragraph_tree(para_id)
+            if children:
+                data["children"] = children
+            
+            result.append(data)
+        
+        return result
     
-    # 一次性获取所有WebLink
-    weblink_ids = [
-        ref.id for ref in all_references 
-        if ref.type == ModelReferenceType.WEB_LINK.value
-    ]
-    all_weblinks = db.query(WebLink).filter(
-        WebLink.reference_id.in_(weblink_ids)
-    ).all() if weblink_ids else []
-    weblinks_dict = {wl.reference_id: wl for wl in all_weblinks}
-    
-    # 递归构建段落数据
-    def build_paragraph_data(paragraph):
-        data = {
-            "id": str(paragraph.id),
-            "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
-            "title": paragraph.title,
-            "description": paragraph.description,
-            "level": paragraph.level,
-            "reference_status": ReferenceStatus(paragraph.reference_status).value
-        }
-        
-        # 只有1级段落才有count_style
-        if paragraph.level == 1 and paragraph.count_style:
-            data["count_style"] = paragraph.count_style.value
-        
-        # 只有1级段落才有引用
-        if paragraph.level == 1:
-            data["references"] = []
-            # 从缓存中获取引用
-            for ref in references_dict.get(paragraph.id, []):
-                ref_data = {
-                    "id": str(ref.id),
-                    "type": ref.type,
-                    "is_selected": ref.is_selected
-                }
-                
-                # 如果是网页链接类型，从缓存中获取WebLink信息
-                if ref.type == ModelReferenceType.WEB_LINK.value:
-                    web_link = weblinks_dict.get(ref.id)
-                    if web_link:
-                        ref_data["web_link"] = {
-                            "id": str(web_link.id),
-                            "url": web_link.url,
-                            "title": web_link.title,
-                            "summary": web_link.summary,
-                            "icon_url": web_link.icon_url,
-                            "content_count": web_link.content_count,
-                            "content": web_link.content
-                        }
-                
-                data["references"].append(ref_data)
-        
-        # 从缓存中获取子段落
-        children_ids = siblings_dict.get(paragraph.id, [])
-        if children_ids:
-            data["children"] = [
-                build_paragraph_data(paragraphs_dict[child_id]) 
-                for child_id in children_ids
-            ]
-        else:
-            data["children"] = []
-        
-        return data
-    
-    # 构建响应数据
+    # 构建响应
     response_data = {
-        "id": str(outline.id),
+        "id": outline.id,
         "title": outline.title,
         "markdown_content": outline.markdown_content,
-        "sub_paragraphs": [
-            build_paragraph_data(paragraphs_dict[para_id]) 
-            for para_id in siblings_dict.get(None, [])  # 获取顶级段落
-        ]
+        "sub_paragraphs": build_paragraph_tree()
     }
     
     return APIResponse.success(message="获取大纲详情成功", data=response_data)
@@ -1465,10 +1380,10 @@ async def parse_outline(
     db: Session = Depends(get_db)
 ):
     """
-    从Word文档解析大纲结构
+    从Word文档或Markdown文件解析大纲结构
     
     Args:
-        file: Word文档文件(.doc或.docx)
+        file: Word文档文件(.doc或.docx)或Markdown文件(.md)
         readable_model_name: 模型（可选）
     Returns:
         id: 大纲ID
@@ -1479,8 +1394,9 @@ async def parse_outline(
     
     try:
         # 检查文件类型
-        if not file.filename.lower().endswith(('.doc', '.docx')):
-            return APIResponse.error(message="仅支持.doc或.docx格式的Word文档")
+        file_extension = os.path.splitext(file.filename.lower())[1]
+        if file_extension not in ['.doc', '.docx', '.md']:
+            return APIResponse.error(message="仅支持.doc、.docx格式的Word文档或.md格式的Markdown文件")
         
         # 保存上传的文件
         file_path = f"/tmp/{file.filename}"
@@ -1488,8 +1404,13 @@ async def parse_outline(
             content = await file.read()
             f.write(content)
         
+        # 根据文件类型选择解析器
+        if file_extension == '.md':
+            parser = MarkdownParser()
+        else:
+            parser = DocxParser()
+            
         # 解析文档
-        parser = DocxParser()
         doc = parser.parse_to_doc(file_path)
         
         # 获取大纲结构

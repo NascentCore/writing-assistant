@@ -10,7 +10,7 @@ import markdown
 import asyncio
 import concurrent.futures
 
-from app.utils.outline import build_paragraph_key
+from app.utils.outline import build_paragraph_key, build_paragraph_data
 from app.models.outline import SubParagraph, Outline
 
 logger = logging.getLogger(__name__)
