@@ -17,3 +17,7 @@ ALTER TABLE chat_messages
 ADD COLUMN task_id VARCHAR(100) DEFAULT '' COMMENT '任务ID' after document_id,
 ADD COLUMN task_status VARCHAR(20) DEFAULT '' COMMENT '任务状态' after task_id,
 ADD COLUMN task_result TEXT COMMENT '任务结果' after task_status;
+
+# 2025-03-15 修改documents表content列类型为longtext
+ALTER TABLE `documents` 
+CHANGE `content` `content` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '文档内容';
