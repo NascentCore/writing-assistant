@@ -1,12 +1,14 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from app.config import settings
 import json
 import logging
 import re
 import markdown
+import asyncio
+import concurrent.futures
 
 from app.utils.outline import build_paragraph_key
 from app.models.outline import SubParagraph, Outline
@@ -314,46 +316,68 @@ class OutlineGenerator:
             outline_structure = outline.markdown_content
             logger.info("获取大纲结构完成")
             
-            # 为每个1级段落生成内容
-            markdown_content = f"# {outline.title}\n\n"
-            
-            for i, para in enumerate(level_one_paragraphs, 1):
-                logger.info(f"开始生成第{i}/{len(level_one_paragraphs)}个段落 [id={para.id}, title={para.title}]")
+            # 创建线程池执行器
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                # 准备并发任务
+                future_to_para = {}
                 
-                # 只有1级段落才有count_style
-                if not para.count_style:
-                    logger.warning(f"段落缺少count_style设置 [id={para.id}]")
-                    continue
-                
-                try:
+                for para in level_one_paragraphs:
+                    if not para.count_style:
+                        logger.warning(f"段落缺少count_style设置 [id={para.id}]")
+                        continue
+                    
                     # 获取子段落标题列表
                     sub_titles = get_sub_paragraph_titles(para)
-                    logger.info(f"获取到{len(sub_titles)}个子标题")
+                    logger.info(f"获取到{len(sub_titles)}个子标题 [para_id={para.id}]")
                     
-                    # 生成内容
-                    content = self._generate_paragraph_content(
+                    # 提交任务到线程池
+                    future = executor.submit(
+                        self._generate_paragraph_content,
                         outline.title,
                         para,
                         sub_titles,
                         para.count_style.value
                     )
-                    
-                    # 添加到全文内容
-                    full_content["content"].append({
-                        "id": para.id,
-                        "title": para.title,
-                        "content": content,
-                        "count_style": para.count_style.value,
-                        "level": para.level
-                    })
-                    
-                    # 添加到markdown
-                    markdown_content += f"## {para.title}\n\n{content}\n\n"
-                    logger.info(f"段落内容生成完成 [id={para.id}]")
-                    
-                except Exception as e:
-                    logger.error(f"生成段落内容时出错 [id={para.id}]: {str(e)}")
-                    continue
+                    future_to_para[future] = para
+                
+                # 收集结果
+                para_contents = []
+                for future in concurrent.futures.as_completed(future_to_para):
+                    para = future_to_para[future]
+                    try:
+                        content = future.result()
+                        para_contents.append({
+                            "para": para,
+                            "content": content
+                        })
+                        logger.info(f"段落内容生成完成 [id={para.id}]")
+                    except Exception as e:
+                        logger.error(f"生成段落内容时出错 [id={para.id}]: {str(e)}")
+            
+            # 按原始段落顺序排序结果
+            para_contents.sort(key=lambda x: next(
+                (i for i, p in enumerate(level_one_paragraphs) if p.id == x["para"].id), 
+                float('inf')
+            ))
+            
+            # 生成最终的markdown内容
+            markdown_content = f"# {outline.title}\n\n"
+            
+            for item in para_contents:
+                para = item["para"]
+                content = item["content"]
+                
+                # 添加到全文内容
+                full_content["content"].append({
+                    "id": para.id,
+                    "title": para.title,
+                    "content": content,
+                    "count_style": para.count_style.value,
+                    "level": para.level
+                })
+                
+                # 添加到markdown
+                markdown_content += f"## {para.title}\n\n{content}\n\n"
             
             # 设置markdown内容
             full_content["markdown"] = markdown_content
