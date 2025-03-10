@@ -49,6 +49,7 @@ export const routes = [
     path: '/EditorPage',
     component: './EditorPage',
     menuRender: false,
+    hideInMenu: true,
   },
   {
     name: '编辑器',
