@@ -1,7 +1,7 @@
 from enum import Enum
 import logging
 import shortuuid
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict, Any
 from fastapi import APIRouter, Depends, Path, UploadFile as FastAPIUploadFile, File, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
@@ -10,6 +10,7 @@ import os
 import asyncio
 import concurrent.futures
 import json
+import time
 
 from app.schemas.response import APIResponse, PaginationData
 from app.database import get_db
@@ -29,10 +30,10 @@ from app.models.outline import (
 )
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType, ContentType
 from app.config import Settings
-from app.parser import DocxParser
+from app.parser import DocxParser, MarkdownParser
 from app.auth import get_current_user
 from app.models.user import User
-from app.utils.outline import build_paragraph_key
+from app.utils.outline import build_paragraph_key, build_paragraph_response
 from app.models.task import Task, TaskStatus, TaskType
 from app.models.document import Document, DocumentVersion
 
@@ -251,70 +252,37 @@ async def generate_outline(
         for parent_id in siblings_dict:
             siblings_dict[parent_id].sort()
             
-        # 构建响应数据
-        def build_paragraph_data(paragraph):
-            data = {
-                "id": str(paragraph.id),
-                "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
-                "title": paragraph.title,
-                "description": paragraph.description,
-                "level": paragraph.level,
-                "reference_status": ReferenceStatus(paragraph.reference_status).value
-            }
+        # 递归构建段落树
+        def build_paragraph_tree(parent_id=None):
+            result = []
+            children_ids = siblings_dict.get(parent_id, [])
             
-            # 只有1级段落才有count_style
-            if paragraph.level == 1 and paragraph.count_style:
-                data["count_style"] = paragraph.count_style.value
-            
-            # 只有1级段落才有引用
-            if paragraph.level == 1:
-                data["references"] = []
-                # 获取引用
-                references = db.query(Reference).filter(
-                    Reference.sub_paragraph_id == paragraph.id
-                ).all()
+            for para_id in children_ids:
+                paragraph = paragraphs_dict[para_id]
+                # 使用build_paragraph_response构建数据
+                data = build_paragraph_response(
+                    paragraph, 
+                    siblings_dict, 
+                    paragraphs_dict, 
+                    {}, 
+                    ReferenceStatus
+                )
                 
-                if references:
-                    for ref in references:
-                        ref_data = {
-                            "id": str(ref.id),
-                            "type": ref.type,
-                            "is_selected": ref.is_selected
-                        }
-                        
-                        # 如果是网页链接类型，获取WebLink信息
-                        if ref.type == ModelReferenceType.WEB_LINK.value:
-                            web_link = db.query(WebLink).filter(
-                                WebLink.reference_id == ref.id
-                            ).first()
-                            
-                            if web_link:
-                                ref_data["web_link"] = {
-                                    "id": str(web_link.id),
-                                    "url": web_link.url,
-                                    "title": web_link.title,
-                                    "summary": web_link.summary,
-                                    "icon_url": web_link.icon_url,
-                                    "content_count": web_link.content_count,
-                                    "content": web_link.content
-                                }
-                        
-                        data["references"].append(ref_data)
-                else:
-                    data["references"] = []
+                # 递归处理子段落
+                children = build_paragraph_tree(para_id)
+                if children:
+                    data["children"] = children
+                
+                result.append(data)
             
-            # 获取子段落
-            children = db.query(SubParagraph).filter(
-                SubParagraph.parent_id == paragraph.id
-            ).all()
-            
-            if children:
-                data["children"] = [build_paragraph_data(child) for child in children]
-            else:
-                data["children"] = []
-            
-            return data
+            return result
         
+        # 构建响应
+        response_data = {
+            "id": outline.id,
+            "title": outline.title,
+            "sub_paragraphs": build_paragraph_tree()
+        }
         
         # 创建聊天会话
         session_id = f"chat-{shortuuid.uuid()}"[:22]
@@ -449,95 +417,186 @@ async def generate_outline(
 
 
 async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str], session_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
-    """异步处理大纲生成任务"""
+    """
+    异步处理大纲生成任务
+    
+    Args:
+        task_id: 任务ID
+        prompt: 写作提示
+        file_ids: 参考文件ID列表
+        session_id: 会话ID
+        assistant_message_id: 助手消息ID
+        readable_model_name: 模型名称（可选）
+    """
     # 创建新的数据库会话
     db = next(get_db())
+    start_time = time.time()
     
     try:
-        # 更新任务状态为处理中
-        task = db.query(Task).filter(Task.id == task_id).first()
-        if not task:
-            print(f"任务 {task_id} 不存在")
+        logger.info(f"开始处理大纲生成任务 [task_id={task_id}]")
+        
+        # 更新任务和消息状态
+        if not await _update_task_status(db, task_id, assistant_message_id, "正在生成大纲，请稍候...", TaskType.GENERATE_OUTLINE):
             return
         
-        task.status = TaskStatus.PROCESSING
-        
-        # 更新助手消息状态为处理中
-        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
-        if assistant_message:
-            assistant_message.task_status = TaskStatus.PROCESSING.value
-            assistant_message.task_id = task_id
-            assistant_message.content = "正在生成大纲，请稍候..."
-        
-        db.commit()
-        
-        # 从task.params中获取user_id
-        task_params = task.params
-        user_id = task_params.get("user_id")
-        
-        # 获取文件内容
-        file_contents = []
-        for file_id in file_ids:
-            file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
-            if file and file.content:
-                file_contents.append(file.content)
+        # 获取用户ID和参考文件内容
+        user_id, file_contents = await _prepare_generation_resources(db, task_id, file_ids)
         
         # 初始化大纲生成器
+        logger.info(f"初始化大纲生成器 [model={readable_model_name or 'default'}]")
         outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
-        # 调用大模型生成结构化大纲
-        outline_data = outline_generator.generate_outline(prompt, file_contents)
-        
-        # 保存到数据库
-        saved_outline = outline_generator.save_outline_to_db(
-            outline_data=outline_data,
-            db_session=db,
-            user_id=user_id
-        )
-        
-        # 创建助手的回答消息
-        if assistant_message:
-            # 更新之前创建的助手消息
-            assistant_message.content_type = ContentType.OUTLINE
-            assistant_message.outline_id = saved_outline["id"]
-            assistant_message.task_status = TaskStatus.COMPLETED.value
-            assistant_message.task_result = json.dumps({"outline_id": saved_outline["id"]})
-        else:
-            # 如果之前的消息不存在，创建新消息
-            assistant_message = ChatMessage(
-                message_id=shortuuid.uuid(),
-                session_id=session_id,
-                role="assistant",
-                content_type=ContentType.OUTLINE,
-                outline_id=saved_outline["id"],
-                task_status=TaskStatus.COMPLETED.value,
-                task_id=task_id,
-                task_result=json.dumps({"outline_id": saved_outline["id"]})
+        try:
+            # 生成大纲
+            outline_data = await _generate_outline(outline_generator, prompt, file_contents)
+            
+            # 保存大纲并更新消息
+            outline_id = await _save_outline_and_update_message(
+                db, outline_generator, outline_data, user_id, task_id, 
+                session_id, assistant_message_id
             )
-            db.add(assistant_message)
-        
-        # 更新任务状态为完成
-        task.status = TaskStatus.COMPLETED
-        task.result = {"outline_id": saved_outline["id"]}
-        db.commit()
-        
+            
+            # 记录任务完成和耗时
+            _log_task_completion(task_id, start_time, "大纲生成")
+            
+        except Exception as e:
+            # 处理大纲生成过程中的异常
+            await _handle_generation_error(db, task_id, assistant_message_id, e, start_time, "大纲生成")
+            
     except Exception as e:
-        # 更新任务状态为失败
-        task = db.query(Task).filter(Task.id == task_id).first()
-        if task:
-            task.status = TaskStatus.FAILED
-            task.error = str(e)
-        
-        # 更新助手消息状态为失败
-        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
-        if assistant_message:
-            assistant_message.task_status = TaskStatus.FAILED.value
-            assistant_message.content = f"生成大纲失败: {str(e)}"
-        
-        db.commit()
-        
+        # 处理整体流程中的异常
+        _log_task_error(task_id, e, start_time, "大纲生成")
     finally:
         db.close()
+        logger.info(f"大纲生成任务处理结束 [task_id={task_id}]")
+
+
+async def _generate_outline(
+    outline_generator: OutlineGenerator,
+    prompt: str,
+    file_contents: List[str]
+) -> Dict[str, Any]:
+    """生成大纲"""
+    logger.info("开始生成结构化大纲")
+    outline_data = outline_generator.generate_outline(prompt, file_contents)
+    logger.info("结构化大纲生成完成")
+    return outline_data
+
+
+async def _save_outline_and_update_message(
+    db: Session,
+    outline_generator: OutlineGenerator,
+    outline_data: Dict[str, Any],
+    user_id: str,
+    task_id: str,
+    session_id: str,
+    assistant_message_id: str
+) -> str:
+    """保存大纲并更新消息状态"""
+    # 保存到数据库
+    logger.info("开始保存大纲到数据库")
+    saved_outline = outline_generator.save_outline_to_db(
+        outline_data=outline_data,
+        db_session=db,
+        user_id=user_id
+    )
+    outline_id = saved_outline["id"]
+    logger.info(f"大纲保存完成 [outline_id={outline_id}]")
+    
+    # 更新助手消息
+    result_data = {"outline_id": outline_id}
+    json_result = json.dumps(result_data)
+    
+    assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+    if assistant_message:
+        # 更新之前创建的助手消息
+        assistant_message.content_type = ContentType.OUTLINE
+        assistant_message.outline_id = outline_id
+        assistant_message.task_status = TaskStatus.COMPLETED.value
+        assistant_message.task_result = json_result
+        logger.info(f"更新助手消息为完成状态 [message_id={assistant_message_id}]")
+    else:
+        # 如果之前的消息不存在，创建新消息
+        assistant_message = ChatMessage(
+            message_id=shortuuid.uuid(),
+            session_id=session_id,
+            role="assistant",
+            content_type=ContentType.OUTLINE,
+            outline_id=outline_id,
+            task_status=TaskStatus.COMPLETED.value,
+            task_id=task_id,
+            task_result=json_result
+        )
+        db.add(assistant_message)
+        logger.info("创建新的助手消息")
+    
+    # 更新任务状态为完成
+    task = db.query(Task).filter(Task.id == task_id).first()
+    task.status = TaskStatus.COMPLETED
+    task.result = result_data
+    db.commit()
+    
+    return outline_id
+
+
+async def _update_task_status(db: Session, task_id: str, assistant_message_id: str, status_message: str, task_type: TaskType = None) -> bool:
+    """更新任务和助手消息状态为处理中"""
+    # 更新任务状态
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        logger.error(f"任务不存在 [task_id={task_id}]")
+        return False
+    
+    task.status = TaskStatus.PROCESSING
+    task_type_str = task_type.name if task_type else task.type.name
+    logger.info(f"更新任务状态为处理中 [task_id={task_id}, type={task_type_str}]")
+    
+    # 更新助手消息状态
+    assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+    if assistant_message:
+        assistant_message.task_status = TaskStatus.PROCESSING.value
+        assistant_message.task_id = task_id
+        assistant_message.content = status_message
+        logger.info(f"更新助手消息状态为处理中 [message_id={assistant_message_id}]")
+    
+    db.commit()
+    return True
+
+
+async def _handle_generation_error(db: Session, task_id: str, assistant_message_id: str, error: Exception, start_time: float, task_name: str = "任务") -> None:
+    """处理生成过程中的异常"""
+    # 更新任务状态为失败
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if task:
+        task.status = TaskStatus.FAILED
+        task.error = str(error)
+    
+    # 更新助手消息状态为失败
+    assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+    if assistant_message:
+        assistant_message.task_status = TaskStatus.FAILED.value
+        assistant_message.content = f"生成失败: {str(error)}"
+    
+    db.commit()
+    
+    # 记录任务失败和耗时
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    logger.error(f"{task_name}任务失败 [task_id={task_id}, elapsed_time={elapsed_time:.2f}s]: {str(error)}")
+
+
+def _log_task_completion(task_id: str, start_time: float, task_name: str = "任务") -> None:
+    """记录任务完成和耗时"""
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    logger.info(f"{task_name}任务完成 [task_id={task_id}, elapsed_time={elapsed_time:.2f}s]")
+
+
+def _log_task_error(task_id: str, error: Exception, start_time: float, task_name: str = "任务") -> None:
+    """记录任务整体流程错误和耗时"""
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    logger.error(f"处理{task_name}任务时出错 [task_id={task_id}, elapsed_time={elapsed_time:.2f}s]: {str(error)}")
 
 
 @router.get("/tasks/{task_id}")
@@ -815,89 +874,37 @@ async def get_outline(
     for parent_id in siblings_dict:
         siblings_dict[parent_id].sort()
     
-    # 一次性获取所有引用
-    all_references = db.query(Reference).filter(
-        Reference.sub_paragraph_id.in_([p.id for p in all_paragraphs])
-    ).all()
-    references_dict = {}  # paragraph_id -> [references]
-    for ref in all_references:
-        if ref.sub_paragraph_id not in references_dict:
-            references_dict[ref.sub_paragraph_id] = []
-        references_dict[ref.sub_paragraph_id].append(ref)
+    # 递归构建段落树
+    def build_paragraph_tree(parent_id=None):
+        result = []
+        children_ids = siblings_dict.get(parent_id, [])
+        
+        for para_id in children_ids:
+            paragraph = paragraphs_dict[para_id]
+            # 使用build_paragraph_response构建数据
+            data = build_paragraph_response(
+                paragraph, 
+                siblings_dict, 
+                paragraphs_dict, 
+                {}, 
+                ReferenceStatus
+            )
+            
+            # 递归处理子段落
+            children = build_paragraph_tree(para_id)
+            if children:
+                data["children"] = children
+            
+            result.append(data)
+        
+        return result
     
-    # 一次性获取所有WebLink
-    weblink_ids = [
-        ref.id for ref in all_references 
-        if ref.type == ModelReferenceType.WEB_LINK.value
-    ]
-    all_weblinks = db.query(WebLink).filter(
-        WebLink.reference_id.in_(weblink_ids)
-    ).all() if weblink_ids else []
-    weblinks_dict = {wl.reference_id: wl for wl in all_weblinks}
-    
-    # 递归构建段落数据
-    def build_paragraph_data(paragraph):
-        data = {
-            "id": str(paragraph.id),
-            "key": build_paragraph_key(paragraph, siblings_dict, paragraphs_dict),
-            "title": paragraph.title,
-            "description": paragraph.description,
-            "level": paragraph.level,
-            "reference_status": ReferenceStatus(paragraph.reference_status).value
-        }
-        
-        # 只有1级段落才有count_style
-        if paragraph.level == 1 and paragraph.count_style:
-            data["count_style"] = paragraph.count_style.value
-        
-        # 只有1级段落才有引用
-        if paragraph.level == 1:
-            data["references"] = []
-            # 从缓存中获取引用
-            for ref in references_dict.get(paragraph.id, []):
-                ref_data = {
-                    "id": str(ref.id),
-                    "type": ref.type,
-                    "is_selected": ref.is_selected
-                }
-                
-                # 如果是网页链接类型，从缓存中获取WebLink信息
-                if ref.type == ModelReferenceType.WEB_LINK.value:
-                    web_link = weblinks_dict.get(ref.id)
-                    if web_link:
-                        ref_data["web_link"] = {
-                            "id": str(web_link.id),
-                            "url": web_link.url,
-                            "title": web_link.title,
-                            "summary": web_link.summary,
-                            "icon_url": web_link.icon_url,
-                            "content_count": web_link.content_count,
-                            "content": web_link.content
-                        }
-                
-                data["references"].append(ref_data)
-        
-        # 从缓存中获取子段落
-        children_ids = siblings_dict.get(paragraph.id, [])
-        if children_ids:
-            data["children"] = [
-                build_paragraph_data(paragraphs_dict[child_id]) 
-                for child_id in children_ids
-            ]
-        else:
-            data["children"] = []
-        
-        return data
-    
-    # 构建响应数据
+    # 构建响应
     response_data = {
-        "id": str(outline.id),
+        "id": outline.id,
         "title": outline.title,
         "markdown_content": outline.markdown_content,
-        "sub_paragraphs": [
-            build_paragraph_data(paragraphs_dict[para_id]) 
-            for para_id in siblings_dict.get(None, [])  # 获取顶级段落
-        ]
+        "sub_paragraphs": build_paragraph_tree()
     }
     
     return APIResponse.success(message="获取大纲详情成功", data=response_data)
@@ -909,7 +916,6 @@ class GenerateFullContentRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="直接生成模式下的写作提示")
     file_ids: Optional[List[str]] = Field(None, description="直接生成模式下的参考文件ID列表")
     model_name: Optional[str] = Field(None, description="模型")
-
 
 @router.post("/content/generate")
 async def generate_content(
@@ -1033,7 +1039,7 @@ async def generate_content(
             session_id=session_id,
             message_id=message_id,
             assistant_message_id=assistant_message_id,
-            readable_model_name=request.readable_model_name
+            readable_model_name=request.model_name
         ))
         
         loop.close()
@@ -1049,118 +1055,170 @@ async def generate_content(
 
 
 async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
-    """异步处理全文生成任务"""
+    """
+    异步处理全文生成任务
+    
+    Args:
+        task_id: 任务ID
+        outline_id: 大纲ID（可选，基于大纲生成模式）
+        prompt: 写作提示（可选，直接生成模式）
+        file_ids: 参考文件ID列表
+        session_id: 会话ID
+        message_id: 用户消息ID
+        assistant_message_id: 助手消息ID
+        readable_model_name: 模型名称（可选）
+    """
     # 创建新的数据库会话
     db = next(get_db())
+    start_time = time.time()
     
     try:
-        # 更新任务状态为处理中
-        task = db.query(Task).filter(Task.id == task_id).first()
-        if not task:
-            print(f"任务 {task_id} 不存在")
+        logger.info(f"开始处理全文生成任务 [task_id={task_id}]")
+        
+        # 更新任务和消息状态
+        if not await _update_task_status(db, task_id, assistant_message_id, "正在生成全文，请稍候...", TaskType.GENERATE_CONTENT):
             return
         
-        task.status = TaskStatus.PROCESSING
-        
-        # 更新助手消息状态为处理中
-        assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
-        if assistant_message:
-            assistant_message.task_status = TaskStatus.PROCESSING.value
-            assistant_message.task_id = task_id
-            assistant_message.content = "正在生成全文，请稍候..."
-        
-        db.commit()
-        
-        # 从task.params中获取user_id
-        task_params = task.params
-        user_id = task_params.get("user_id")
-        
-        # 获取文件内容
-        file_contents = []
-        for file_id in file_ids:
-            file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
-            if file and file.content:
-                file_contents.append(file.content)
+        # 获取用户ID和参考文件内容
+        user_id, file_contents = await _prepare_generation_resources(db, task_id, file_ids)
         
         # 初始化大纲生成器
+        logger.info(f"初始化内容生成器 [model={readable_model_name or 'default'}]")
         outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
-        # 根据模式生成内容
+        # 生成内容并保存
         try:
-            if outline_id:
-                # 基于大纲生成模式
-                full_content = outline_generator.generate_full_content(outline_id, db)
-            else:
-                # 直接生成模式
-                # 调用直接生成方法
-                full_content = outline_generator.generate_content_directly(
-                    prompt=prompt,
-                    file_contents=file_contents
-                )
+            # 根据模式生成内容
+            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db)
             
-            # 保存HTML内容到documents表
-            doc_id = f"doc-{shortuuid.uuid()}"[:22]
-            title = full_content.get("title", "无标题文档")
-            html_content = full_content.get("html", "")
-            
-            # 创建文档记录
-            document = Document(
-                doc_id=doc_id,
-                title=title,
-                content=html_content,
-                user_id=user_id  # 使用传入的user_id
+            # 保存文档并更新消息
+            doc_id = await _save_document_and_update_message(
+                db, full_content, user_id, task_id, session_id, 
+                message_id, assistant_message_id
             )
-            db.add(document)
             
-            # 创建AI回复消息
-            ai_message_id = f"msg-{shortuuid.uuid()}"[:22]
-            
-            # 如果存在之前创建的助手消息，则更新它
-            if assistant_message:
-                assistant_message.content = ""
-                assistant_message.content_type = ContentType.DOCUMENT
-                assistant_message.document_id = doc_id
-                assistant_message.task_status = TaskStatus.COMPLETED.value
-                assistant_message.task_result = json.dumps({"doc_id": doc_id})
-                assistant_message.full_content = json.dumps({"doc_id": doc_id})
-            else:
-                # 如果之前的消息不存在，创建新消息
-                assistant_message = ChatMessage(
-                    message_id=ai_message_id,
-                    session_id=session_id,
-                    question_id=message_id,
-                    role="assistant",
-                    content="",
-                    content_type=ContentType.DOCUMENT,
-                    document_id=doc_id,
-                    task_status=TaskStatus.COMPLETED.value,
-                    task_id=task_id,
-                    task_result=json.dumps({"doc_id": doc_id}),
-                    full_content=json.dumps({"doc_id": doc_id})
-                )
-                db.add(assistant_message)
-            
-            # 更新任务状态为完成
-            task.status = TaskStatus.COMPLETED
-            task.result = {"doc_id": doc_id}
-            db.commit()
+            # 记录任务完成和耗时
+            _log_task_completion(task_id, start_time, "全文生成")
             
         except Exception as e:
-            # 更新任务状态为失败
-            task.status = TaskStatus.FAILED
-            task.error = str(e)
-            
-            # 更新助手消息状态为失败
-            if assistant_message:
-                assistant_message.task_status = TaskStatus.FAILED.value
-                assistant_message.content = f"生成全文失败: {str(e)}"
-            
-            db.commit()
+            # 处理内容生成过程中的异常
+            await _handle_generation_error(db, task_id, assistant_message_id, e, start_time, "全文生成")
             
     except Exception as e:
-        print(f"处理全文生成任务时出错: {str(e)}")
+        # 处理整体流程中的异常
+        _log_task_error(task_id, e, start_time, "全文生成")
     finally:
         db.close()
+        logger.info(f"全文生成任务处理结束 [task_id={task_id}]")
+
+
+async def _prepare_generation_resources(db: Session, task_id: str, file_ids: List[str]) -> Tuple[str, List[str]]:
+    """准备生成所需的资源：用户ID和参考文件内容"""
+    # 获取用户ID
+    task = db.query(Task).filter(Task.id == task_id).first()
+    task_params = task.params
+    user_id = task_params.get("user_id")
+    logger.info(f"获取用户ID [user_id={user_id}]")
+    
+    # 获取文件内容
+    file_contents = []
+    for file_id in file_ids:
+        file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
+        if file and file.content:
+            file_contents.append(file.content)
+            logger.info(f"加载参考文件内容 [file_id={file_id}]")
+    
+    return user_id, file_contents
+
+
+async def _generate_content(
+    outline_generator: OutlineGenerator,
+    outline_id: Optional[str],
+    prompt: Optional[str],
+    file_contents: List[str],
+    db: Session
+) -> Dict[str, Any]:
+    """根据模式生成内容"""
+    if outline_id:
+        # 基于大纲生成模式
+        logger.info(f"开始基于大纲生成全文 [outline_id={outline_id}]")
+        full_content = outline_generator.generate_full_content(outline_id, db)
+    else:
+        # 直接生成模式
+        logger.info("开始直接生成全文")
+        full_content = outline_generator.generate_content_directly(
+            prompt=prompt,
+            file_contents=file_contents
+        )
+    logger.info("全文生成完成")
+    return full_content
+
+
+async def _save_document_and_update_message(
+    db: Session, 
+    full_content: Dict[str, Any], 
+    user_id: str,
+    task_id: str,
+    session_id: str,
+    message_id: str,
+    assistant_message_id: str
+) -> str:
+    """保存文档并更新消息状态"""
+    # 保存HTML内容到documents表
+    doc_id = f"doc-{shortuuid.uuid()}"[:22]
+    title = full_content.get("title", "无标题文档")
+    html_content = full_content.get("html", "")
+    
+    # 创建文档记录
+    document = Document(
+        doc_id=doc_id,
+        title=title,
+        content=html_content,
+        user_id=user_id
+    )
+    db.add(document)
+    logger.info(f"保存文档记录 [doc_id={doc_id}]")
+    
+    # 更新助手消息
+    result_data = {"doc_id": doc_id}
+    json_result = json.dumps(result_data)
+    
+    assistant_message = db.query(ChatMessage).filter(ChatMessage.message_id == assistant_message_id).first()
+    if assistant_message:
+        # 更新现有消息
+        assistant_message.content = ""
+        assistant_message.content_type = ContentType.DOCUMENT
+        assistant_message.document_id = doc_id
+        assistant_message.task_status = TaskStatus.COMPLETED.value
+        assistant_message.task_result = json_result
+        assistant_message.full_content = json_result
+        logger.info(f"更新助手消息为完成状态 [message_id={assistant_message_id}]")
+    else:
+        # 创建新消息
+        ai_message_id = f"msg-{shortuuid.uuid()}"[:22]
+        assistant_message = ChatMessage(
+            message_id=ai_message_id,
+            session_id=session_id,
+            question_id=message_id,
+            role="assistant",
+            content="",
+            content_type=ContentType.DOCUMENT,
+            document_id=doc_id,
+            task_status=TaskStatus.COMPLETED.value,
+            task_id=task_id,
+            task_result=json_result,
+            full_content=json_result
+        )
+        db.add(assistant_message)
+        logger.info("创建新的助手消息")
+    
+    # 更新任务状态为完成
+    task = db.query(Task).filter(Task.id == task_id).first()
+    task.status = TaskStatus.COMPLETED
+    task.result = result_data
+    db.commit()
+    
+    return doc_id
 
 
 class TemplateBase(BaseModel):
@@ -1322,10 +1380,10 @@ async def parse_outline(
     db: Session = Depends(get_db)
 ):
     """
-    从Word文档解析大纲结构
+    从Word文档或Markdown文件解析大纲结构
     
     Args:
-        file: Word文档文件(.doc或.docx)
+        file: Word文档文件(.doc或.docx)或Markdown文件(.md)
         readable_model_name: 模型（可选）
     Returns:
         id: 大纲ID
@@ -1336,8 +1394,9 @@ async def parse_outline(
     
     try:
         # 检查文件类型
-        if not file.filename.lower().endswith(('.doc', '.docx')):
-            return APIResponse.error(message="仅支持.doc或.docx格式的Word文档")
+        file_extension = os.path.splitext(file.filename.lower())[1]
+        if file_extension not in ['.doc', '.docx', '.md']:
+            return APIResponse.error(message="仅支持.doc、.docx格式的Word文档或.md格式的Markdown文件")
         
         # 保存上传的文件
         file_path = f"/tmp/{file.filename}"
@@ -1345,8 +1404,13 @@ async def parse_outline(
             content = await file.read()
             f.write(content)
         
+        # 根据文件类型选择解析器
+        if file_extension == '.md':
+            parser = MarkdownParser()
+        else:
+            parser = DocxParser()
+            
         # 解析文档
-        parser = DocxParser()
         doc = parser.parse_to_doc(file_path)
         
         # 获取大纲结构
