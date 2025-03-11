@@ -3,11 +3,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser
 from typing import List, Dict, Any, Optional, Tuple
 from app.config import settings
-import json
 import logging
 import re
 import markdown
-import asyncio
 import concurrent.futures
 
 from app.utils.outline import build_paragraph_key, build_paragraph_data
@@ -462,6 +460,17 @@ class OutlineGenerator:
             
             try:
                 # 创建提示
+                template = """
+                你是一个专业的写作助手。请根据以下提示生成一篇完整的文章：
+                
+                提示: {prompt}
+                
+                {file_context}
+                
+                请生成一篇结构清晰、内容丰富的文章。文章应该包含标题（使用# 标记）、
+                适当的小标题（使用## 和 ### 标记）以及详细的内容。
+                确保文章逻辑连贯，有足够的论据支持，并且语言流畅。
+                """
                 prompt_template = ChatPromptTemplate.from_template(template)
                 logger.info("创建提示模板完成")
                 
