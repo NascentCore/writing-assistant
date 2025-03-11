@@ -166,7 +166,7 @@ async def get_files(
     page: Optional[int] = Query(default=1, ge=1, description="页码", example=1),
     page_size: Optional[int] = Query(default=10, ge=1, description="每页数量", example=10),
     current_user: User = Depends(get_current_user),
-    query: Optional[str] = Query(None, description="搜索关键词", example="四川"),
+    file_name: Optional[str] = Query(None, description="搜索关键词", example="四川"),
     db: Session = Depends(get_db)
 ):
     try:
@@ -204,8 +204,8 @@ async def get_files(
 
         query_filter = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False)
         
-        if query:
-            query_filter = query_filter.filter(RagFile.file_name.contains(query))
+        if file_name:
+            query_filter = query_filter.filter(RagFile.file_name.contains(file_name))
         
         total = query_filter.count()
         total_pages = (total + page_size - 1) // page_size
