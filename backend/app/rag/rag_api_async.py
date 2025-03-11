@@ -3,6 +3,7 @@ import aiofiles
 import aiohttp
 import json
 import logging
+import codecs
 from typing import Dict, Any, AsyncIterator, List, Optional, Union
 from app.config import settings
 
@@ -34,29 +35,60 @@ class RagAPIAsync:
                 async with session.request(method, url, **kwargs) as response:
                     response.raise_for_status()
                     
-                    async for chunk in response.content.iter_any():  # 逐块读取
-                        if not chunk.strip():
+                    decoder = codecs.getincrementaldecoder('utf-8')()  # 创建增量解码器
+                    buffer = ""
+                    
+                    async for chunk in response.content.iter_any():
+                        if not chunk:
                             continue
+                            
+                        try:
+                            # 使用增量解码器处理可能不完整的UTF-8序列
+                            text = decoder.decode(chunk)
+                            buffer += text
+                            
+                            # 处理缓冲区中的完整行
+                            while '\n\n' in buffer:
+                                line, buffer = buffer.split('\n\n', 1)
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                    
+                                # 处理SSE格式
+                                if line.startswith("data: "):
+                                    json_str = line[6:].strip()  # 去掉 "data: " 前缀
+                                    if json_str == "[DONE]":
+                                        return
+                                    try:
+                                        yield json.loads(json_str)
+                                    except json.JSONDecodeError as e:
+                                        logger.error(f"JSON解析错误: {json_str}, 错误: {str(e)}")
+                                else:
+                                    # 尝试直接解析JSON
+                                    try:
+                                        yield json.loads(line)
+                                    except json.JSONDecodeError as e:
+                                        logger.debug(f"非JSON格式数据: {line}")
+                                        
+                        except UnicodeDecodeError as e:
+                            logger.error(f"UTF-8解码错误: {str(e)}")
+                            continue
+                    
+                    # 处理最后的数据
+                    try:
+                        final_text = decoder.decode(b'', final=True)  # 刷新解码器缓冲区
+                        if final_text:
+                            buffer += final_text
                         
-                        line_str = chunk.decode('utf-8').strip()
-                        
-                        # 处理SSE格式
-                        if line_str.startswith("data: "):
-                            json_str = line_str[6:].strip()  # 去掉 "data: " 前缀
-                            if json_str == "[DONE]":
-                                break
-                            try:
-                                yield json.loads(json_str)
-                            except json.JSONDecodeError as e:
-                                logger.error(f"JSON解析错误: {json_str}, 错误: {str(e)}")
-                                continue
-                        else:
-                            # 尝试直接解析JSON
-                            try:
-                                yield json.loads(line_str)
-                            except json.JSONDecodeError as e:
-                                logger.debug(f"非JSON格式数据 (长度 {len(line_str)}): {line_str}")
-                                continue
+                        if buffer.strip():
+                            if buffer.startswith("data: "):
+                                json_str = buffer[6:].strip()
+                                if json_str and json_str != "[DONE]":
+                                    yield json.loads(json_str)
+                            else:
+                                yield json.loads(buffer.strip())
+                    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                        logger.error(f"处理最终数据时出错: {str(e)}")
                         
         except aiohttp.ClientError as e:
             logger.error(f"RAG API流式请求失败: {str(e)}, URL: {url}, 请求参数: {kwargs}")
