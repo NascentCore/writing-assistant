@@ -37,31 +37,41 @@ class RagAPI:
         """发送异步HTTP流式请求的通用方法"""
         url = f"{self.base_url}{endpoint}"
         session = await self._get_session()
+        
+        # 设置较大的读取限制
+        timeout = aiohttp.ClientTimeout(total=3600)  # 设置1小时超时
+        kwargs['timeout'] = timeout
+        
         try:
             async with session.request(method, url, **kwargs) as response:
                 response.raise_for_status()
-                async for line in response.content:
-                    line_str = line.decode('utf-8').strip()
-                    if not line_str:
-                        continue
-                    
-                    if line_str.startswith("data: "):
-                        json_str = line_str[6:].strip()
-                        if json_str == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(json_str)
-                            yield data
-                        except json.JSONDecodeError as e:
-                            logger.error(f"JSON解析错误: {json_str}, 错误: {str(e)}")
+                # 使用 aiohttp.StreamReader 的 read 方法替代按行读取
+                buffer = b""
+                async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        line_str = line.decode('utf-8').strip()
+                        if not line_str:
                             continue
-                    else:
-                        try:
-                            data = json.loads(line_str)
-                            yield data
-                        except json.JSONDecodeError:
-                            logger.debug(f"非JSON格式数据: {line_str}")
-                            continue
+                        
+                        if line_str.startswith("data: "):
+                            json_str = line_str[6:].strip()
+                            if json_str == "[DONE]":
+                                return
+                            try:
+                                data = json.loads(json_str)
+                                yield data
+                            except json.JSONDecodeError as e:
+                                logger.error(f"JSON解析错误: {json_str}, 错误: {str(e)}")
+                                continue
+                        else:
+                            try:
+                                data = json.loads(line_str)
+                                yield data
+                            except json.JSONDecodeError:
+                                logger.debug(f"非JSON格式数据: {line_str}")
+                                continue
                             
         except aiohttp.ClientError as e:
             logger.error(f"RAG API流式请求失败: {str(e)}")
@@ -90,15 +100,18 @@ class RagAPI:
             "mode": mode
         }
         
-        files_data = []
-        for file_path in files:
-            file_name = os.path.basename(file_path)
-            files_data.append(('files', open(file_path, 'rb')))
-            
+        files_list = []
+        file_objects = []
         try:
-            return await self._make_request("POST", endpoint, data=data, files=files_data)
+            for file_path in files:
+                f = open(file_path, 'rb')
+                file_objects.append(f)
+                file_name = os.path.basename(file_path)
+                files_list.append(("files", (file_name, f, 'text/plain')))
+
+            return await self._make_request("POST", endpoint, data=data, files=files_list)
         finally:
-            for _, f in files_data:
+            for f in file_objects:
                 f.close()
 
     async def list_files(

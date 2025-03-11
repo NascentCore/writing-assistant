@@ -636,19 +636,21 @@ async def chat(
                         if chunk:
                             response_text = chunk.get("response", "")
                             if chunk.get("msg") == "success stream chat":
-                                continue
-                            # 构建新的响应格式
-                            new_chunk = {
-                                **chunk,  # 保留原有的所有字段
-                                "choices": [
-                                    {
-                                        "delta": {
-                                            "content": response_text,
-                                            "role": "assistant"
+                                new_chunk = {
+                                    **chunk, # 最后一条原样返回
+                                }
+                            else:
+                                new_chunk = {
+                                    **chunk,
+                                    "choices": [
+                                        {
+                                            "delta": {
+                                                "content": response_text,
+                                                "role": "assistant"
+                                            }
                                         }
-                                    }
-                                ]
-                            }
+                                    ]
+                                }
                             assistant_content += response_text
                             yield f"data: {json.dumps(new_chunk, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
