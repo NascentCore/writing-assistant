@@ -635,8 +635,7 @@ async def chat(
                         if chunk:
                             response_text = chunk.get("response", "")
                             if chunk.get("msg") == "success stream chat":
-                                continue
-                            # 构建新的响应格式
+                                response_text = ""
                             new_chunk = {
                                 **chunk,  # 保留原有的所有字段
                                 "choices": [
