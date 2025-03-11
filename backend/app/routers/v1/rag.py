@@ -637,7 +637,7 @@ async def chat(
                             if chunk.get("msg") == "success stream chat":
                                 response_text = ""
                             new_chunk = {
-                                **chunk,  # 保留原有的所有字段
+                                **chunk,
                                 "choices": [
                                     {
                                         "delta": {
