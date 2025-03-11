@@ -84,7 +84,7 @@ async def upload_files(
         
         if not kb_id:
             kb_name = "系统知识库" if category == "system" else f"用户知识库-{current_user.user_id}"
-            create_kb_response = rag_api.create_knowledge_base(kb_name=kb_name)
+            create_kb_response = await rag_api.create_knowledge_base(kb_name=kb_name)
             if create_kb_response["code"] != 200:
                 logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
                 return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
@@ -184,7 +184,7 @@ async def get_files(
         
         if not kb:
             kb_name = "系统知识库" if category == "system" else f"用户知识库-{current_user.user_id}"
-            create_kb_response = rag_api.create_knowledge_base(kb_name=kb_name)
+            create_kb_response = await rag_api.create_knowledge_base(kb_name=kb_name)
             if create_kb_response["code"] != 200:
                 logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
                 return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
@@ -260,7 +260,7 @@ async def delete_files(
             return APIResponse.error(message="用户知识库需要本人权限")
 
     try:
-        resp = rag_api.delete_files(kb_id=files[0].kb_id, file_ids=[file.kb_file_id for file in files])
+        resp = await rag_api.delete_files(kb_id=files[0].kb_id, file_ids=[file.kb_file_id for file in files])
         if resp["code"] != 200:
             logger.error(f"删除RAG知识库文件失败: user_id={current_user.user_id}, kb_id={files[0].kb_id}, file_ids={request.file_ids}, msg={resp['msg']}")
             # return APIResponse.error(message=f"删除文件失败: {resp['msg']}")
@@ -605,7 +605,7 @@ async def chat(
         # 根据请求参数决定是否使用流式返回
         streaming = request.streaming
 
-        response = rag_api.chat(
+        response = await rag_api.chat(
             kb_ids=kb_ids,
             question=request.question,
             custom_prompt=custom_prompt,
@@ -631,7 +631,8 @@ async def chat(
             async def generate():
                 try:
                     assistant_content = ''
-                    for chunk in response:
+                    # 不再需要等待 response 协程完成，因为已经在上面 await 了
+                    async for chunk in response:
                         if chunk:
                             response_text = chunk.get("response", "")
                             if chunk.get("msg") == "success stream chat":
@@ -720,7 +721,7 @@ async def upload_attachment(
            kb_id = kb.kb_id
         else:
             kb_name = f"用户知识库-{current_user.user_id}"
-            create_kb_response = rag_api.create_knowledge_base(kb_name=kb_name)
+            create_kb_response = await rag_api.create_knowledge_base(kb_name=kb_name)
             if create_kb_response["code"] != 200:
                 logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
                 return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
