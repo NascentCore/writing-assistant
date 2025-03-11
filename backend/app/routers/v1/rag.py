@@ -166,6 +166,7 @@ async def get_files(
     page: Optional[int] = Query(default=1, ge=1, description="页码", example=1),
     page_size: Optional[int] = Query(default=10, ge=1, description="每页数量", example=10),
     current_user: User = Depends(get_current_user),
+    query: Optional[str] = Query(None, description="搜索关键词", example="四川"),
     db: Session = Depends(get_db)
 ):
     try:
@@ -201,10 +202,14 @@ async def get_files(
             db.add(kb)
             db.commit()
 
-        total = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False).count()
-        total_pages = (total + page_size - 1) // page_size
-        files = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False).order_by(RagFile.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        query_filter = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False)
         
+        if query:
+            query_filter = query_filter.filter(RagFile.file_name.contains(query))
+        
+        total = query_filter.count()
+        total_pages = (total + page_size - 1) // page_size
+        files = query_filter.order_by(RagFile.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
         return APIResponse.success(
             message="获取知识库文件列表成功",
             data=PaginationData(
