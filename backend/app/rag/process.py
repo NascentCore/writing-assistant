@@ -4,7 +4,7 @@ import time
 from app.database import get_async_db, get_db
 from app.models.rag import RagFile, RagFileStatus
 from app.rag.parser import get_parser
-from app.rag.rag_api import rag_api
+from app.rag.rag_api_async import rag_api_async
 from sqlalchemy import update, select, case
 
 logger = logging.getLogger("app")
@@ -218,7 +218,7 @@ async def rag_upload_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore):
             # 2. 限制并发数处理任务
             async with semaphore:
                 # 上传文件到知识库
-                resp = rag_api.upload_files(rag_file.kb_id, [rag_file.file_path], mode="strong")
+                resp = await rag_api_async.upload_files(rag_file.kb_id, [rag_file.file_path], mode="strong")
                 if resp.get("code") != 200 or len(resp.get("data")) == 0:
                     logger.error(f"rag_upload_task 上传文件到知识库失败: {resp.get('msg')}")
                     await update_file_status(
@@ -263,7 +263,7 @@ async def rag_file_poll_task(queue: asyncio.Queue, semaphore: asyncio.Semaphore)
             # logger.info(f"rag_file_poll_task 成功从队列获取任务: {rag_file.file_id} {rag_file.file_name}")
 
             async with semaphore:
-                resp = rag_api.list_files(rag_file.kb_id, file_id=rag_file.kb_file_id)
+                resp = await rag_api_async.list_files(rag_file.kb_id, file_id=rag_file.kb_file_id)
                 details = resp.get("data").get("details")
                 if resp.get("code") != 200 or details is None or len(details) == 0:
                     logger.error(f"rag_file_poll_task 查询RAG解析进度失败: {resp.get('msg')}")
