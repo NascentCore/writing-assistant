@@ -36,6 +36,7 @@ from app.models.user import User
 from app.utils.outline import build_paragraph_key, build_paragraph_response
 from app.models.task import Task, TaskStatus, TaskType
 from app.models.document import Document, DocumentVersion
+from app.models.rag import RagKnowledgeBase, RagKnowledgeBaseType
 
 logger = logging.getLogger("app")
 
@@ -447,8 +448,19 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
         outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
         try:
+            kb_ids = []
+            # 查询系统知识库
+            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, RagKnowledgeBase.is_deleted == False).first()
+
+            if kb:
+                kb_ids.append(kb.kb_id)
+            # 查询用户知识库
+            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, RagKnowledgeBase.user_id == user_id, RagKnowledgeBase.is_deleted == False).first()
+            if kb:
+                kb_ids.append(kb.kb_id)
+            
             # 生成大纲
-            outline_data = await _generate_outline(outline_generator, prompt, file_contents)
+            outline_data = await _generate_outline(outline_generator, prompt, file_contents, user_id, kb_ids)
             
             # 保存大纲并更新消息
             outline_id = await _save_outline_and_update_message(
@@ -474,11 +486,13 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
 async def _generate_outline(
     outline_generator: OutlineGenerator,
     prompt: str,
-    file_contents: List[str]
+    file_contents: List[str],
+    user_id: Optional[str] = None,
+    kb_ids: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """生成大纲"""
     logger.info("开始生成结构化大纲")
-    outline_data = outline_generator.generate_outline(prompt, file_contents)
+    outline_data = outline_generator.generate_outline(prompt, file_contents, user_id, kb_ids)
     logger.info("结构化大纲生成完成")
     return outline_data
 
@@ -1056,12 +1070,12 @@ async def generate_content(
 
 async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
     """
-    异步处理全文生成任务
+    异步处理内容生成任务
     
     Args:
         task_id: 任务ID
-        outline_id: 大纲ID（可选，基于大纲生成模式）
-        prompt: 写作提示（可选，直接生成模式）
+        outline_id: 大纲ID（可选）
+        prompt: 写作提示（可选，直接生成模式下必须）
         file_ids: 参考文件ID列表
         session_id: 会话ID
         message_id: 用户消息ID
@@ -1073,28 +1087,37 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
     start_time = time.time()
     
     try:
-        logger.info(f"开始处理全文生成任务 [task_id={task_id}]")
+        logger.info(f"开始处理内容生成任务 [task_id={task_id}]")
         
         # 更新任务和消息状态
-        if not await _update_task_status(db, task_id, assistant_message_id, "正在生成全文，请稍候...", TaskType.GENERATE_CONTENT):
+        if not await _update_task_status(db, task_id, assistant_message_id, "正在生成内容，请稍候...", TaskType.GENERATE_CONTENT):
             return
         
         # 获取用户ID和参考文件内容
         user_id, file_contents = await _prepare_generation_resources(db, task_id, file_ids)
         
         # 初始化大纲生成器
-        logger.info(f"初始化内容生成器 [model={readable_model_name or 'default'}]")
+        logger.info(f"初始化大纲生成器 [model={readable_model_name or 'default'}]")
         outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
-        # 生成内容并保存
         try:
-            # 根据模式生成内容
-            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db)
+            kb_ids = []
+            # 查询系统知识库
+            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, RagKnowledgeBase.is_deleted == False).first()
+
+            if kb:
+                kb_ids.append(kb.kb_id)
+            # 查询用户知识库
+            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, RagKnowledgeBase.user_id == user_id, RagKnowledgeBase.is_deleted == False).first()
+            if kb:
+                kb_ids.append(kb.kb_id)
+            
+            # 生成内容
+            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids)
             
             # 保存文档并更新消息
-            doc_id = await _save_document_and_update_message(
-                db, full_content, user_id, task_id, session_id, 
-                message_id, assistant_message_id
+            document_id = await _save_document_and_update_message(
+                db, full_content, user_id, task_id, session_id, message_id, assistant_message_id
             )
             
             # 记录任务完成和耗时
@@ -1136,20 +1159,20 @@ async def _generate_content(
     outline_id: Optional[str],
     prompt: Optional[str],
     file_contents: List[str],
-    db: Session
+    db: Session,
+    user_id: Optional[str] = None,
+    kb_ids: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """根据模式生成内容"""
     if outline_id:
         # 基于大纲生成模式
         logger.info(f"开始基于大纲生成全文 [outline_id={outline_id}]")
-        full_content = outline_generator.generate_full_content(outline_id, db)
+        full_content = outline_generator.generate_full_content(outline_id, db, user_id, kb_ids)
     else:
         # 直接生成模式
         logger.info("开始直接生成全文")
-        full_content = outline_generator.generate_content_directly(
-            prompt=prompt,
-            file_contents=file_contents
-        )
+        full_content = outline_generator.generate_content_directly(prompt, file_contents, user_id, kb_ids)
+    
     logger.info("全文生成完成")
     return full_content
 
