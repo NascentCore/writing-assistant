@@ -36,7 +36,7 @@ from app.models.user import User
 from app.utils.outline import build_paragraph_key, build_paragraph_response
 from app.models.task import Task, TaskStatus, TaskType
 from app.models.document import Document, DocumentVersion
-from app.models.rag import RagKnowledgeBase, RagKnowledgeBaseType
+from app.models.rag import RagFile, RagKnowledgeBase, RagKnowledgeBaseType
 
 logger = logging.getLogger("app")
 
@@ -1146,9 +1146,9 @@ async def _prepare_generation_resources(db: Session, task_id: str, file_ids: Lis
     # 获取文件内容
     file_contents = []
     for file_id in file_ids:
-        file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
+        file = db.query(RagFile).filter(RagFile.file_id == file_id, RagFile.is_deleted == False).first()
         if file and file.content:
-            file_contents.append(file.content)
+            file_contents.append(file.content[:Settings.RAG_CHAT_PER_FILE_MAX_LENGTH])
             logger.info(f"加载参考文件内容 [file_id={file_id}]")
     
     return user_id, file_contents
