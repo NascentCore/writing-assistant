@@ -1,7 +1,7 @@
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 import os
-from typing import Optional
+from typing import Optional, List
 import yaml
 from pathlib import Path
 

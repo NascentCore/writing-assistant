@@ -3,15 +3,15 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser
 from typing import List, Dict, Any, Optional, Tuple
 from app.config import settings
-import json
 import logging
 import re
 import markdown
-import asyncio
 import concurrent.futures
+import json
 
 from app.utils.outline import build_paragraph_key, build_paragraph_data
 from app.models.outline import SubParagraph, Outline
+from app.rag.rag_api import rag_api
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,15 @@ def get_sub_paragraph_titles(paragraph: SubParagraph) -> List[str]:
 class OutlineGenerator:
     """使用LangChain调用大模型生成结构化大纲"""
     
-    def __init__(self, readable_model_name: Optional[str] = None):
+    def __init__(self, readable_model_name: Optional[str] = None, use_rag: bool = True):
         """
         初始化大纲生成器
         
         Args:
             readable_model_name: 模型名称
+            use_rag: 是否使用RAG API，默认为True
         """
-        logger.info(f"初始化OutlineGenerator [model={readable_model_name or 'default'}]")
+        logger.info(f"初始化OutlineGenerator [model={readable_model_name or 'default'}, use_rag={use_rag}]")
         
         # 初始化LLM
         if readable_model_name:
@@ -54,36 +55,180 @@ class OutlineGenerator:
                 (model for model in settings.LLM_MODELS if model.get("readable_model_name") == readable_model_name),
                 settings.LLM_MODELS[0]  # 如果没有找到匹配的，则使用第一个模型
             )
-            model = model_config["model"]   
-            api_key = model_config["api_key"]
-            base_url = model_config["base_url"]
+            self.model = model_config["model"]   
+            self.api_key = model_config["api_key"]
+            self.base_url = model_config["base_url"]
         else:
-            model = settings.LLM_MODELS[0]["model"]
-            api_key = settings.LLM_MODELS[0]["api_key"]
-            base_url = settings.LLM_MODELS[0]["base_url"]
+            self.model = settings.LLM_MODELS[0]["model"]
+            self.api_key = settings.LLM_MODELS[0]["api_key"]
+            self.base_url = settings.LLM_MODELS[0]["base_url"]
         
         self.llm = ChatOpenAI(
-            model=model,
-            openai_api_key=api_key,
-            openai_api_base=base_url,
+            model=self.model,
+            openai_api_key=self.api_key,
+            openai_api_base=self.base_url,
             temperature=0.7,
         )
         
         # 初始化输出解析器
         self.parser = JsonOutputParser()
         
-    def generate_outline(self, prompt: str, file_contents: List[str] = None) -> Dict[str, Any]:
+        # 是否使用RAG API
+        self.use_rag = use_rag
+        
+        # 初始化RAG API（如果启用）
+        if self.use_rag:
+            self.rag_api = rag_api
+        else:
+            self.rag_api = None
+            logger.info("RAG API 已禁用")
+        
+    def _call_rag_api(
+        self,
+        question: str,
+        kb_ids: List[str],
+        user_id: str,
+        streaming: bool = True,
+        only_need_search_results: bool = False,
+        context_msg: str = ""
+    ) -> Optional[str]:
+        """
+        调用RAG API的通用方法
+        
+        Args:
+            question: 问题内容
+            kb_ids: 知识库ID列表
+            user_id: 用户ID
+            streaming: 是否使用流式返回
+            only_need_search_results: 是否只需要搜索结果
+            context_msg: 上下文信息，用于日志记录
+            
+        Returns:
+            Optional[str]: RAG响应文本，如果失败则返回None
+        """
+        try:
+            
+            logger.info(f"开始获取RAG搜索结果 [user_id={user_id}, kb_ids={kb_ids}] {context_msg}")
+            rag_result = self.rag_api.chat(
+                kb_ids=kb_ids,
+                question=question,
+                streaming=streaming,
+                only_need_search_results=only_need_search_results,
+                temperature=settings.RAG_CHAT_TEMPERATURE,
+                top_p=settings.RAG_CHAT_TOP_P,
+                top_k=settings.RAG_CHAT_TOP_K,
+                max_token=settings.RAG_CHAT_MAX_TOKENS,
+                api_base=self.base_url,
+                api_key=self.api_key,
+                model=self.model
+            )
+
+            # 记录完整的RAG响应
+            logger.info(f"RAG API响应类型: {type(rag_result)}")
+            
+            # 处理流式响应
+            rag_response = None
+            if isinstance(rag_result, dict):
+                # 非流式响应处理
+                logger.info(f"处理非流式响应: {rag_result}")
+                if "response" in rag_result:
+                    rag_response = rag_result["response"]
+                    logger.info(f"提取到非流式RAG响应文本: {rag_response}")
+            elif isinstance(rag_result, list) or hasattr(rag_result, '__iter__'):
+                # 流式响应处理
+                logger.info("检测到流式响应，开始处理")
+                last_response = None
+                chunk_count = 0
+                
+                try:
+                    for chunk in rag_result:
+                        chunk_count += 1
+                        
+                        if not chunk:
+                            continue
+                        
+                        # 获取当前chunk的响应
+                        current_response = chunk.get("response", "")
+                        if current_response:
+                            last_response = current_response
+                    
+                    # 使用最后一个chunk的响应
+                    if last_response:
+                        logger.info(f"流式响应处理完成，共处理 {chunk_count} 个数据块，最后一个响应: {last_response}")
+                        rag_response = last_response
+                    else:
+                        logger.warning("未找到有效的响应内容")
+                        
+                except Exception as e:
+                    logger.error(f"处理流式响应时出错: {str(e)}")
+                    return None
+            else:
+                logger.error(f"未知的响应类型: {type(rag_result)}")
+            
+            # 验证响应内容
+            if not rag_response:
+                logger.warning("检测到无效的响应内容")
+                return None
+            
+            logger.info(f"最终返回的响应内容: {rag_response}")
+            return rag_response
+            
+        except Exception as e:
+            logger.error(f"获取RAG搜索结果失败: {str(e)}")
+            return None
+
+    def _get_rag_context(self, question: str, user_id: Optional[str], kb_ids: Optional[List[str]], context_msg: str = "") -> str:
+        """
+        获取RAG上下文的通用方法
+        
+        Args:
+            question: 问题内容
+            user_id: 用户ID
+            kb_ids: 知识库ID列表
+            context_msg: 上下文信息，用于日志记录
+            
+        Returns:
+            str: RAG上下文文本
+        """
+        # 如果未启用RAG，直接返回空字符串
+        if not self.use_rag:
+            logger.info("RAG API已禁用，跳过RAG搜索")
+            return ""
+            
+        rag_context = ""
+        if user_id and kb_ids:
+            rag_response = self._call_rag_api(
+                question=question,
+                kb_ids=kb_ids,
+                user_id=user_id,
+                context_msg=context_msg
+            )
+            
+            if rag_response:
+                rag_context = f"大模型回答:\n{rag_response}\n\n"
+                logger.info("已将RAG响应文本添加到上下文中")
+            else:
+                logger.warning("RAG响应内容无效或为空")
+                rag_context = "知识库搜索未返回有效内容。"
+        else:
+            logger.info("未提供用户ID或知识库ID，跳过RAG搜索")
+        
+        return rag_context
+
+    def generate_outline(self, prompt: str, file_contents: List[str] = None, user_id: str = None, kb_ids: List[str] = None) -> Dict[str, Any]:
         """
         生成结构化大纲
         
         Args:
             prompt: 用户提供的写作提示
             file_contents: 用户上传的文件内容列表
+            user_id: 用户ID，用于RAG搜索（如果启用）
+            kb_ids: 知识库ID列表，用于RAG搜索（如果启用）
             
         Returns:
             Dict: 包含大纲结构的字典
         """
-        logger.info(f"开始生成大纲 [prompt_length={len(prompt)}]")
+        logger.info(f"开始生成大纲 [prompt_length={len(prompt)}, use_rag={self.use_rag}]")
         
         # 处理文件内容
         file_context = ""
@@ -94,6 +239,17 @@ class OutlineGenerator:
             file_context = "没有提供参考文件内容。"
             logger.info("无参考文件内容")
         
+        # 获取RAG搜索结果（如果启用）
+        rag_context = ""
+        if self.use_rag:
+            rag_prompt = f"关于主题：{prompt}，请提供参考内容"
+            rag_context = self._get_rag_context(
+                question=rag_prompt,
+                user_id=user_id,
+                kb_ids=kb_ids,
+                context_msg="生成大纲"
+            )
+        
         try:
             # 构建提示模板
             template = """
@@ -103,13 +259,15 @@ class OutlineGenerator:
             
             {file_context}
             
+            {rag_context}
+            
             请生成一个包含以下内容的结构化大纲:
             1. 文章标题
             2. 多个段落，每个段落可以有不同的级别:
                - 1级段落: 主要段落，包含标题、描述和篇幅风格(short/medium/long)
                - 2级及以上段落: 子段落，包含标题和描述，但没有篇幅风格
             
-            以JSON格式返回，格式如下:
+           以JSON格式返回，格式如下:
             {{
                 "title": "文章标题",
                 "sub_paragraphs": [
@@ -124,15 +282,13 @@ class OutlineGenerator:
                                 "description": "2级段落描述",
                                 "level": 2,
                                 "children": []
-                            }},
-                            // 更多子段落...
+                            }}
                         ]
-                    }},
-                    // 更多1级段落...
+                    }}
                 ]
             }}
             
-            确保返回的是有效的JSON格式。
+            确保返回的是有效的JSON格式，不要包含任何注释或额外的文本。
             注意:
             1. 只有1级段落才有 count_style 属性
             2. 所有段落都必须有 level 属性
@@ -149,10 +305,34 @@ class OutlineGenerator:
             
             # 执行链
             logger.info("开始执行大模型调用")
-            result = chain.invoke({"prompt": prompt, "file_context": file_context})
-            logger.info("大模型调用完成")
-            
-            return result
+            try:
+                result = chain.invoke({"prompt": prompt, "file_context": file_context, "rag_context": rag_context})
+                logger.info("大模型调用完成")
+                return result
+            except Exception as parser_error:
+                logger.error(f"解析大模型输出时出错: {str(parser_error)}")
+                
+                # 尝试直接获取大模型的原始输出
+                raw_chain = prompt_template | self.llm
+                raw_output = raw_chain.invoke({"prompt": prompt, "file_context": file_context, "rag_context": rag_context})
+                
+                if hasattr(raw_output, 'content'):
+                    raw_content = raw_output.content
+                    logger.info("获取到大模型原始输出，尝试手动解析")
+                    
+                    # 尝试清理和修复JSON
+                    try:
+                        # 移除可能的注释
+                        cleaned_content = re.sub(r'//.*?(\n|$)', '', raw_content)
+                        # 尝试解析JSON
+                        parsed_json = json.loads(cleaned_content)
+                        logger.info("手动解析JSON成功")
+                        return parsed_json
+                    except Exception as json_error:
+                        logger.error(f"手动解析JSON失败: {str(json_error)}")
+                
+                # 如果所有尝试都失败，返回基本结构
+                raise ValueError(f"无法解析大模型输出: {str(parser_error)}")
             
         except Exception as e:
             logger.error(f"生成大纲时出错: {str(e)}")
@@ -163,7 +343,9 @@ class OutlineGenerator:
                     {
                         "title": "第一部分",
                         "description": "请重新尝试生成大纲",
-                        "count_style": "medium"
+                        "count_style": "medium",
+                        "level": 1,
+                        "children": []
                     }
                 ]
             }
@@ -274,115 +456,129 @@ class OutlineGenerator:
             logger.error(f"保存大纲到数据库时出错: {str(e)}")
             raise
 
-    def generate_full_content(self, outline_id: str, db_session) -> Dict[str, Any]:
+    def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        根据大纲生成全文内容
+        根据大纲生成完整内容
         
         Args:
             outline_id: 大纲ID
             db_session: 数据库会话
+            user_id: 用户ID，用于RAG搜索（如果启用）
+            kb_ids: 知识库ID列表，用于RAG搜索（如果启用）
             
         Returns:
-            Dict: 生成的全文内容，包含markdown和html格式
+            Dict: 包含生成内容的字典
         """
-        logger.info(f"开始根据大纲生成全文 [outline_id={outline_id}]")
+        logger.info(f"开始生成全文内容 [outline_id={outline_id}, use_rag={self.use_rag}]")
         
         try:
-            # 查找大纲
+            # 获取大纲信息
             outline = db_session.query(Outline).filter(Outline.id == outline_id).first()
             if not outline:
-                error_msg = f"未找到ID为{outline_id}的大纲"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
+                raise ValueError(f"未找到大纲: {outline_id}")
             
-            logger.info(f"找到大纲 [title={outline.title}]")
-            
-            # 获取所有1级段落（只有1级段落需要生成内容）
-            level_one_paragraphs = db_session.query(SubParagraph).filter(
-                SubParagraph.outline_id == outline_id,
-                SubParagraph.level == 1
+            # 获取所有段落
+            paragraphs = db_session.query(SubParagraph).filter(
+                SubParagraph.outline_id == outline_id
             ).all()
             
-            logger.info(f"获取到{len(level_one_paragraphs)}个一级段落")
+            if not paragraphs:
+                raise ValueError(f"大纲没有段落: {outline_id}")
             
-            # 准备全文内容
+            # 构建段落树
+            paragraph_map = {p.id: p for p in paragraphs}
+            root_paragraphs = [p for p in paragraphs if p.parent_id is None]
+            
+            for p in paragraphs:
+                if p.parent_id:
+                    parent = paragraph_map.get(p.parent_id)
+                    if parent:
+                        if not hasattr(parent, 'children'):
+                            parent.children = []
+                        parent.children.append(p)
+            
+            # 一次性获取RAG搜索结果（如果启用）
+            rag_context = ""
+            if self.use_rag:
+                # 构建完整的搜索查询
+                search_query = f"关于主题：{outline.title}，需要生成一篇完整的文章。文章大纲如下：\n"
+                for p in paragraphs:
+                    search_query += f"- {p.title}"
+                    if p.description:
+                        search_query += f"：{p.description}"
+                    search_query += "\n"
+                
+                logger.info(f"执行一次性RAG查询 [outline_id={outline_id}]")
+                rag_context = self._get_rag_context(
+                    question=search_query,
+                    user_id=user_id,
+                    kb_ids=kb_ids,
+                    context_msg="生成全文内容"
+                )
+            
+            # 生成内容
             full_content = {
                 "title": outline.title,
-                "content": [],
-                "markdown": ""
+                "outline_id": outline_id,
+                "content": "",
+                "markdown": "",
+                "html": "",
+                "outline_structure": []
             }
             
-            # 使用outline.markdown_content获取大纲的基本结构
-            outline_structure = outline.markdown_content
-            logger.info("获取大纲结构完成")
-            
-            # 创建线程池执行器
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                # 准备并发任务
-                future_to_para = {}
-                
-                for para in level_one_paragraphs:
-                    if not para.count_style:
-                        logger.warning(f"段落缺少count_style设置 [id={para.id}]")
-                        continue
-                    
-                    # 获取子段落标题列表
-                    sub_titles = get_sub_paragraph_titles(para)
-                    logger.info(f"获取到{len(sub_titles)}个子标题 [para_id={para.id}]")
-                    
-                    # 提交任务到线程池
-                    future = executor.submit(
-                        self._generate_paragraph_content,
-                        outline.title,
-                        para,
-                        sub_titles,
-                        para.count_style.value
-                    )
-                    future_to_para[future] = para
-                
-                # 收集结果
-                para_contents = []
-                for future in concurrent.futures.as_completed(future_to_para):
-                    para = future_to_para[future]
-                    try:
-                        content = future.result()
-                        para_contents.append({
-                            "para": para,
-                            "content": content
-                        })
-                        logger.info(f"段落内容生成完成 [id={para.id}]")
-                    except Exception as e:
-                        logger.error(f"生成段落内容时出错 [id={para.id}]: {str(e)}")
-            
-            # 按原始段落顺序排序结果
-            para_contents.sort(key=lambda x: next(
-                (i for i, p in enumerate(level_one_paragraphs) if p.id == x["para"].id), 
-                float('inf')
-            ))
-            
-            # 生成最终的markdown内容
+            # 构建大纲结构
+            outline_structure = []
             markdown_content = f"# {outline.title}\n\n"
             
-            for item in para_contents:
-                para = item["para"]
-                content = item["content"]
+            # 递归生成内容
+            def generate_content_for_paragraph(paragraph, level=1, parent_structure=None):
+                nonlocal markdown_content
                 
-                # 添加到全文内容
-                full_content["content"].append({
-                    "id": para.id,
-                    "title": para.title,
-                    "content": content,
-                    "count_style": para.count_style.value,
-                    "level": para.level
-                })
+                # 获取子标题
+                sub_titles = get_sub_paragraph_titles(paragraph)
                 
-                # 添加到markdown
-                markdown_content += f"## {para.title}\n\n{content}\n\n"
+                # 创建结构节点
+                structure_node = {
+                    "id": paragraph.id,
+                    "title": paragraph.title,
+                    "level": level,
+                    "children": []
+                }
+                
+                if parent_structure is None:
+                    outline_structure.append(structure_node)
+                else:
+                    parent_structure["children"].append(structure_node)
+                
+                # 只为1级段落生成内容
+                if level == 1:
+                    # 为1级段落生成内容
+                    count_style = paragraph.count_style or "medium"
+                    
+                    # 使用全局RAG上下文生成内容
+                    content = self._generate_paragraph_content(
+                        outline.title, 
+                        paragraph, 
+                        sub_titles, 
+                        count_style,
+                        rag_context
+                    )
+                    
+                    # 添加到Markdown
+                    markdown_content += f"## {paragraph.title}\n\n{content}\n\n"
+                
+                # 递归处理子段落
+                if hasattr(paragraph, 'children') and paragraph.children:
+                    for child in paragraph.children:
+                        generate_content_for_paragraph(child, level + 1, structure_node)
             
-            # 设置markdown内容
+            # 开始递归生成
+            for root_paragraph in root_paragraphs:
+                generate_content_for_paragraph(root_paragraph)
+            
+            # 设置内容
+            full_content["content"] = markdown_content
             full_content["markdown"] = markdown_content
-            
-            # 转换为HTML
             full_content["html"] = markdown.markdown(markdown_content, extensions=['extra'])
             logger.info("Markdown转HTML完成")
             
@@ -396,7 +592,7 @@ class OutlineGenerator:
             logger.error(f"生成全文内容时出错: {str(e)}")
             raise
 
-    def _generate_paragraph_content(self, article_title: str, paragraph: SubParagraph, sub_titles: List[str], count_style: str) -> str:
+    def _generate_paragraph_content(self, article_title: str, paragraph: SubParagraph, sub_titles: List[str], count_style: str, rag_context: str = "") -> str:
         """生成段落内容"""
         # 根据count_style确定字数范围
         word_count_range = {
@@ -414,11 +610,38 @@ class OutlineGenerator:
         这个段落包含以下子主题：
         {chr(10).join([f'- {title}' for title in sub_titles])}
         
-        请生成一个字数在{word_count_range}字之间的内容，内容应该符合章节描述，并且与整体文章主题保持一致。
-        内容应该有逻辑性、连贯性，并且包含足够的细节和例子。
-        请确保内容涵盖所有列出的子段落主题。
+        {rag_context}
         
-        请直接返回生成的内容，不需要添加标题。
+        请遵循以下要求生成内容：
+        1. 格式要求：
+           - 每个段落必须有清晰的主题句
+           - 每个观点必须有具体的论据和例子支持
+           - 段落之间使用恰当的过渡词衔接
+           - 使用统一的写作语气和风格
+           
+           段落层级编号规范：
+           - 二级标题使用：（一）（二）（三）（四）...
+           - 三级标题使用：1、2、3、4...
+           - 四级标题使用：(1)(2)(3)(4)...
+           - 五级标题使用：①②③④...
+           严格遵循以上编号规范，确保全文格式统一。
+           
+           注意：不要在内容开头重复章节标题，因为标题会在其他地方自动添加。直接从正文内容开始。
+        
+        2. 内容要求：
+           - 字数控制在{word_count_range}字之间
+           - 确保内容与整体文章主题"{article_title}"保持一致
+           - 与文章其他部分建立明确的逻辑关联
+           - 合理引用和整合知识库提供的相关内容
+           - 每个子主题都要得到充分展开
+           - 所有子主题必须按照上述编号规范进行编号
+        
+        3. 连贯性要求：
+           - 在开头部分，简要回顾上文的关键内容（如果不是第一个段落）
+           - 在结尾部分，预示下文将要讨论的内容（如果不是最后一个段落）
+           - 使用适当的过渡语句，确保段落间的自然衔接
+        
+        请生成符合以上要求的段落内容。内容应该专业、严谨，同时保持生动有趣。确保严格遵循段落编号规范，不得混用不同的编号方式。记住：不要在内容中包含章节标题，直接从正文内容开始。
         """
         
         try:
@@ -437,100 +660,85 @@ class OutlineGenerator:
             logger.error(f"生成段落内容时出错: {str(e)}")
             return f"生成内容失败: {str(e)}"
 
-    def generate_content_directly(self, prompt: str, file_contents: List[str] = None) -> Dict[str, Any]:
+    def generate_content_directly(self, prompt: str, file_contents: List[str] = None, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        直接生成文章内容，不需要先生成大纲
+        直接生成内容（不基于大纲）
         
         Args:
-            prompt: 写作提示
-            file_contents: 参考文件内容列表
+            prompt: 用户提供的写作提示
+            file_contents: 用户上传的文件内容列表
+            user_id: 用户ID，用于RAG搜索（如果启用）
+            kb_ids: 知识库ID列表，用于RAG搜索（如果启用）
             
         Returns:
-            Dict: 生成的文章内容，包含标题、内容、markdown格式和html格式
+            Dict: 包含生成内容的字典
         """
-        logger.info(f"开始直接生成文章 [prompt_length={len(prompt)}]")
+        logger.info(f"开始直接生成内容 [prompt_length={len(prompt)}, use_rag={self.use_rag}]")
+        
+        # 处理文件内容
+        file_context = ""
+        if file_contents and len(file_contents) > 0:
+            file_context = "参考以下文件内容:\n" + "\n".join(file_contents)
+            logger.info(f"使用参考文件内容 [files_count={len(file_contents)}]")
+        else:
+            file_context = "没有提供参考文件内容。"
+            logger.info("无参考文件内容")
+        
+        # 获取RAG搜索结果（如果启用）
+        rag_context = ""
+        if self.use_rag:
+            rag_context = self._get_rag_context(
+                question=prompt,
+                user_id=user_id,
+                kb_ids=kb_ids,
+                context_msg="直接生成内容"
+            )
         
         try:
-            # 处理文件内容
-            file_context = ""
-            if file_contents and len(file_contents) > 0:
-                file_context = "参考以下文件内容:\n" + "\n".join(file_contents)
-                logger.info(f"使用参考文件内容 [files_count={len(file_contents)}]")
-            else:
-                file_context = "没有提供参考文件内容。"
-                logger.info("无参考文件内容")
+            # 构建提示模板
+            template = """
+            你是一个专业的写作助手，请根据用户的写作需求生成一篇完整的文章。
             
-            try:
-                # 创建提示
-                prompt_template = ChatPromptTemplate.from_template(template)
-                logger.info("创建提示模板完成")
-                
-                # 创建链
-                chain = prompt_template | self.llm
-                logger.info("创建处理链完成")
-                
-                # 执行链
-                logger.info("开始调用大模型生成内容")
-                result = chain.invoke({
-                    "prompt": prompt,
-                    "file_context": file_context
-                })
-                logger.info("内容生成完成")
-                
-                # 提取内容
-                markdown_content = result.content if hasattr(result, 'content') else str(result)
-                
-                # 解析markdown内容
-                logger.info("开始解析生成的内容")
-                
-                # 提取文章标题
-                title_match = re.search(r'^#\s+(.+)$', markdown_content, re.MULTILINE)
-                title = title_match.group(1) if title_match else "生成的文章"
-                logger.info(f"提取到文章标题: {title}")
-                
-                # 提取所有章节
-                sections = []
-                section_pattern = r'^##\s+(.+)\n(.*?)(?=##|\Z)'
-                for match in re.finditer(section_pattern, markdown_content, re.MULTILINE | re.DOTALL):
-                    section_title = match.group(1).strip()
-                    section_content = match.group(2).strip()
-                    sections.append({
-                        "id": len(sections) + 1,
-                        "title": section_title,
-                        "content": section_content,
-                        "count_style": "medium",
-                        "level": 1
-                    })
-                logger.info(f"提取到{len(sections)}个章节")
-                
-                # 构建返回数据
-                result = {
-                    "title": title,
-                    "content": sections,
-                    "markdown": markdown_content,
-                    "html": markdown.markdown(markdown_content, extensions=['extra'])
-                }
-                
-                logger.info("文章生成和解析完成")
-                return result
-                
-            except Exception as e:
-                logger.error(f"生成文章内容时出错: {str(e)}")
-                raise
-                
+            用户的写作需求是: {prompt}
+            
+            {file_context}
+            
+            {rag_context}
+            
+            请生成一篇结构良好、内容丰富的文章，包括标题和正文。文章应该有清晰的段落划分，每个段落都有明确的主题。
+            """
+            
+            # 创建提示
+            prompt_template = ChatPromptTemplate.from_template(template)
+            logger.info("创建提示模板完成")
+            
+            # 创建链
+            chain = prompt_template | self.llm
+            logger.info("创建处理链完成")
+            
+            # 执行链
+            logger.info("开始执行大模型调用")
+            content = chain.invoke({"prompt": prompt, "file_context": file_context, "rag_context": rag_context})
+            logger.info("大模型调用完成")
+            
+            # 提取标题
+            lines = content.content.strip().split('\n')
+            title = lines[0].strip().replace('#', '').strip()
+            if not title or len(title) > 100:
+                title = "生成的文章"
+            
+            # 构建返回结果
+            result = {
+                "title": title,
+                "content": content.content,
+                "markdown": content.content,
+                "html": markdown.markdown(content.content, extensions=['extra']),
+                "outline_structure": []
+            }
+            
+            logger.info("直接生成内容完成")
+            return result
+            
         except Exception as e:
-            logger.error(f"直接生成文章内容时出错: {str(e)}")
-            error_content = "# 生成失败，请重试\n\n## 生成失败\n\n生成文章内容时出错，请重试"
-            # 返回一个基本结构，避免完全失败
-            return {
-                "title": "生成失败，请重试",
-                "content": [{
-                    "id": 1,
-                    "title": "生成失败",
-                    "content": "生成文章内容时出错，请重试",
-                    "count_style": "medium",
-                    "level": 1
-                }],
-                "markdown": error_content,
-                "html": markdown.markdown(error_content, extensions=['extra'])
-            } 
+            logger.error(f"直接生成内容时出错: {str(e)}")
+            raise 

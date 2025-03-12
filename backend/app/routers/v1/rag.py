@@ -17,7 +17,7 @@ from app.models.rag import RagFile, RagFileStatus, RagKnowledgeBase, RagKnowledg
 from app.models.user import User
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from app.rag.parser import get_parser, get_file_format
-from app.rag.rag_api import rag_api
+from app.rag.rag_api_async import rag_api_async
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.models.task import Task, TaskStatus
 
@@ -84,7 +84,7 @@ async def upload_files(
         
         if not kb_id:
             kb_name = "系统知识库" if category == "system" else f"用户知识库-{current_user.user_id}"
-            create_kb_response = rag_api.create_knowledge_base(kb_name=kb_name)
+            create_kb_response = await rag_api_async.create_knowledge_base(kb_name=kb_name)
             if create_kb_response["code"] != 200:
                 logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
                 return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
@@ -166,6 +166,7 @@ async def get_files(
     page: Optional[int] = Query(default=1, ge=1, description="页码", example=1),
     page_size: Optional[int] = Query(default=10, ge=1, description="每页数量", example=10),
     current_user: User = Depends(get_current_user),
+    file_name: Optional[str] = Query(None, description="搜索关键词", example="四川"),
     db: Session = Depends(get_db)
 ):
     try:
@@ -183,7 +184,7 @@ async def get_files(
         
         if not kb:
             kb_name = "系统知识库" if category == "system" else f"用户知识库-{current_user.user_id}"
-            create_kb_response = rag_api.create_knowledge_base(kb_name=kb_name)
+            create_kb_response = await rag_api_async.create_knowledge_base(kb_name=kb_name)
             if create_kb_response["code"] != 200:
                 logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
                 return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
@@ -201,10 +202,14 @@ async def get_files(
             db.add(kb)
             db.commit()
 
-        total = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False).count()
-        total_pages = (total + page_size - 1) // page_size
-        files = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False).order_by(RagFile.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        query_filter = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False)
         
+        if file_name:
+            query_filter = query_filter.filter(RagFile.file_name.contains(file_name))
+        
+        total = query_filter.count()
+        total_pages = (total + page_size - 1) // page_size
+        files = query_filter.order_by(RagFile.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
         return APIResponse.success(
             message="获取知识库文件列表成功",
             data=PaginationData(
@@ -255,7 +260,7 @@ async def delete_files(
             return APIResponse.error(message="用户知识库需要本人权限")
 
     try:
-        resp = rag_api.delete_files(kb_id=files[0].kb_id, file_ids=[file.kb_file_id for file in files])
+        resp = await rag_api_async.delete_files(kb_id=files[0].kb_id, file_ids=[file.kb_file_id for file in files])
         if resp["code"] != 200:
             logger.error(f"删除RAG知识库文件失败: user_id={current_user.user_id}, kb_id={files[0].kb_id}, file_ids={request.file_ids}, msg={resp['msg']}")
             # return APIResponse.error(message=f"删除文件失败: {resp['msg']}")
@@ -492,28 +497,28 @@ async def chat(
 ):
     try:
         kb_ids = []
-        # 查询系统知识库
-        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
+        kb = db.query(RagKnowledgeBase).filter(
+            RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
+            RagKnowledgeBase.is_deleted == False
+        ).first()
         if kb:
             kb_ids.append(kb.kb_id)
-        # 查询用户知识库
-        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
-                                                   RagKnowledgeBase.user_id == current_user.user_id, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
+        kb = db.query(RagKnowledgeBase).filter(
+            RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
+            RagKnowledgeBase.user_id == current_user.user_id, 
+            RagKnowledgeBase.is_deleted == False
+        ).first()
         if kb:
             kb_ids.append(kb.kb_id)
         if not kb_ids:
             logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到任何相关知识库")
             return APIResponse.error(message="未找到相关知识库")
 
-        # 根据model_name获取模型
         model = next((m for m in settings.LLM_MODELS if m["readable_model_name"] == request.model_name), None)
         if not model:
             logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到模型: {request.model_name}")
             return APIResponse.error(message="请输入正确的模型名称")
-        
-        # session_id 验证
+
         session_id = request.session_id
         chat_session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
@@ -523,23 +528,18 @@ async def chat(
         ).first()
         if not chat_session:
             return APIResponse.error(message="会话不存在或无权访问")
-        
-        # 获取引用的文件
+
         reference_files = db.query(RagFile).filter(
             RagFile.file_id.in_(request.file_ids),
             RagFile.user_id == current_user.user_id,
             RagFile.is_deleted == False
         ).all()
-        if len(reference_files) != len(request.file_ids):
-            logger.error(f"rag_chat 用户 {current_user.user_id} 引用的文件不存在或无权访问: {request.file_ids}")
-
-        # 获取引用的文件内容
+        
         custom_prompt = ''
         for file in reference_files:
             content_preview = file.content[:settings.RAG_CHAT_PER_FILE_MAX_LENGTH]
             custom_prompt += f"文件名: {file.file_name}\n文件内容: {content_preview}\n\n"
 
-        # 获取最近的2条大模型回答
         recent_answers = db.query(ChatMessage).filter(
             ChatMessage.session_id == session_id,
             ChatMessage.role == "assistant",
@@ -557,50 +557,21 @@ async def chat(
             ).first()
             if question:
                 history.append([question.content, answer.content])
-        
-        # 保存问题
+
         question_message_id = f"msg-{shortuuid.uuid()}"
         user_question = ChatMessage(
             message_id=question_message_id,
             session_id=session_id,
             role="user",
             content=request.question,
-            meta=json.dumps({
-                "files": request.files
-            })
+            meta=json.dumps({"files": request.files})
         )
         db.add(user_question)
         db.commit()
 
-        logger.info(json.dumps({
-            "session_id": session_id,
-            "message_id": question_message_id,
-            "user_id": current_user.user_id,
-            "kb_ids": kb_ids,
-            "question": request.question,
-            "custom_prompt": custom_prompt,
-            "history": history,
-            "streaming": request.streaming,
-            "networking": settings.RAG_CHAT_NETWORKING,
-            "product_source": settings.RAG_CHAT_PRODUCT_SOURCE,
-            "rerank": settings.RAG_CHAT_RERANK,
-            "only_need_search_results": settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
-            "hybrid_search": settings.RAG_CHAT_HYBRID_SEARCH,
-            "max_token": settings.RAG_CHAT_MAX_TOKENS,
-            "api_base": model['base_url'],
-            "api_key": model['api_key'],
-            "model": model['model'],
-            "api_context_length": settings.RAG_CHAT_API_CONTEXT_LENGTH,
-            "chunk_size": settings.RAG_CHAT_CHUNK_SIZE,
-            "top_p": settings.RAG_CHAT_TOP_P,
-            "top_k": settings.RAG_CHAT_TOP_K,
-            "temperature": settings.RAG_CHAT_TEMPERATURE
-        }, ensure_ascii=False))
-        
-        # 根据请求参数决定是否使用流式返回
         streaming = request.streaming
 
-        response = rag_api.chat(
+        response = await rag_api_async.chat(
             kb_ids=kb_ids,
             question=request.question,
             custom_prompt=custom_prompt,
@@ -626,27 +597,20 @@ async def chat(
             async def generate():
                 try:
                     assistant_content = ''
-                    for chunk in response:
+                    async for chunk in response:
                         if chunk:
                             response_text = chunk.get("response", "")
                             if chunk.get("msg") == "success stream chat":
-                                continue
-                            # 构建新的响应格式
+                                response_text = ""
                             new_chunk = {
-                                **chunk,  # 保留原有的所有字段
+                                **chunk,
                                 "choices": [
-                                    {
-                                        "delta": {
-                                            "content": response_text,
-                                            "role": "assistant"
-                                        }
-                                    }
+                                    {"delta": {"content": response_text, "role": "assistant"}}
                                 ]
                             }
                             assistant_content += response_text
                             yield f"data: {json.dumps(new_chunk, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
-                    # 流式响应结束后保存回答记录
                     assistant_message = ChatMessage(
                         message_id=f"msg-{shortuuid.uuid()}",
                         session_id=session_id,
@@ -658,8 +622,7 @@ async def chat(
                     db.commit()
                 except Exception as e:
                     logger.exception("流式响应生成异常")
-                    error_msg = {"error": str(e)}
-                    yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
 
             return StreamingResponse(
@@ -674,7 +637,7 @@ async def chat(
             )
         else:
             if isinstance(response, dict) and response.get("code") == 200:
-                answer = response.get("history",[["", ""]])[0][1]
+                answer = response.get("history", [["", ""]])[0][1]
                 assistant_message = ChatMessage(
                     message_id=f"msg-{shortuuid.uuid()}",
                     session_id=session_id,
@@ -683,15 +646,12 @@ async def chat(
                     content=answer
                 )
                 db.add(assistant_message)
-                db.commit() 
-                return APIResponse.success(
-                    message="对话成功",
-                    data=answer
-                )
+                db.commit()
+                return APIResponse.success(message="对话成功", data=answer)
             else:
                 logger.error(f"RAG对话失败: user_id={current_user.user_id}, response={response}")
                 return APIResponse.error(message="对话失败")
-        
+
     except Exception as e:
         logger.exception(f"知识库对话发生异常: {str(e)}")
         return APIResponse.error(message=f"对话失败: {str(e)}")
@@ -699,6 +659,7 @@ async def chat(
 @router.post("/attachments", summary="知识库对话附件上传")
 async def upload_attachment(
     files: List[FastAPIUploadFile] = File(...),
+    save_to_kb: Optional[bool] = Body(default=False, description="是否保存到知识库"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -715,7 +676,7 @@ async def upload_attachment(
            kb_id = kb.kb_id
         else:
             kb_name = f"用户知识库-{current_user.user_id}"
-            create_kb_response = rag_api.create_knowledge_base(kb_name=kb_name)
+            create_kb_response = await rag_api_async.create_knowledge_base(kb_name=kb_name)
             if create_kb_response["code"] != 200:
                 logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
                 return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
@@ -732,51 +693,56 @@ async def upload_attachment(
 
         # 过滤已存在的文件
         file_names = [file.filename for file in files]
-        existing_files = db.query(RagFile).filter(RagFile.kb_id == kb_id, RagFile.file_name.in_(file_names), RagFile.is_deleted == False).all()
+        existing_files = db.query(RagFile).filter(RagFile.file_name.in_(file_names), RagFile.user_id == current_user.user_id, RagFile.is_deleted == False).all()
         existing_file_names = [file.file_name for file in existing_files]
-        files = [file for file in files if file.filename not in existing_file_names]
+        new_files = [file for file in files if file.filename not in existing_file_names]
         
         result = []
         update_content_files = []
-        for file in files:
+        for new_file in new_files:
             file_id = f"file-{shortuuid.uuid()}"
-            file_location = upload_dir / f"{file_id}_{file.filename}" # 文件存储路径
+            file_location = upload_dir / f"{file_id}_{new_file.filename}" # 文件存储路径
             # 保存文件到磁盘
             try:
-                contents = await file.read()
+                contents = await new_file.read()
                 with open(file_location, "wb") as f:
                     f.write(contents)
                 # 从文件内容判断格式
                 file_format = get_file_format(str(file_location))
                 result.append({
                     "file_id": file_id,
-                    "file_name": file.filename,
+                    "file_name": new_file.filename,
                     "size": len(contents),
                     "content_type": file_format,
                 })
             except Exception as e:
-                logger.error(f"上传文件 {file.filename} 时发生错误: {str(e)}")
-                return APIResponse.error(message=f"上传文件 {file.filename} 时发生错误: {str(e)}")
+                logger.error(f"上传文件 {new_file.filename} 时发生错误: {str(e)}")
+                return APIResponse.error(message=f"上传文件 {new_file.filename} 时发生错误: {str(e)}")
             finally:
-                await file.close()
+                await new_file.close()
         
             # 提交RAG解析任务
             db_file = RagFile(
                 file_id=file_id,    
-                kb_id=kb_id,
-                kb_type=RagKnowledgeBaseType.USER,
                 user_id=current_user.user_id,
-                file_name=file.filename,
+                file_name=new_file.filename,
                 file_size=len(contents),
                 file_ext=file_format, 
                 file_path=str(file_location),
-                status=RagFileStatus.LOCAL_SAVED,
                 summary_small='',
                 summary_medium='',
                 summary_large='',
                 content='',
                 meta='',
             )
+            if save_to_kb:
+                db_file.kb_id = kb_id
+                db_file.kb_type = RagKnowledgeBaseType.USER
+                db_file.status = RagFileStatus.LOCAL_SAVED
+            else:
+                db_file.kb_id = ''
+                db_file.kb_type = RagKnowledgeBaseType.NONE
+                db_file.status = RagFileStatus.DONE
             db.add(db_file)
             db.commit() 
             # 同步解析内容，附件的内容马上要使用，所以进行同步解析
@@ -786,28 +752,28 @@ async def upload_attachment(
                 continue
             content = await parser.async_content(file_location)
             if not content.strip():
-                logger.error(f"upload_attachment 解析文件 {file.filename} 时发生错误: 文件内容为空")
+                logger.error(f"upload_attachment 解析文件 {new_file.filename} 时发生错误: 文件内容为空")
                 continue
             # 添加到更新内容列表
             update_content_files.append((file_id, content))
 
-        for file in existing_files:
+        for new_file in existing_files:
             result.append({
-                "file_id": file.file_id,
-                "file_name": file.file_name,
-                "size": file.file_size,
-                "content_type": file.file_ext,
+                "file_id": new_file.file_id,
+                "file_name": new_file.file_name,
+                "size": new_file.file_size,
+                "content_type": new_file.file_ext,
             })
-            if not file.content.strip():
-                parser = get_parser(file.file_ext)
+            if not new_file.content.strip():
+                parser = get_parser(new_file.file_ext)
                 if not parser:
-                    logger.error(f"upload_attachment 不支持解析的文件格式: {file.file_ext}")
+                    logger.error(f"upload_attachment 不支持解析的文件格式: {new_file.file_ext}")
                     continue
-                content = await parser.async_content(file.file_path)
+                content = await parser.async_content(new_file.file_path)
                 if not content.strip():
-                    logger.error(f"upload_attachment 解析文件 {file.file_name} 时发生错误: 文件内容为空")
+                    logger.error(f"upload_attachment 解析文件 {new_file.file_name} 时发生错误: 文件内容为空")
                     continue
-                update_content_files.append((file.file_id, content))
+                update_content_files.append((new_file.file_id, content))
         
         # 更新内容
         for file_id, content in update_content_files:

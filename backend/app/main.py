@@ -6,12 +6,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from app.routers.v1 import api, auth, users, prompt, document, rag,writing
+from app.routers.v1 import api, auth, users, prompt, document, rag, writing
 from fastapi.openapi.utils import get_openapi
 from app.config import settings
 from app.database import sync_engine, Base
 from app.rag.process import rag_worker
-from app.routers.v1 import api, auth, users, prompt, document, rag
 from fastapi.logger import logger as fastapi_logger
 logger = logging.getLogger("app")
 
