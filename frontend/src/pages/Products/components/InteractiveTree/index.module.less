@@ -6,6 +6,16 @@
       .ant-tree-node-content-wrapper {
       padding: 0;
     }
+    .ant-tree .ant-tree-node-content-wrapper:hover {
+      background-color: rgba(0, 0, 0, 0.04);
+    }
+    .ant-tree .ant-tree-node-content-wrapper {
+      cursor: auto;
+    }
+    .ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+      color: rgba(0, 0, 0, 0.88);
+      background-color: transparent;
+    }
     .ant-tree .ant-tree-switcher {
       padding-top: 6px;
       z-index: 2;
@@ -29,6 +39,7 @@
     align-items: flex-start;
     padding: 4px 0;
     width: 100%;
+    min-width: 600px;
     gap: 8px;
     position: relative;
     z-index: 1;
@@ -36,7 +47,7 @@
       .nodeActions {
         opacity: 1;
         visibility: visible;
-        margin-right: 20px;
+        // margin-right: 20px;
       }
       :global {
         .ant-input {
@@ -88,7 +99,6 @@
       visibility: hidden;
       transition: all 0.3s ease;
       .actionIcon {
-        cursor: pointer;
         padding: 4px;
         color: rgba(0, 0, 0, 0.45);
 

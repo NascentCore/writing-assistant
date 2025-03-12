@@ -57,6 +57,7 @@ const Home: React.FC = () => {
     { id: number; title: string }[] | null
   >(null);
   const [hasSteps, setHasSteps] = useState<boolean>(false);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
   // 获取模板列表
   useEffect(() => {
@@ -105,6 +106,9 @@ const Home: React.FC = () => {
   // 处理卡片点击事件
   const handleCardClick = (card: WritingCard) => {
     console.log('点击卡片:', card);
+    // 设置选中的卡片ID
+    setSelectedCardId(card.id);
+    
     if (card.value) {
       setSelectedTemplateValue(card.value);
     }
@@ -142,7 +146,7 @@ const Home: React.FC = () => {
       </Tabs> */}
       <div style={{ marginBottom: 'auto' }}>
         <div className={styles.header}>
-          <h1 className={styles.title}>我是小标，你的标书写作助手</h1>
+          <h1 className={styles.title}>我是你的写作助手</h1>
           <p className={styles.subtitle}>
             请告诉我你的具体需求，让我来帮你完成吧~
           </p>
@@ -155,7 +159,7 @@ const Home: React.FC = () => {
               allCards.map((card) => (
                 <div
                   key={card.id}
-                  className={styles.card}
+                  className={`${styles.card} ${selectedCardId === card.id ? styles.selectedCard : ''}`}
                   onClick={() => handleCardClick(card)}
                 >
                   <div className={styles.cardIcon}>

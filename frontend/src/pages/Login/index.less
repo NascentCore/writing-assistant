@@ -1,75 +1,184 @@
 .login-container-forUni {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: #f0f2f5;
+  justify-content: center;
+  align-items: center;
+
   .auth-container {
     display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 100vh;
-    background-color: #f3f4f6;
+    width: 1100px;
+    height: 580px;
+    max-width: 90%;
+    max-height: 90vh;
+    margin: 0;
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    position: relative;
   }
 
+  // 左侧背景图区域
+  .left-side {
+    flex: 0.5;
+    background-image: url('@/assets/11681741759847_.pic_hd.jpg');
+    background-size: cover;
+    background-position: center;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .logo-container {
+      position: absolute;
+      top: 30px;
+      left: 30px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+
+      .logo {
+        width: 150px;
+        height: auto;
+        margin-right: 0;
+      }
+
+      .logo-text {
+        display: none;
+      }
+    }
+  }
+
+  // 右侧登录区域
   .auth-box {
+    flex: 0.5;
+    padding: 0 40px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
     background: white;
-    padding: 2rem;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 10%);
+    position: relative;
+
+    &::before {
+      display: none;
+    }
+  }
+
+  // 添加绿色边框
+  .login-form-container {
     width: 100%;
-    max-width: 400px;
+
+    border-radius: 4px;
+    padding: 30px;
+    position: relative;
+  }
+
+  .system-title {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 30px;
+    align-items: center;
+    width: 100%;
+
+    .main-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 6px;
+      text-align: center;
+      position: relative;
+    }
+
+    .sub-title {
+      font-size: 14px;
+      color: #666;
+      text-align: center;
+      position: relative;
+    }
   }
 
   .auth-box h2 {
-    margin: 0 0 1.5rem;
-    text-align: center;
+    margin: 0 0 40px;
+    font-size: 20px;
     color: #333;
   }
 
   .auth-box form {
-    margin-bottom: 1rem;
-  }
-
-  .form-group {
-    margin-bottom: 1rem;
-  }
-
-  .form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    color: #666;
-  }
-
-  .form-group input {
+    margin-bottom: 0;
     width: 100%;
-    padding: 0.5rem;
-    border: 1px solid #ddd;
+  }
+
+  // 表单项间距调整
+  .ant-form-item {
+    margin-bottom: 20px;
+  }
+
+  // 输入框样式
+  .ant-input-affix-wrapper {
     border-radius: 4px;
-    font-size: 1rem;
+
+    transition: all 0.3s;
+    padding: 8px 12px;
+    height: auto;
+
+    .ant-input {
+      font-size: 14px;
+    }
   }
 
-  .auth-box button[type='submit'] {
-    width: 100%;
-    padding: 0.75rem;
-    color: white;
+  .ant-input-password {
+    border-radius: 4px;
+  }
+
+  // 登录按钮样式
+  .login-button {
+    height: 40px;
+    font-size: 16px;
+    font-weight: 500;
+    margin-top: 20px;
+    border-radius: 4px;
+    background: #1890ff;
     border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background-color 0.2s;
+    box-shadow: none;
+    transition: all 0.3s;
+
+    &:hover {
+      background: #40a9ff;
+      box-shadow: 0 4px 12px rgba(24, 144, 255, 0.2);
+    }
+
+    &:active {
+      background: #096dd9;
+    }
   }
 
-  .auth-switch {
+  // 底部版权信息
+  .footer {
+    margin-top: 30px;
     text-align: center;
-    color: #666;
-  }
+    color: #999;
+    font-size: 12px;
+    position: absolute;
+    bottom: 15px;
+    left: 0;
+    right: 0;
 
-  .auth-switch button {
-    background: none;
-    border: none;
-    color: #1890ff;
-    cursor: pointer;
-    padding: 0;
-    font-size: inherit;
-  }
-
-  .auth-switch button:hover {
-    text-decoration: underline;
+    &::before {
+      display: none;
+    }
   }
 }

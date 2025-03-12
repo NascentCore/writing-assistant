@@ -32,7 +32,6 @@ const KnowledgeBaseList: React.FC = () => {
       dataIndex: 'file_name',
       copyable: true,
       ellipsis: true,
-      tooltip: '文件名过长会自动收缩',
     },
     {
       title: '状态',
@@ -135,7 +134,6 @@ const KnowledgeBaseList: React.FC = () => {
         pagination={{
           pageSize: 10,
         }}
-        search={false}
         dateFormatter="string"
         headerTitle="知识库文件列表"
         toolBarRender={() => [

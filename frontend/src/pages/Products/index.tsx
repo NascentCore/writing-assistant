@@ -24,6 +24,7 @@ const Products: React.FC = () => {
     <div className={styles.container}>
       <Card title="文档大纲" bordered={false}>
         <InteractiveTree
+          outlineId={83}
           onNodeUpdate={handleNodeUpdate}
           onNodeDelete={handleNodeDelete}
           onNodeAdd={handleNodeAdd}

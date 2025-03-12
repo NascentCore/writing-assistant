@@ -1,6 +1,6 @@
+import logoImg from '@/assets/11691741759860_.pic.jpg';
 import { fetchWithAuthNew } from '@/utils/fetch';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
-import { history } from '@umijs/max';
 import { Button, Form, Input, message } from 'antd';
 import React from 'react';
 import './index.less';
@@ -43,48 +43,64 @@ const LoginPage: React.FC = () => {
     <div className="login-container-forUni">
       {contextHolder}
       <div className="auth-container">
-        <div className="auth-box">
-          <h2>登录</h2>
-          <Form
-            form={form}
-            name="login"
-            onFinish={handleSubmit}
-            autoComplete="off"
-          >
-            <Form.Item
-              name="username"
-              rules={[{ required: true, message: '请输入用户名！' }]}
-            >
-              <Input
-                prefix={<UserOutlined />}
-                placeholder="用户名"
-                size="large"
-              />
-            </Form.Item>
-
-            <Form.Item
-              name="password"
-              rules={[{ required: true, message: '请输入密码！' }]}
-            >
-              <Input.Password
-                prefix={<LockOutlined />}
-                placeholder="密码"
-                size="large"
-              />
-            </Form.Item>
-
-            <Form.Item>
-              <Button type="primary" htmlType="submit" block size="large">
-                登录
-              </Button>
-            </Form.Item>
-          </Form>
-          <div className="auth-switch">
-            没有账号？
-            <Button type="link" onClick={() => history.push('/Register')}>
-              去注册
-            </Button>
+        {/* 左侧背景区域 */}
+        <div className="left-side">
+          <div className="logo-container">
+            <img src={logoImg} alt="Logo" className="logo" />
           </div>
+        </div>
+
+        {/* 右侧登录区域 */}
+        <div className="auth-box">
+          <div className="login-form-container">
+            <div className="system-title">
+              <div className="main-title">中咨路捷</div>
+              {/* <div className="sub-title">资产管理系统</div> */}
+            </div>
+
+            <Form
+              form={form}
+              name="login"
+              onFinish={handleSubmit}
+              autoComplete="off"
+            >
+              <Form.Item
+                name="username"
+                rules={[{ required: true, message: '请输入用户名！' }]}
+              >
+                <Input
+                  prefix={<UserOutlined />}
+                  placeholder="用户名"
+                  size="large"
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="password"
+                rules={[{ required: true, message: '请输入密码！' }]}
+              >
+                <Input.Password
+                  prefix={<LockOutlined />}
+                  placeholder="密码"
+                  size="large"
+                />
+              </Form.Item>
+
+              <Form.Item>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  block
+                  size="large"
+                  className="login-button"
+                >
+                  登录
+                </Button>
+              </Form.Item>
+            </Form>
+          </div>
+
+          <div className="footer">Copyright © 2025 中咨路捷科技有限公司</div>
         </div>
       </div>
     </div>

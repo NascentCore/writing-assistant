@@ -136,7 +136,11 @@ const Layout: React.FC = () => {
   }, [location.pathname, location.search]);
 
   // 检查当前路由是否需要隐藏菜单
-  const currentRoute = routes.find((route) => route.path === location.pathname);
+  const currentRoute = routes.find(
+    (route) =>
+      route.path === '/*' ||
+      route.path.toLowerCase() === location.pathname.toLowerCase(),
+  );
   if (currentRoute?.menuRender === false) {
     return <Outlet />;
   }

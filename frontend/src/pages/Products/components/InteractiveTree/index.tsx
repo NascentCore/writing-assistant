@@ -1,16 +1,28 @@
+import { fetchWithAuthNew } from '@/utils/fetch';
+import { BarsOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import {
-  DeleteOutlined,
-  FileAddOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
-import { Button, Input, Tree, TreeProps } from 'antd';
+  Button,
+  Dropdown,
+  Input,
+  MenuProps,
+  Spin,
+  Tree,
+  TreeProps,
+} from 'antd';
 import type { DataNode } from 'antd/es/tree';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useState,
+} from 'react';
 import styles from './index.module.less';
 
 interface TreeNode extends Omit<DataNode, 'title'> {
   title: string;
   description?: string;
+  count_style?: string;
   children?: TreeNode[];
   level: number;
 }
@@ -20,12 +32,28 @@ interface InteractiveTreeProps {
   onNodeDelete?: (key: React.Key) => void;
   onNodeAdd?: (parentKey: React.Key | null, node: TreeNode) => void;
   onAddMaterial?: (nodeKey: React.Key) => void;
+  outlineId?: string | number;
+  readOnly?: boolean;
 }
 
+const items: MenuProps['items'] = [
+  {
+    key: 'short',
+    label: '短篇',
+  },
+  {
+    key: 'medium',
+    label: '中篇',
+  },
+  {
+    key: 'long',
+    label: '长篇',
+  },
+];
 // 抽离节点编辑组件以优化性能
 const NodeTitle: React.FC<{
   node: TreeNode;
-  editingNode: { title: string; description: string };
+  editingNode: { title: string; description: string; count_style?: string };
   onTitleChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
   onTitleBlur: () => void;
@@ -33,6 +61,7 @@ const NodeTitle: React.FC<{
   onAddMaterial?: () => void;
   onAddChild?: () => void;
   onDelete?: () => void;
+  onMenuSelect?: (key: string) => void;
 }> = React.memo(
   ({
     node,
@@ -44,6 +73,7 @@ const NodeTitle: React.FC<{
     onAddMaterial,
     onAddChild,
     onDelete,
+    onMenuSelect,
   }) => {
     const level = node.level;
 
@@ -66,12 +96,12 @@ const NodeTitle: React.FC<{
     };
 
     return (
-      <div className={styles.nodeContent}>
-        <div
-          className={styles.inputWrapper}
-          onMouseEnter={handleInputMouseEnter}
-          onMouseLeave={handleInputMouseLeave}
-        >
+      <div
+        className={styles.nodeContent}
+        onMouseEnter={handleInputMouseEnter}
+        onMouseLeave={handleInputMouseLeave}
+      >
+        <div className={styles.inputWrapper}>
           <Input.TextArea
             autoSize={{ minRows: 1, maxRows: 6 }}
             value={editingNode.title}
@@ -90,13 +120,26 @@ const NodeTitle: React.FC<{
         </div>
         <div className={styles.nodeActions}>
           {level < 3 && (
-            <FileAddOutlined
-              className={styles.actionIcon}
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddMaterial?.();
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items,
+                selectable: true,
+                selectedKeys: editingNode.count_style
+                  ? [editingNode.count_style]
+                  : undefined,
+                onClick: ({ key }) => onMenuSelect?.(key as string),
               }}
-            />
+              placement="bottomLeft"
+            >
+              <BarsOutlined
+                className={styles.actionIcon}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddMaterial?.();
+                }}
+              />
+            </Dropdown>
           )}
           {level < 3 && (
             <PlusOutlined
@@ -120,47 +163,97 @@ const NodeTitle: React.FC<{
   },
 );
 
-const InteractiveTree: React.FC<InteractiveTreeProps> = ({
-  onNodeDelete,
-  onNodeAdd,
-  onAddMaterial,
-}) => {
-  const [treeData, setTreeData] = useState<TreeNode[]>([
-    {
-      key: '1',
-      title: '第一章',
-      description: '章节描述',
-      level: 1,
-      children: [
-        {
-          key: '1-1',
-          title: '1.1 节',
-          description: '小节描述',
-          level: 2,
-          children: [
-            {
-              key: 'node-3',
-              title: '新建节点 1',
-              description: '',
-              level: 3,
-            },
-            {
-              key: 'node-2',
-              title: '新建节点2',
-              description: '',
-              level: 3,
-            },
-            {
-              key: 'node-4',
-              title: '新建节点 3',
-              description: '',
-              level: 3,
-            },
-          ],
-        },
-      ],
+const InteractiveTree = forwardRef<
+  {
+    getTreeData: () => TreeNode[];
+    getOutlineTitle: () => string;
+    getInteractiveTreeData: () => {
+      treeData: TreeNode[];
+      outlineTitle: string;
+    };
+  },
+  InteractiveTreeProps
+>(({ onNodeDelete, onNodeAdd, onAddMaterial, outlineId, readOnly }, ref) => {
+  const [treeData, setTreeData] = useState<TreeNode[]>([]);
+  const [outlineTitle, setOutlineTitle] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  useImperativeHandle(ref, () => ({
+    getTreeData: () => {
+      return treeData;
     },
-  ]);
+    getOutlineTitle: () => {
+      return outlineTitle;
+    },
+    getInteractiveTreeData: () => {
+      return {
+        treeData,
+        outlineTitle,
+      };
+    },
+  }));
+
+  // 从props获取outline_id
+  useEffect(() => {
+    const fetchOutlineData = async () => {
+      if (outlineId) {
+        setLoading(true);
+        try {
+          const response = await fetchWithAuthNew<any>(
+            `/api/v1/writing/outlines/${outlineId}`,
+          );
+          if (response && response.sub_paragraphs) {
+            // 直接使用接口返回的sub_paragraphs作为树节点数据
+            setTreeData(response.sub_paragraphs);
+            setOutlineTitle(response.title);
+          }
+        } catch (error) {
+          console.error('获取大纲数据失败:', error);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        // 如果没有提供outline_id，使用默认数据
+        setTreeData([
+          {
+            key: '1',
+            title: '第一章',
+            description: '章节描述',
+            level: 1,
+            children: [
+              {
+                key: '1-1',
+                title: '1.1 节',
+                description: '小节描述',
+                level: 2,
+                children: [
+                  {
+                    key: '1-1-1',
+                    title: '1.1.1 节',
+                    description: '',
+                    level: 3,
+                  },
+                  {
+                    key: '1-1-2',
+                    title: '1.1.2 节',
+                    description: '',
+                    level: 3,
+                  },
+                  {
+                    key: '1-1-3',
+                    title: '1.1.3 节',
+                    description: '',
+                    level: 3,
+                  },
+                ],
+              },
+            ],
+          },
+        ]);
+      }
+    };
+
+    fetchOutlineData();
+  }, [outlineId]);
 
   // 获取所有第一级和第二级节点的 key
   const getDefaultExpandedKeys = useCallback((nodes: TreeNode[]): string[] => {
@@ -176,59 +269,108 @@ const InteractiveTree: React.FC<InteractiveTreeProps> = ({
     return keys;
   }, []);
 
-  // 获取当前树中最大的数字 key
-  const getMaxNodeNumber = useCallback((nodes: TreeNode[]): number => {
-    let maxNum = 0;
-    const extractNumber = (key: React.Key) => {
-      const match = String(key).match(/\d+$/);
-      return match ? parseInt(match[0], 10) : 0;
-    };
-
-    const traverse = (node: TreeNode) => {
-      const num = extractNumber(node.key);
-      maxNum = Math.max(maxNum, num);
-      if (node.children) {
-        node.children.forEach(traverse);
+  // 获取父节点下的最大子节点索引
+  const getMaxChildIndex = useCallback(
+    (nodes: TreeNode[], parentKey: React.Key | null): number => {
+      if (!parentKey) {
+        // 如果是顶级节点，找出所有顶级节点中的最大索引
+        return nodes.reduce((max, node) => {
+          const index = parseInt(String(node.key), 10);
+          return isNaN(index) ? max : Math.max(max, index);
+        }, 0);
       }
-    };
 
-    nodes.forEach(traverse);
-    return maxNum;
-  }, []);
+      // 递归查找父节点及其子节点
+      const findMaxChildIndex = (
+        nodeList: TreeNode[],
+        targetKey: React.Key,
+      ): number => {
+        for (const node of nodeList) {
+          if (node.key === targetKey) {
+            // 找到目标节点，计算其子节点的最大索引
+            if (!node.children || node.children.length === 0) {
+              return 0;
+            }
 
-  const [nodeCounter, setNodeCounter] = useState(
-    () => getMaxNodeNumber(treeData) + 1,
+            return node.children.reduce((max, child) => {
+              const parts = String(child.key).split('-');
+              const lastIndex = parseInt(parts[parts.length - 1], 10);
+              return isNaN(lastIndex) ? max : Math.max(max, lastIndex);
+            }, 0);
+          }
+
+          // 如果当前节点有子节点，递归查找
+          if (node.children && node.children.length > 0) {
+            const result = findMaxChildIndex(node.children, targetKey);
+            if (result > 0) {
+              return result;
+            }
+          }
+        }
+
+        return 0; // 如果没有找到目标节点或没有子节点
+      };
+
+      return findMaxChildIndex(nodes, parentKey);
+    },
+    [],
   );
+
+  // 生成新节点的键
+  const generateNodeKey = useCallback(
+    (parentKey: React.Key | null): string => {
+      if (!parentKey) {
+        // 顶级节点，格式为数字
+        const maxIndex = getMaxChildIndex(treeData, null);
+        return String(maxIndex + 1);
+      }
+
+      // 子节点，格式为 parentKey-index
+      const maxIndex = getMaxChildIndex(treeData, parentKey);
+      return `${parentKey}-${maxIndex + 1}`;
+    },
+    [treeData, getMaxChildIndex],
+  );
+
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() =>
     getDefaultExpandedKeys(treeData),
   );
   const [editingNodes, setEditingNodes] = useState<
-    Record<string, { title: string; description: string }>
+    Record<string, { title: string; description: string; count_style?: string }>
   >({});
 
   useEffect(() => {
     const initialEditingNodes: Record<
       string,
-      { title: string; description: string }
+      { title: string; description: string; count_style?: string }
     > = {};
     const initNodes = (nodes: TreeNode[]) => {
       nodes.forEach((node) => {
         initialEditingNodes[node.key as string] = {
           title: node.title,
           description: node.description || '',
+          count_style: node.count_style,
         };
         if (node.children) {
           initNodes(node.children);
         }
       });
     };
-    initNodes(treeData);
-    setEditingNodes(initialEditingNodes);
-  }, [treeData]);
+
+    if (treeData && treeData.length > 0) {
+      initNodes(treeData);
+      setEditingNodes(initialEditingNodes);
+
+      // 只在初始加载时设置默认展开的节点，而不是每次treeData更新时
+      if (expandedKeys.length === 0) {
+        setExpandedKeys(getDefaultExpandedKeys(treeData));
+      }
+    }
+  }, [treeData, getDefaultExpandedKeys, expandedKeys.length]);
 
   // 使用 useCallback 优化函数
   const updateTreeData = useCallback((newData: TreeNode[]) => {
-    console.log('树形数据更新:', JSON.stringify(newData, null, 2));
+    console.log('树形数据更新:', newData);
     setTreeData(newData);
   }, []);
 
@@ -297,8 +439,7 @@ const InteractiveTree: React.FC<InteractiveTreeProps> = ({
 
   const addChildNode = useCallback(
     (parentKey: React.Key | null) => {
-      const newKey = `node-${nodeCounter}`;
-      setNodeCounter((prev) => prev + 1);
+      const newKey = generateNodeKey(parentKey);
 
       const parentLevel = parentKey ? getNodeLevel(treeData, parentKey) : 0;
       const newNode: TreeNode = {
@@ -325,30 +466,58 @@ const InteractiveTree: React.FC<InteractiveTreeProps> = ({
 
       onNodeAdd?.(parentKey, newNode);
     },
-    [nodeCounter, treeData, onNodeAdd, addNode, getNodeLevel, updateTreeData],
+    [
+      treeData,
+      onNodeAdd,
+      addNode,
+      getNodeLevel,
+      updateTreeData,
+      generateNodeKey,
+    ],
   );
 
   const onDrop: TreeProps['onDrop'] = (info) => {
+    // 在拖拽前保存当前的展开状态
+    const currentExpandedKeys = [...expandedKeys];
+
     const dropKey = info.node.key;
     const dragKey = info.dragNode.key;
     const dropPos = info.node.pos.split('-');
     const dropPosition =
       info.dropPosition - Number(dropPos[dropPos.length - 1]);
 
+    // 获取节点的层级
     const dragLevel = getNodeLevel(treeData, dragKey);
     const dropLevel = getNodeLevel(treeData, dropKey);
 
-    // 如果是放到节点上，需要检查目标节点的层级
+    // 完全禁止跨层级移动
+    // 如果是放到节点上（作为子节点），不允许
     if (dropPosition === 0) {
-      const targetLevel = dropLevel + 1;
-      if (dragLevel !== targetLevel) {
-        return;
-      }
-    } else {
-      // 如果是放到节点前后，需要检查是否同级
-      if (dragLevel !== dropLevel) {
-        return;
-      }
+      console.log('不允许将节点作为子节点添加');
+      return;
+    }
+
+    // 如果是放到节点前后，必须是同级节点
+    if (dragLevel !== dropLevel) {
+      console.log('只能在同级节点之间拖拽');
+      return;
+    }
+
+    // 获取父节点键
+    const getParentKey = (key: string): string | null => {
+      const parts = key.split('-');
+      return parts.length > 1 ? parts.slice(0, -1).join('-') : null;
+    };
+
+    const dragKeyStr = String(dragKey);
+    const dropKeyStr = String(dropKey);
+    const dragParent = getParentKey(dragKeyStr);
+    const dropParent = getParentKey(dropKeyStr);
+
+    // 必须有相同的父节点
+    if (dragParent !== dropParent) {
+      console.log('只能在同一父节点下的节点之间拖拽');
+      return;
     }
 
     const data = [...treeData];
@@ -402,6 +571,11 @@ const InteractiveTree: React.FC<InteractiveTreeProps> = ({
     }
 
     updateTreeData(data);
+
+    // 在数据更新后恢复原来的展开状态
+    setTimeout(() => {
+      setExpandedKeys(currentExpandedKeys);
+    }, 0);
   };
 
   const updateNodeInTree = useCallback(
@@ -475,6 +649,22 @@ const InteractiveTree: React.FC<InteractiveTreeProps> = ({
         }
       };
 
+      const handleMenuSelect = (selectedKey: string) => {
+        setEditingNodes((prev) => ({
+          ...prev,
+          [node.key as string]: {
+            ...prev[node.key as string],
+            count_style: selectedKey,
+          },
+        }));
+
+        const newTreeData = updateNodeInTree(treeData, node.key, (n) => ({
+          ...n,
+          count_style: selectedKey,
+        }));
+        updateTreeData(newTreeData);
+      };
+
       return (
         <NodeTitle
           node={node}
@@ -490,6 +680,7 @@ const InteractiveTree: React.FC<InteractiveTreeProps> = ({
             updateTreeData(newData);
             onNodeDelete?.(node.key);
           }}
+          onMenuSelect={handleMenuSelect}
         />
       );
     },
@@ -510,47 +701,92 @@ const InteractiveTree: React.FC<InteractiveTreeProps> = ({
     dropNode,
     dropPosition,
   }) => {
+    // 获取节点的层级
     const dragLevel = getNodeLevel(treeData, dragNode.key);
     const dropLevel = getNodeLevel(treeData, dropNode.key);
 
-    // 如果是放到节点上，检查是否符合层级要求
+    // 完全禁止跨层级移动
+    // 如果是放到节点上（作为子节点），不允许
     if (dropPosition === 0) {
-      const targetLevel = dropLevel + 1;
-      return dragLevel === targetLevel;
+      return false;
     }
 
-    // 如果是放到节点前后，检查是否同级
-    return dragLevel === dropLevel;
-  };
+    // 如果是放到节点前后，必须是同级节点
+    if (dragLevel !== dropLevel) {
+      return false;
+    }
 
+    // 获取父节点键
+    const getParentKey = (key: string): string | null => {
+      const parts = key.split('-');
+      return parts.length > 1 ? parts.slice(0, -1).join('-') : null;
+    };
+
+    const dragKey = String(dragNode.key);
+    const dropKey = String(dropNode.key);
+    const dragParent = getParentKey(dragKey);
+    const dropParent = getParentKey(dropKey);
+
+    // 必须有相同的父节点
+    return dragParent === dropParent;
+  };
+  const addChapter = useCallback(() => addChildNode(null), [addChildNode]);
   return (
     <div className={styles.interactiveTree}>
-      <Tree
-        className={styles.tree}
-        treeData={treeData}
-        titleRender={titleRender}
-        draggable
-        blockNode
-        allowDrop={allowDrop}
-        onDrop={onDrop}
-        expandedKeys={expandedKeys}
-        onExpand={useCallback((keys: React.Key[]) => {
-          console.log('展开/收起的节点:', keys);
-          setExpandedKeys(keys);
-        }, [])}
-        autoExpandParent={false}
-        selectable={false}
-      />
-      <Button
-        type="dashed"
-        icon={<PlusOutlined />}
-        className={styles.addChapterButton}
-        onClick={useCallback(() => addChildNode(null), [addChildNode])}
-      >
-        添加章节
-      </Button>
+      {readOnly && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: 'transparent',
+            zIndex: 2,
+          }}
+        ></div>
+      )}
+      <Spin spinning={loading}>
+        <div style={{ display: loading ? 'none' : 'block' }}>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Input
+              style={{ width: '80%', marginBottom: 20 }}
+              prefix="文章标题："
+              value={outlineTitle}
+              onChange={(e) => setOutlineTitle(e.target.value)}
+              placeholder="请输入文章标题"
+            />
+          </div>
+
+          <Tree
+            className={styles.tree}
+            treeData={treeData}
+            titleRender={titleRender}
+            draggable
+            blockNode
+            allowDrop={allowDrop}
+            onDrop={onDrop}
+            expandedKeys={expandedKeys}
+            onExpand={useCallback((keys: React.Key[]) => {
+              setExpandedKeys(keys);
+            }, [])}
+            autoExpandParent={false}
+            selectable={false}
+          />
+          {!readOnly && (
+            <Button
+              type="dashed"
+              icon={<PlusOutlined />}
+              className={styles.addChapterButton}
+              onClick={addChapter}
+            >
+              添加章节
+            </Button>
+          )}
+        </div>
+      </Spin>
     </div>
   );
-};
+});
 
 export default InteractiveTree;

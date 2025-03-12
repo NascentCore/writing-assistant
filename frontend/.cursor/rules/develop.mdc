@@ -4,13 +4,5 @@ globs:
 alwaysApply: false
 ---
 
-# Your rule content
-
 - The current project is built with umi Max, so when it comes to styles, the new styles should follow the cssModule specification, do not directly use the simple className, the existing content can continue to remain the original way
-- 路由跳转需要用 router 来执行，示例代码如下
-```ts
-import { useNavigate } from '@umijs/max';
-const navigate = useNavigate();
-navigate('目标路径')
-```
-- 编辑过程中，不要去删除已经注释掉的代码，应为这些代码还是有参考价值的
+

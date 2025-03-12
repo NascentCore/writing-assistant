@@ -20,6 +20,7 @@ import React, {
   useState,
 } from 'react';
 import { API_BASE_URL } from '../../config';
+import InteractiveTree from '../Products/components/InteractiveTree';
 import ChatSessionList, { ChatMessage } from './components/ChatSessionList';
 import styles from './index.module.less';
 
@@ -70,6 +71,60 @@ interface AIChatRef {
   addSelectedFile: (file: FileItem) => void;
 }
 
+// 创建一个包装组件来处理 InteractiveTree 的 ref
+const TreeWrapper = forwardRef<
+  {
+    getTreeData: () => any[];
+    getOutlineTitle: () => string;
+    getInteractiveTreeData: () => {
+      treeData: any[];
+      outlineTitle: string;
+    };
+  },
+  {
+    outlineId?: string | number;
+    readOnly?: boolean;
+    onGenerateLongDocument: (currentMessage: ChatMessage) => void;
+    currentMessage: ChatMessage;
+  }
+>(({ outlineId, readOnly, onGenerateLongDocument, currentMessage }, ref) => {
+  const handleGenerateDocument = async () => {
+    onGenerateLongDocument(currentMessage);
+
+    try {
+      // 先获取大纲数据
+      const outlineResponse = (ref as any)?.current?.getInteractiveTreeData();
+      // 调用大纲更新接口
+      await fetchWithAuthNew(`/api/v1/writing/outlines/${outlineId}`, {
+        method: 'PUT',
+        data: {
+          outline_id: outlineId,
+          title: outlineResponse?.outlineTitle || 'Untitled',
+          sub_paragraphs: outlineResponse?.treeData || [],
+        },
+      });
+
+      // 调用父组件的生成长文档方法
+    } catch (error) {
+      console.error('更新大纲失败', error);
+      message.error('更新大纲失败');
+      // 即使更新失败，也尝试生成长文档
+      // onGenerateLongDocument(currentMessage);
+    }
+  };
+
+  return (
+    <>
+      <InteractiveTree ref={ref} readOnly={readOnly} outlineId={outlineId} />
+      {!readOnly && (
+        <Button type="link" size="small" onClick={handleGenerateDocument}>
+          基于大纲生成长文档
+        </Button>
+      )}
+    </>
+  );
+});
+
 const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   // 获取当前路由信息
   const location = useLocation();
@@ -97,6 +152,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     return savedModel || '';
   });
   const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
+  const treeWrapperRef = useRef(null);
 
   // 当消息更新时，保存到 localStorage
   useEffect(() => {
@@ -282,7 +338,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     console.log('currentMessage', currentMessage);
 
     try {
-      // 使用antd的message组件显示提示
+      // 添加一条用户消息"请基于大纲生成全文"
+      const userMessage = createMessage('请基于大纲生成全文', true);
+      setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
 
       // 发送生成长文档请求
       const response = await fetchWithAuthNew<{
@@ -630,31 +688,34 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                 </Typography.Text>
                               ) : currentMessage.status === 'completed' ? (
                                 <Typography.Text type="success">
-                                  处理完成
-                                  <Button
-                                    type="link"
-                                    size="small"
-                                    onClick={() => {
-                                      history.push(
-                                        `/EditorPage?document_id=${currentMessage.document_id}`,
-                                      );
-                                    }}
-                                  >
-                                    查看结果
-                                  </Button>
-                                  {currentMessage.content_type ===
+                                  {currentMessage.content_type === 'outline'
+                                    ? '大纲生成完成'
+                                    : '全文生成完成'}
+                                  {currentMessage.content_type !==
                                     'outline' && (
                                     <Button
                                       type="link"
                                       size="small"
-                                      onClick={() =>
-                                        handleGenerateLongDocument(
-                                          currentMessage,
-                                        )
-                                      }
+                                      onClick={() => {
+                                        history.push(
+                                          `/EditorPage?document_id=${currentMessage.document_id}`,
+                                        );
+                                      }}
                                     >
-                                      生成长文档
+                                      查看结果
                                     </Button>
+                                  )}
+                                  {currentMessage.content_type ===
+                                    'outline' && (
+                                    <TreeWrapper
+                                      ref={treeWrapperRef}
+                                      outlineId={currentMessage.outline_id}
+                                      readOnly={messages.length > 3}
+                                      onGenerateLongDocument={
+                                        handleGenerateLongDocument
+                                      }
+                                      currentMessage={currentMessage}
+                                    />
                                   )}
                                 </Typography.Text>
                               ) : currentMessage.status === 'failed' ? (

@@ -7,16 +7,22 @@ export const routes = [
     name: '登录',
     path: '/Login',
     component: './Login',
-    hideInMenu: true, // 隐藏菜单栏
-    menuRender: false, //菜单栏存在，但是该路由不在菜单栏中显示
+    hideInMenu: true, // 菜单栏存在，但是该路由不在菜单栏中显示
+    menuRender: false, //隐藏菜单栏
   },
   {
-    name: '注册',
-    path: '/Register',
-    component: './Register',
+    name: '树形',
+    path: '/Products',
+    component: './Products',
     hideInMenu: true,
-    menuRender: false,
   },
+  // {
+  //   name: '注册',
+  //   path: '/Register',
+  //   component: './Register',
+  //   hideInMenu: true,
+  //   menuRender: false,
+  // },
   {
     name: '写作助手',
     path: '/WritingAssistant',
@@ -55,6 +61,13 @@ export const routes = [
     name: '编辑器',
     path: '/EditorPageA',
     component: './EditorPageA',
+    menuRender: false,
+  },
+  {
+    path: '/*',
+    component: '@/pages/404',
+    name: '404',
+    hideInMenu: true,
     menuRender: false,
   },
 ];

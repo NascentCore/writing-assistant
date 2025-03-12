@@ -23,6 +23,7 @@
     "html2pdf.js": "^0.10.2",
     "lodash": "^4.17.21",
     "markdown-it": "^14.1.0",
+    "react-copy-to-clipboard": "^5.1.0",
     "turndown": "^7.2.0"
   },
   "devDependencies": {
