@@ -3,6 +3,7 @@ from sqlalchemy.sql import func
 from app.database import Base
 
 class RagKnowledgeBaseType(Enum):
+    NONE = 0
     SYSTEM = 1
     USER = 2
 

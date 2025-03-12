@@ -659,6 +659,7 @@ async def chat(
 @router.post("/attachments", summary="知识库对话附件上传")
 async def upload_attachment(
     files: List[FastAPIUploadFile] = File(...),
+    save_to_kb: Optional[bool] = Body(default=False, description="是否保存到知识库"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -692,51 +693,56 @@ async def upload_attachment(
 
         # 过滤已存在的文件
         file_names = [file.filename for file in files]
-        existing_files = db.query(RagFile).filter(RagFile.kb_id == kb_id, RagFile.file_name.in_(file_names), RagFile.is_deleted == False).all()
+        existing_files = db.query(RagFile).filter(RagFile.file_name.in_(file_names), RagFile.user_id == current_user.user_id, RagFile.is_deleted == False).all()
         existing_file_names = [file.file_name for file in existing_files]
-        files = [file for file in files if file.filename not in existing_file_names]
+        new_files = [file for file in files if file.filename not in existing_file_names]
         
         result = []
         update_content_files = []
-        for file in files:
+        for new_file in new_files:
             file_id = f"file-{shortuuid.uuid()}"
-            file_location = upload_dir / f"{file_id}_{file.filename}" # 文件存储路径
+            file_location = upload_dir / f"{file_id}_{new_file.filename}" # 文件存储路径
             # 保存文件到磁盘
             try:
-                contents = await file.read()
+                contents = await new_file.read()
                 with open(file_location, "wb") as f:
                     f.write(contents)
                 # 从文件内容判断格式
                 file_format = get_file_format(str(file_location))
                 result.append({
                     "file_id": file_id,
-                    "file_name": file.filename,
+                    "file_name": new_file.filename,
                     "size": len(contents),
                     "content_type": file_format,
                 })
             except Exception as e:
-                logger.error(f"上传文件 {file.filename} 时发生错误: {str(e)}")
-                return APIResponse.error(message=f"上传文件 {file.filename} 时发生错误: {str(e)}")
+                logger.error(f"上传文件 {new_file.filename} 时发生错误: {str(e)}")
+                return APIResponse.error(message=f"上传文件 {new_file.filename} 时发生错误: {str(e)}")
             finally:
-                await file.close()
+                await new_file.close()
         
             # 提交RAG解析任务
             db_file = RagFile(
                 file_id=file_id,    
-                kb_id=kb_id,
-                kb_type=RagKnowledgeBaseType.USER,
                 user_id=current_user.user_id,
-                file_name=file.filename,
+                file_name=new_file.filename,
                 file_size=len(contents),
                 file_ext=file_format, 
                 file_path=str(file_location),
-                status=RagFileStatus.LOCAL_SAVED,
                 summary_small='',
                 summary_medium='',
                 summary_large='',
                 content='',
                 meta='',
             )
+            if save_to_kb:
+                db_file.kb_id = kb_id
+                db_file.kb_type = RagKnowledgeBaseType.USER
+                db_file.status = RagFileStatus.LOCAL_SAVED
+            else:
+                db_file.kb_id = ''
+                db_file.kb_type = RagKnowledgeBaseType.NONE
+                db_file.status = RagFileStatus.DONE
             db.add(db_file)
             db.commit() 
             # 同步解析内容，附件的内容马上要使用，所以进行同步解析
@@ -746,28 +752,28 @@ async def upload_attachment(
                 continue
             content = await parser.async_content(file_location)
             if not content.strip():
-                logger.error(f"upload_attachment 解析文件 {file.filename} 时发生错误: 文件内容为空")
+                logger.error(f"upload_attachment 解析文件 {new_file.filename} 时发生错误: 文件内容为空")
                 continue
             # 添加到更新内容列表
             update_content_files.append((file_id, content))
 
-        for file in existing_files:
+        for new_file in existing_files:
             result.append({
-                "file_id": file.file_id,
-                "file_name": file.file_name,
-                "size": file.file_size,
-                "content_type": file.file_ext,
+                "file_id": new_file.file_id,
+                "file_name": new_file.file_name,
+                "size": new_file.file_size,
+                "content_type": new_file.file_ext,
             })
-            if not file.content.strip():
-                parser = get_parser(file.file_ext)
+            if not new_file.content.strip():
+                parser = get_parser(new_file.file_ext)
                 if not parser:
-                    logger.error(f"upload_attachment 不支持解析的文件格式: {file.file_ext}")
+                    logger.error(f"upload_attachment 不支持解析的文件格式: {new_file.file_ext}")
                     continue
-                content = await parser.async_content(file.file_path)
+                content = await parser.async_content(new_file.file_path)
                 if not content.strip():
-                    logger.error(f"upload_attachment 解析文件 {file.file_name} 时发生错误: 文件内容为空")
+                    logger.error(f"upload_attachment 解析文件 {new_file.file_name} 时发生错误: 文件内容为空")
                     continue
-                update_content_files.append((file.file_id, content))
+                update_content_files.append((new_file.file_id, content))
         
         # 更新内容
         for file_id, content in update_content_files:
