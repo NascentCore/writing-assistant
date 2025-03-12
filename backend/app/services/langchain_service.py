@@ -497,11 +497,20 @@ class OutlineGenerator:
                             parent.children = []
                         parent.children.append(p)
             
-            # 获取RAG搜索结果（如果启用）
+            # 一次性获取RAG搜索结果（如果启用）
             rag_context = ""
             if self.use_rag:
+                # 构建完整的搜索查询
+                search_query = f"关于主题：{outline.title}，需要生成一篇完整的文章。文章大纲如下：\n"
+                for p in paragraphs:
+                    search_query += f"- {p.title}"
+                    if p.description:
+                        search_query += f"：{p.description}"
+                    search_query += "\n"
+                
+                logger.info(f"执行一次性RAG查询 [outline_id={outline_id}]")
                 rag_context = self._get_rag_context(
-                    question=f"关于主题：{outline.title}，需要生成一篇完整的文章",
+                    question=search_query,
                     user_id=user_id,
                     kb_ids=kb_ids,
                     context_msg="生成全文内容"
@@ -546,21 +555,13 @@ class OutlineGenerator:
                     # 为1级段落生成内容
                     count_style = paragraph.count_style or "medium"
                     
-                    # 获取特定段落的RAG搜索结果
-                    paragraph_rag_context = self._get_rag_context(
-                        question=f"关于主题：{paragraph.title}，{paragraph.description or ''}",
-                        user_id=user_id,
-                        kb_ids=kb_ids,
-                        context_msg=f"生成段落内容: {paragraph.title}"
-                    )
-                    
-                    # 修改_generate_paragraph_content方法调用，传入RAG上下文
+                    # 使用全局RAG上下文生成内容
                     content = self._generate_paragraph_content(
                         outline.title, 
                         paragraph, 
                         sub_titles, 
                         count_style,
-                        rag_context + paragraph_rag_context
+                        rag_context
                     )
                     
                     # 添加到Markdown
@@ -611,8 +612,36 @@ class OutlineGenerator:
         
         {rag_context}
         
-        请生成一个字数在{word_count_range}字之间的内容，内容应该符合章节描述，并且与整体文章主题保持一致。
-        内容应该有逻辑性、连贯性，并且包含足够的细节和例子。
+        请遵循以下要求生成内容：
+        1. 格式要求：
+           - 每个段落必须有清晰的主题句
+           - 每个观点必须有具体的论据和例子支持
+           - 段落之间使用恰当的过渡词衔接
+           - 使用统一的写作语气和风格
+           
+           段落层级编号规范：
+           - 二级标题使用：（一）（二）（三）（四）...
+           - 三级标题使用：1、2、3、4...
+           - 四级标题使用：(1)(2)(3)(4)...
+           - 五级标题使用：①②③④...
+           严格遵循以上编号规范，确保全文格式统一。
+           
+           注意：不要在内容开头重复章节标题，因为标题会在其他地方自动添加。直接从正文内容开始。
+        
+        2. 内容要求：
+           - 字数控制在{word_count_range}字之间
+           - 确保内容与整体文章主题"{article_title}"保持一致
+           - 与文章其他部分建立明确的逻辑关联
+           - 合理引用和整合知识库提供的相关内容
+           - 每个子主题都要得到充分展开
+           - 所有子主题必须按照上述编号规范进行编号
+        
+        3. 连贯性要求：
+           - 在开头部分，简要回顾上文的关键内容（如果不是第一个段落）
+           - 在结尾部分，预示下文将要讨论的内容（如果不是最后一个段落）
+           - 使用适当的过渡语句，确保段落间的自然衔接
+        
+        请生成符合以上要求的段落内容。内容应该专业、严谨，同时保持生动有趣。确保严格遵循段落编号规范，不得混用不同的编号方式。记住：不要在内容中包含章节标题，直接从正文内容开始。
         """
         
         try:
