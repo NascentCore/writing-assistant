@@ -13,6 +13,7 @@ export default defineConfig({
   // },
   // mako: {},
   mfsu: {},
+  hash: true,
   locale: {
     default: 'zh-CN', // 默认语言
     antd: true, // 启用 antd 国际化
