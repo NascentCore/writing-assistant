@@ -597,6 +597,31 @@ async def chat(
         db.add(user_question)
         db.commit()
 
+        logger.info(json.dumps({
+            "session_id": session_id,
+            "message_id": question_message_id,
+            "user_id": current_user.user_id,
+            "kb_ids": kb_ids,
+            "question": request.question,
+            "custom_prompt": custom_prompt,
+            "history": history,
+            "streaming": request.streaming,
+            "networking": settings.RAG_CHAT_NETWORKING,
+            "product_source": settings.RAG_CHAT_PRODUCT_SOURCE,
+            "rerank": settings.RAG_CHAT_RERANK,
+            "only_need_search_results": settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
+            "hybrid_search": settings.RAG_CHAT_HYBRID_SEARCH,
+            "max_token": settings.RAG_CHAT_MAX_TOKENS,
+            "api_base": model['base_url'],
+            "api_key": model['api_key'],
+            "model": model['model'],
+            "api_context_length": settings.RAG_CHAT_API_CONTEXT_LENGTH,
+            "chunk_size": settings.RAG_CHAT_CHUNK_SIZE,
+            "top_p": settings.RAG_CHAT_TOP_P,
+            "top_k": settings.RAG_CHAT_TOP_K,
+            "temperature": settings.RAG_CHAT_TEMPERATURE
+        }, ensure_ascii=False))
+
         streaming = request.streaming
 
         response = await rag_api_async.chat(
