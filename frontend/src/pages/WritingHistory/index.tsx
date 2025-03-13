@@ -678,7 +678,11 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                       size="small"
                                       onClick={() => {
                                         history.push(
-                                          `/EditorPage?document_id=${currentMessage.document_id}`,
+                                          `/EditorPage?document_id=${
+                                            currentMessage.document_id
+                                          }&pre-id=${new URLSearchParams(
+                                            location.search,
+                                          ).get('id')}`,
                                         );
                                       }}
                                     >

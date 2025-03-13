@@ -74,7 +74,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   // 获取当前路由信息
   const location = useLocation();
 
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState<string | undefined>(undefined);
   const [items, setItems] = useState<AttachmentsProps['items']>([]);
   const [open, setOpen] = useState(false);
 
@@ -82,13 +82,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   // 根据 URL 参数初始化消息状态
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const query = new URLSearchParams(location.search);
-    const sessionIdFromUrl = query.get('id');
-    return sessionIdFromUrl
-      ? []
-      : [createMessage('你好，我是你的AI助手', false)];
-  });
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // 刷新会话列表的函数
   const [refreshSessionsList, setRefreshSessionsList] = useState<
@@ -125,7 +119,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   // 创建新会话
   const createNewSession = useCallback(() => {
     setActiveSessionId(null);
-    setMessages([createMessage('你好，我是你的AI助手', false)]);
+    setMessages([]);
     setSelectedFiles([]);
     setValue('');
 
@@ -133,7 +127,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     localStorage.removeItem(SESSION_STORAGE_KEY);
 
     // 清除 URL 中的会话 ID 参数
-    history.push('/AiChat');
+    history.push(location.pathname);
   }, []);
 
   // 添加一个函数来检查是否在底部附近
@@ -285,13 +279,13 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       const savedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
       if (savedSessionId) {
         // 更新URL，添加会话ID参数
-        history.push(`/AiChat?id=${savedSessionId}`);
+        history.push(`${location.pathname}?id=${savedSessionId}`);
       }
     }
   }, [location.search, activeSessionId, history]);
 
   const handleSubmit = async () => {
-    if (!value.trim()) return;
+    if (!value || !value.trim()) return;
 
     const userMessage = createMessage(value, true, selectedFiles);
     setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
@@ -307,6 +301,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           '/api/v1/rag/chat/session',
           {
             method: 'POST',
+            data: {},
           },
         );
 
@@ -321,7 +316,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           }
 
           // 更新路由，添加会话ID参数
-          history.push(`/AiChat?id=${currentSessionId}`);
+          history.push(`${location.pathname}?id=${currentSessionId}`);
         }
       } catch (error) {
         console.error('创建会话失败:', error);
@@ -642,6 +637,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
             <div>
               <Sender
                 ref={senderRef}
+                placeholder="给AI助手发送消息"
                 style={{
                   marginTop: 12,
                 }}

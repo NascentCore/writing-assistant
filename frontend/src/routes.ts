@@ -24,26 +24,26 @@ export const routes = [
   //   menuRender: false,
   // },
   {
+    name: 'AI对话',
+    path: '/AiChat',
+    component: './AiChat',
+  },
+  {
     name: '写作助手',
     path: '/WritingAssistant',
     component: './WritingAssistant',
-  },
-  {
-    name: '个人知识库',
-    path: '/PersonalKnowledge',
-    component: './PersonalKnowledge',
   },
   {
     name: '系统知识库',
     path: '/SystemKnowledge',
     component: './SystemKnowledge',
   },
-
   {
-    name: 'AI对话',
-    path: '/AiChat',
-    component: './AiChat',
+    name: '个人知识库',
+    path: '/PersonalKnowledge',
+    component: './PersonalKnowledge',
   },
+
   {
     name: '历史记录',
     path: '/WritingHistory',
@@ -57,12 +57,12 @@ export const routes = [
     menuRender: false,
     hideInMenu: true,
   },
-  {
-    name: '编辑器',
-    path: '/EditorPageA',
-    component: './EditorPageA',
-    menuRender: false,
-  },
+  // {
+  //   name: '编辑器',
+  //   path: '/EditorPageA',
+  //   component: './EditorPageA',
+  //   menuRender: false,
+  // },
   {
     path: '/*',
     component: '@/pages/404',

@@ -1,6 +1,6 @@
 import { API_BASE_URL } from '@/config';
 import { fetchWithAuth } from '@/utils/fetch';
-import { useLocation, useModel, useNavigate } from '@umijs/max';
+import { history, useLocation, useModel } from '@umijs/max';
 import { useDebounceFn } from 'ahooks';
 import { AiEditor } from 'aieditor';
 import 'aieditor/dist/style.css';
@@ -42,8 +42,6 @@ function App() {
     // 如果 URL 查询参数中没有 document_id，则返回null
     return null;
   });
-
-  const navigate = useNavigate();
 
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [outlineData, setOutlineData] = useState<OutlineNode[]>([]);
@@ -107,6 +105,12 @@ function App() {
           const result = await response.json();
           const content = result.data.content || '';
           setDocument(result.data);
+          if (result.data.session_ids.length) {
+            // 更新路由，添加会话ID参数
+            const query = new URLSearchParams(location.search);
+            query.set('id', result.data.session_ids[0]);
+            history.push(`${location.pathname}?${query.toString()}`);
+          }
           // 创建临时 div 来解析内容
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = content;
@@ -164,9 +168,9 @@ function App() {
   // }, [currentDocId, loadDocumentContent]);
 
   // 生成随机文件ID
-  const generateFileId = () => {
-    return 'file-' + Math.random().toString(36).substr(2, 9);
-  };
+  // const generateFileId = () => {
+  //   return 'file-' + Math.random().toString(36).substr(2, 9);
+  // };
 
   // 修改编辑器初始化代码，在组件挂载和currentDocId变化时执行
   useEffect(() => {
@@ -181,44 +185,44 @@ function App() {
               'Bold',
               'Italic',
               'Underline',
-              {
-                id: 'visit',
-                title: '插入到对话',
-                icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6V8H5V19H16V14H18V20C18 20.5523 17.5523 21 17 21H4C3.44772 21 3 20.5523 3 20V7C3 6.44772 3.44772 6 4 6H10ZM21 3V11H19L18.9999 6.413L11.2071 14.2071L9.79289 12.7929L17.5849 5H13V3H21Z"></path></svg>',
-                onClick: (editor) => {
-                  const content = editor.getSelectedText();
-                  if (!showAIChat) {
-                    setShowAIChat(true);
-                    setTimeout(() => {
-                      if (content && aiChatRef.current) {
-                        const newFile = {
-                          file_id: generateFileId(),
-                          name:
-                            content.slice(0, 20) +
-                            (content.length > 20 ? '...' : ''),
-                          size: new Blob([content]).size,
-                          type: 'text',
-                          status: 1,
-                          created_at: new Date().toISOString(),
-                        };
-                        aiChatRef.current.addSelectedFile(newFile);
-                      }
-                    }, 0);
-                  } else if (content && aiChatRef.current) {
-                    const newFile = {
-                      file_id: generateFileId(),
-                      name:
-                        content.slice(0, 20) +
-                        (content.length > 20 ? '...' : ''),
-                      size: new Blob([content]).size,
-                      type: 'text',
-                      status: 1,
-                      created_at: new Date().toISOString(),
-                    };
-                    aiChatRef.current.addSelectedFile(newFile);
-                  }
-                },
-              },
+              // {
+              //   id: 'visit',
+              //   title: '插入到对话',
+              //   icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6V8H5V19H16V14H18V20C18 20.5523 17.5523 21 17 21H4C3.44772 21 3 20.5523 3 20V7C3 6.44772 3.44772 6 4 6H10ZM21 3V11H19L18.9999 6.413L11.2071 14.2071L9.79289 12.7929L17.5849 5H13V3H21Z"></path></svg>',
+              //   onClick: (editor) => {
+              //     const content = editor.getSelectedText();
+              //     if (!showAIChat) {
+              //       setShowAIChat(true);
+              //       setTimeout(() => {
+              //         if (content && aiChatRef.current) {
+              //           const newFile = {
+              //             file_id: generateFileId(),
+              //             name:
+              //               content.slice(0, 20) +
+              //               (content.length > 20 ? '...' : ''),
+              //             size: new Blob([content]).size,
+              //             type: 'text',
+              //             status: 1,
+              //             created_at: new Date().toISOString(),
+              //           };
+              //           aiChatRef.current.addSelectedFile(newFile);
+              //         }
+              //       }, 0);
+              //     } else if (content && aiChatRef.current) {
+              //       const newFile = {
+              //         file_id: generateFileId(),
+              //         name:
+              //           content.slice(0, 20) +
+              //           (content.length > 20 ? '...' : ''),
+              //         size: new Blob([content]).size,
+              //         type: 'text',
+              //         status: 1,
+              //         created_at: new Date().toISOString(),
+              //       };
+              //       aiChatRef.current.addSelectedFile(newFile);
+              //     }
+              //   },
+              // },
             ],
           },
           onCreated: async (editor) => {
@@ -287,7 +291,14 @@ function App() {
           }}
         >
           <h1>售前方案写作助手</h1>
-          <Button style={{ marginLeft: 10 }} onClick={() => navigate(-1)}>
+          <Button
+            style={{ marginLeft: 10 }}
+            onClick={() => {
+              // 更新路由，添加会话ID参数
+              const query = new URLSearchParams(location.search);
+              history.push(`/WritingHistory?id=${query.get('pre-id') || ''}`);
+            }}
+          >
             返回
           </Button>
           <div className="header-buttons">
