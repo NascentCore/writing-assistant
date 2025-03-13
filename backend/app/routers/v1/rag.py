@@ -293,6 +293,13 @@ async def create_chat_session(
             user_id=current_user.user_id,
         )
         if request.doc_id:
+            # 检查文档是否存在
+            doc = db.query(Document).filter(
+                Document.doc_id == request.doc_id,
+                Document.user_id == current_user.user_id,
+            ).first()
+            if not doc:
+                return APIResponse.error(message="文档不存在")
             chat_session.doc_id = request.doc_id
 
         db.add(chat_session)
