@@ -25,7 +25,6 @@ import styles from './index.module.less';
 
 const md = markdownit({ html: true, breaks: true });
 
-const STORAGE_KEY = 'ai_chat_messages';
 const MODEL_STORAGE_KEY = 'ai_chat_model';
 const SESSION_STORAGE_KEY = 'current_chat_session_id';
 
@@ -104,24 +103,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     return savedModel || '';
   });
   const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
-
-  // 当消息更新时，保存到 localStorage
-  useEffect(() => {
-    if (
-      messages.length === 1 &&
-      messages[0].content ===
-        createMessage('你好，我是你的AI助手', false).content
-    ) {
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
-      // 确保消息中的文件信息也被保存
-      const messagesToSave = messages.map((msg: ChatMessage) => ({
-        ...msg,
-        files: msg.files || [], // 确保 files 字段存在
-      }));
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messagesToSave));
-    }
-  }, [messages]);
 
   // 获取模型列表
   useEffect(() => {

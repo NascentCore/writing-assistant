@@ -33,7 +33,6 @@ const renderMarkdown: BubbleProps['messageRender'] = (content) => (
   </Typography>
 );
 
-const STORAGE_KEY = 'ai_chat_messages';
 const MODEL_STORAGE_KEY = 'ai_chat_model';
 
 // 定义模型接口类型
@@ -100,7 +99,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     return savedModel || '';
   });
   const [messages, setMessages] = useState(() => {
-    const savedMessages = localStorage.getItem(STORAGE_KEY);
     if (savedMessages) {
       return JSON.parse(savedMessages);
     }
@@ -110,17 +108,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // 当消息更新时，保存到 localStorage
-  useEffect(() => {
-    if (
-      messages.length === 1 &&
-      messages[0].content === DEFAULT_MESSAGE.content
-    ) {
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-    }
-  }, [messages]);
+
 
   // 获取模型列表
   useEffect(() => {

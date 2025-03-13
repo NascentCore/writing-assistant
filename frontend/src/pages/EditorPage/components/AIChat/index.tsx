@@ -1,6 +1,5 @@
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
-  ClearOutlined,
   CloseCircleOutlined,
   MinusCircleOutlined,
   PlusCircleOutlined,
@@ -9,8 +8,7 @@ import {
 } from '@ant-design/icons';
 import type { BubbleProps } from '@ant-design/x';
 import { Bubble, Sender, XProvider, XStream } from '@ant-design/x';
-import { Button, Checkbox, Flex, Popover, Select, Typography } from 'antd';
-import type { CheckboxChangeEvent } from 'antd/es/checkbox';
+import { Button, Flex, Modal, Select, Typography } from 'antd';
 import markdownit from 'markdown-it';
 import React, {
   forwardRef,
@@ -19,6 +17,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import KnowledgeBaseList from './components/PersonalKnowledge';
 import styles from './index.module.less';
 
 const md = markdownit({ html: true, breaks: true });
@@ -83,9 +82,21 @@ interface AIChatRef {
   addSelectedFile: (file: FileItem) => void;
 }
 
+// 创建一个包装组件来处理 KnowledgeBaseList 的选择变更
+const KnowledgeBaseListWrapper: React.FC<{
+  onSelectChange: (selectedRowKeys: React.Key[]) => void;
+  onSelectFiles: (selectedFiles: any[]) => void;
+}> = ({ onSelectChange, onSelectFiles }) => {
+  return (
+    <KnowledgeBaseList
+      onSelectChange={onSelectChange}
+      onSelectFiles={onSelectFiles}
+    />
+  );
+};
+
 const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
   const [value, setValue] = useState('');
-  const [resetKey, setResetKey] = useState(0); // 添加重置键
   const [models, setModels] = useState<Model[]>([]);
   const [open, setOpen] = React.useState(false);
   const [selectedModel, setSelectedModel] = useState<ModelType>(() => {
@@ -99,11 +110,15 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
     }
     return [DEFAULT_MESSAGE];
   });
-  const [fileList, setFileList] = useState<FileItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
-  const [popoverVisible, setPopoverVisible] = useState(false);
-  const [tempSelectedFiles, setTempSelectedFiles] = useState<FileItem[]>([]);
+  const [selectedKnowledgeFileIds, setSelectedKnowledgeFileIds] = useState<
+    React.Key[]
+  >([]);
+  const [knowledgeModalVisible, setKnowledgeModalVisible] = useState(false);
+  const [selectedKnowledgeFiles, setSelectedKnowledgeFiles] = useState<any[]>(
+    [],
+  );
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -136,19 +151,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
     };
     fetchModels();
   }, []);
-
-  // 获取文件列表
-  const fetchFileList = async () => {
-    setLoading(true);
-    try {
-      const response = await fetchWithAuthNew('/api/v1/files');
-      setFileList(response.items);
-    } catch (error) {
-      console.error('获取文件列表失败:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // 添加一个函数来检查是否在底部附近
   const isNearBottom = () => {
@@ -272,12 +274,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
     }
   };
 
-  const handleClearChat = () => {
-    localStorage.removeItem(STORAGE_KEY);
-    setMessages([DEFAULT_MESSAGE]);
-    setResetKey((prev) => prev + 1); // 强制重置组件状态
-  };
-
   // 处理消息显示，添加avatar组件和markdown渲染
   const displayMessages = messages.map((msg: ChatMessage) => ({
     ...msg,
@@ -291,25 +287,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
     localStorage.setItem(MODEL_STORAGE_KEY, value);
   };
 
-  // 处理文件选择
-  const handleFileSelect = (file: FileItem, e: CheckboxChangeEvent) => {
-    e.stopPropagation();
-    if (e.target.checked) {
-      setTempSelectedFiles((prev) => [...prev, file]);
-    } else {
-      setTempSelectedFiles((prev) =>
-        prev.filter((f) => f.file_id !== file.file_id),
-      );
-    }
-  };
-
-  // 处理确认选择
-  const handleConfirm = () => {
-    setSelectedFiles(tempSelectedFiles);
-    setOpen(true);
-    setPopoverVisible(false);
-  };
-
   // 处理删除单个文件
   const handleDeleteFile = (fileId: string) => {
     setSelectedFiles((prev) => {
@@ -321,52 +298,60 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
     });
   };
 
-  // 在 Popover 打开时初始化临时选择
-  useEffect(() => {
-    if (popoverVisible) {
-      setTempSelectedFiles(selectedFiles);
-      fetchFileList(); // 在Popover打开时获取最新的文件列表
-    }
-  }, [popoverVisible]);
+  // 处理知识库文件选择回调
+  const handleKnowledgeFileSelect = (selectedRowKeys: React.Key[]) => {
+    setSelectedKnowledgeFileIds(selectedRowKeys);
+  };
 
-  // Popover 内容
-  const popoverContent = (
-    <div className={styles.popoverContent}>
-      <div className={styles.fileList}>
-        {loading ? (
-          <div className={styles.loading}>加载中...</div>
-        ) : fileList.length > 0 ? (
-          fileList.map((file) => (
-            <div key={file.file_id} className={styles.fileItem}>
-              <Checkbox
-                checked={tempSelectedFiles.some(
-                  (f) => f.file_id === file.file_id,
-                )}
-                onChange={(e) => handleFileSelect(file, e)}
-              >
-                <span className={styles.fileName}>{file.name}</span>
-                <span className={styles.fileSize}>
-                  {(file.size / 1024).toFixed(2)}KB
-                </span>
-              </Checkbox>
-            </div>
-          ))
-        ) : (
-          <div className={styles.emptyText}>暂无可用文件</div>
-        )}
-      </div>
-      <div className={styles.popoverFooter}>
-        <Button
-          type="primary"
-          size="small"
-          onClick={handleConfirm}
-          disabled={tempSelectedFiles.length === 0}
-        >
-          确定
-        </Button>
-      </div>
-    </div>
-  );
+  // 处理知识库文件数据选择回调
+  const handleKnowledgeFilesSelect = (selectedFiles: any[]) => {
+    setSelectedKnowledgeFiles(selectedFiles);
+  };
+
+  // 处理知识库文件选择
+  const handleKnowledgeModalOk = () => {
+    if (selectedKnowledgeFileIds.length > 0) {
+      // 直接使用已选中的文件数据
+      const selectedKnowledgeFilesFormatted = selectedKnowledgeFiles.map(
+        (file) => ({
+          file_id: file.file_id,
+          name: file.file_name,
+          size: file.file_size,
+          type: file.file_name.split('.').pop() || 'unknown',
+          status: file.status,
+          created_at: file.created_at,
+        }),
+      );
+
+      setSelectedFiles((prev) => [...prev, ...selectedKnowledgeFilesFormatted]);
+      setOpen(true);
+    }
+    setKnowledgeModalVisible(false);
+  };
+
+  // 暴露添加文件的方法
+  useImperativeHandle(ref, () => ({
+    addSelectedFile: (file: FileItem) => {
+      setSelectedFiles((prev) => {
+        const newFiles = [...prev, file];
+        setOpen(true);
+        return newFiles;
+      });
+    },
+  }));
+
+  const handleSelectedModel = (selectedModel: string) => {
+    if (models.length === 0) {
+      return '';
+    }
+
+    // 判断下selectedModel是否在models中
+    const model = models.find((model) => model.name === selectedModel);
+    if (model) {
+      return selectedModel;
+    }
+    return models[0].name;
+  };
 
   const headerNode = (
     <Sender.Header
@@ -400,31 +385,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
     </Sender.Header>
   );
 
-  // 暴露添加文件的方法
-  useImperativeHandle(ref, () => ({
-    addSelectedFile: (file: FileItem) => {
-      setSelectedFiles((prev) => {
-        const newFiles = [...prev, file];
-        setOpen(true);
-        return newFiles;
-      });
-    },
-  }));
-
-  const handleSelectedModel = (selectedModel: string) => {
-    if (models.length === 0) {
-      return '';
-    }
-
-    // 判断下selectedModel是否在models中
-    const model = models.find((model) => model.name === selectedModel);
-    if (model) {
-      return selectedModel;
-    }
-    return models[0].name;
-  };
   return (
-    <div key={resetKey}>
+    <div>
       <XProvider>
         <Flex
           vertical
@@ -456,7 +418,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                   fontSize: '16px',
                   fontWeight: 500,
                   marginRight: 20,
-                  marginTop: -7,
                 }}
               >
                 AI助手
@@ -466,7 +427,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                 value={handleSelectedModel(selectedModel)}
                 onChange={handleModelChange}
                 prefix={<SwapOutlined />}
-                style={{ marginBottom: 8 }}
               >
                 {models.map((model) => (
                   <Select.Option
@@ -480,11 +440,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
               </Select>
             </div>
             <div>
-              <Button
-                icon={<ClearOutlined />}
-                type="text"
-                onClick={handleClearChat}
-              />
               <Button
                 icon={<CloseCircleOutlined />}
                 type="text"
@@ -500,24 +455,32 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
               header={headerNode}
               value={value}
               prefix={
-                <Popover
-                  content={popoverContent}
-                  trigger="click"
-                  placement="top"
-                  open={popoverVisible}
-                  onOpenChange={setPopoverVisible}
-                >
-                  <Button
-                    type="text"
-                    icon={<PlusCircleOutlined style={{ fontSize: 18 }} />}
-                  />
-                </Popover>
+                <Button
+                  type="text"
+                  icon={<PlusCircleOutlined style={{ fontSize: 18 }} />}
+                  onClick={() => setKnowledgeModalVisible(true)}
+                />
               }
               onChange={(nextVal: string) => {
                 setValue(nextVal);
               }}
               onSubmit={handleSubmit}
             />
+
+            {/* 添加知识库选择Modal */}
+            <Modal
+              title="选择个人知识库文件"
+              open={knowledgeModalVisible}
+              onOk={handleKnowledgeModalOk}
+              onCancel={() => setKnowledgeModalVisible(false)}
+              width={800}
+              destroyOnClose
+            >
+              <KnowledgeBaseListWrapper
+                onSelectChange={handleKnowledgeFileSelect}
+                onSelectFiles={handleKnowledgeFilesSelect}
+              />
+            </Modal>
           </div>
         </Flex>
       </XProvider>

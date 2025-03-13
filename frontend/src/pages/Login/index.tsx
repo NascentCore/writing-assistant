@@ -32,6 +32,8 @@ const LoginPage: React.FC = () => {
         localStorage.setItem('token', response.access_token);
         localStorage.setItem('username', values.username);
         localStorage.setItem('admin', response.admin.toString());
+        localStorage.removeItem('current_chat_session_id');
+        localStorage.removeItem('current_document_id');
         window.location.href = '/';
       }
     } catch (error) {
@@ -54,7 +56,8 @@ const LoginPage: React.FC = () => {
         <div className="auth-box">
           <div className="login-form-container">
             <div className="system-title">
-              <div className="main-title">中咨路捷</div>
+              <div className="main-title">北京中咨路捷工程咨询有限公司</div>
+              <div className="main-title">知识管理系统</div>
               {/* <div className="sub-title">资产管理系统</div> */}
             </div>
 
@@ -100,7 +103,7 @@ const LoginPage: React.FC = () => {
             </Form>
           </div>
 
-          <div className="footer">Copyright © 2025 中咨路捷科技有限公司</div>
+          <div className="footer">Copyright © 2025 中咨路捷</div>
         </div>
       </div>
     </div>
