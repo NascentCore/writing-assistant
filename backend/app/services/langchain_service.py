@@ -626,13 +626,16 @@ class OutlineGenerator:
            - 五级标题使用：①②③④...
            严格遵循以上编号规范，确保全文格式统一。
            
-           注意：不要在内容开头重复章节标题，因为标题会在其他地方自动添加。直接从正文内容开始。
+           注意：
+           - 不要在内容开头重复章节标题，因为标题会在其他地方自动添加。直接从正文内容开始。
+           - 不要包含"参考文档说明"、"参考文档"、"参考文献"等辅助说明文本。
+           - 不要出现类似"根据xxx标准"、"参考了xxx文件"等说明性文字。
         
         2. 内容要求：
            - 字数控制在{word_count_range}字之间
            - 确保内容与整体文章主题"{article_title}"保持一致
            - 与文章其他部分建立明确的逻辑关联
-           - 合理引用和整合知识库提供的相关内容
+           - 合理引用和整合知识库提供的相关内容，但不要出现引用说明
            - 每个子主题都要得到充分展开
            - 所有子主题必须按照上述编号规范进行编号
         
@@ -641,7 +644,7 @@ class OutlineGenerator:
            - 在结尾部分，预示下文将要讨论的内容（如果不是最后一个段落）
            - 使用适当的过渡语句，确保段落间的自然衔接
         
-        请生成符合以上要求的段落内容。内容应该专业、严谨，同时保持生动有趣。确保严格遵循段落编号规范，不得混用不同的编号方式。记住：不要在内容中包含章节标题，直接从正文内容开始。
+        请生成符合以上要求的段落内容。内容应该专业、严谨，同时保持生动有趣。确保严格遵循段落编号规范，不得混用不同的编号方式。记住：不要在内容中包含章节标题，直接从正文内容开始。生成的内容应该是完整的正文，不要包含任何参考说明、文档说明等辅助文本。
         """
         
         try:
@@ -654,7 +657,28 @@ class OutlineGenerator:
             # 执行链
             result = chain.invoke({})
             
-            return result.content
+            # 过滤掉可能出现的参考说明文本
+            content = result.content
+            filtered_lines = []
+            skip_line = False
+            
+            for line in content.split('\n'):
+                # 跳过包含特定关键词的行
+                if any(keyword in line for keyword in [
+                    "参考文档", "参考文献", "参考说明", "文档说明",
+                    "根据标准", "依据标准", "参考了", "参考资料"
+                ]):
+                    skip_line = True
+                    continue
+                    
+                if skip_line and not line.strip():
+                    skip_line = False
+                    continue
+                    
+                if not skip_line:
+                    filtered_lines.append(line)
+            
+            return '\n'.join(filtered_lines)
             
         except Exception as e:
             logger.error(f"生成段落内容时出错: {str(e)}")
