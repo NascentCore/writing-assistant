@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 PARAGRAPH_GENERATION_TEMPLATE = """
 你是一位专业的写作助手，正在为一篇题为"{article_title}"的文章撰写内容。
 
+【用户需求】
+{user_prompt}
+
 【文章整体大纲】
 {outline_content}
 
@@ -652,7 +655,62 @@ class OutlineGenerator:
             # 返回一个基本的大纲结构，避免完全失败
             return f"# {outline.title}\n## 大纲生成失败，请重试\n(构建大纲内容时发生错误: {str(e)})"
 
-    def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    def _generate_article_title(self, user_prompt: str, outline_title: str, outline_content: str) -> str:
+        """
+        生成文章标题
+        
+        Args:
+            user_prompt: 用户需求
+            outline_title: 大纲标题
+            outline_content: 大纲内容
+            
+        Returns:
+            str: 生成的文章标题
+        """
+        logger.info("开始生成文章标题")
+        
+        title_prompt = f"""
+        请根据以下信息生成一个合适的文章标题：
+
+        【用户需求】
+        {user_prompt}
+
+        【大纲标题】
+        {outline_title}
+
+        【大纲结构】
+        {outline_content}
+
+        【要求】
+        1. 标题要简洁、准确、吸引人
+        2. 标题长度在10-30个字之间
+        3. 标题要体现文章的核心主题
+        4. 标题要符合学术写作风格
+        5. 直接返回标题文本，不要包含任何其他内容
+        """
+        
+        try:
+            # 创建标题生成提示
+            title_template = ChatPromptTemplate.from_template(title_prompt)
+            title_chain = title_template | self.llm
+            
+            # 生成标题
+            title_result = title_chain.invoke({})
+            generated_title = title_result.content.strip()
+            
+            # 验证标题
+            if not generated_title or len(generated_title) > 100:
+                generated_title = outline_title
+                logger.warning("生成的标题无效，使用大纲标题作为备选")
+            
+            logger.info(f"生成的文章标题: {generated_title}")
+            return generated_title
+            
+        except Exception as e:
+            logger.error(f"生成文章标题时出错: {str(e)}")
+            return outline_title
+
+    def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, user_prompt: str = "") -> Dict[str, Any]:
         """
         根据大纲生成完整内容
         
@@ -661,6 +719,7 @@ class OutlineGenerator:
             db_session: 数据库会话
             user_id: 用户ID，用于RAG搜索（如果启用）
             kb_ids: 知识库ID列表，用于RAG搜索（如果启用）
+            user_prompt: 用户的第一条消息，作为额外的提示词
             
         Returns:
             Dict: 包含生成内容的字典
@@ -684,11 +743,31 @@ class OutlineGenerator:
             # 构建完整大纲内容（用于提示词）
             outline_content = self._build_outline_content(outline, paragraphs)
             
+            # 生成内容
+            full_content = {
+                "title": "",
+                "outline_id": outline_id,
+                "content": "",
+                "markdown": "",
+                "html": "",
+                "outline_structure": []
+            }
+            
+            # 生成文章标题
+            full_content["title"] = self._generate_article_title(
+                user_prompt=user_prompt,
+                outline_title=outline.title,
+                outline_content=outline_content
+            )
+            
             # 一次性获取RAG搜索结果（如果启用）
             rag_context = ""
             if self.use_rag:
-                # 构建完整的搜索查询
-                search_query = f"关于主题：{outline.title}，需要生成一篇完整的文章。文章大纲如下：\n"
+                # 构建完整的搜索查询，使用生成的标题
+                search_query = f"关于主题：{full_content['title']}，需要生成一篇完整的文章。"
+                if user_prompt:
+                    search_query += f"\n用户需求：{user_prompt}"
+                search_query += "\n文章大纲如下：\n"
                 for p in paragraphs:
                     search_query += f"- {p.title}"
                     if p.description:
@@ -702,16 +781,6 @@ class OutlineGenerator:
                     kb_ids=kb_ids,
                     context_msg="生成全文内容"
                 )
-            
-            # 生成内容
-            full_content = {
-                "title": outline.title,
-                "outline_id": outline_id,
-                "content": "",
-                "markdown": "",
-                "html": "",
-                "outline_structure": []
-            }
             
             # 构建大纲结构
             outline_structure = []
@@ -775,12 +844,13 @@ class OutlineGenerator:
                 # 使用全局RAG上下文生成内容
                 logger.info(f"调用_generate_paragraph_content生成段落内容 [ID={paragraph.id}]")
                 content = self._generate_paragraph_content(
-                    outline.title, 
-                    paragraph, 
-                    sub_titles, 
-                    count_style,
-                    rag_context,
-                    outline_content
+                    article_title=full_content["title"], 
+                    paragraph=paragraph, 
+                    sub_titles=sub_titles, 
+                    count_style=count_style,
+                    rag_context=rag_context,
+                    outline_content=outline_content,
+                    user_prompt=user_prompt
                 )
                 
                 # 清理标题中的编号
@@ -868,7 +938,7 @@ class OutlineGenerator:
             logger.error(f"生成全文内容时出错: {str(e)}")
             raise
 
-    def _generate_paragraph_content(self, article_title: str, paragraph: SubParagraph, sub_titles: List[str], count_style: str, rag_context: str = "", outline_content: str = "") -> str:
+    def _generate_paragraph_content(self, article_title: str, paragraph: SubParagraph, sub_titles: List[str], count_style: str, rag_context: str = "", outline_content: str = "", user_prompt: str = "") -> str:
         """生成段落内容"""
         # 记录开始生成段落内容
         logger.info(f"开始生成段落内容 [段落ID={paragraph.id}, 标题='{paragraph.title}', 字数范围={count_style}]")
@@ -895,7 +965,8 @@ class OutlineGenerator:
             paragraph_description=paragraph.description or "无",
             sub_topics=sub_topics,
             rag_context=rag_context,
-            word_count_range=word_count_range
+            word_count_range=word_count_range,
+            user_prompt=user_prompt
         )
         
         # 记录提示词长度和内容
