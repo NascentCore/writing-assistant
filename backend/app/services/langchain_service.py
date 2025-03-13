@@ -18,24 +18,31 @@ logger = logging.getLogger(__name__)
 
 # 段落生成的提示词模板常量
 PARAGRAPH_GENERATION_TEMPLATE = """
-你是一位专业的写作助手，正在为一篇题为"{article_title}"的文章撰写内容。
+你是一位专业的写作助手，正在为一篇题为"{article_title}"的文章撰写每一章的内容。
 
 【用户需求】
 {user_prompt}
 
-【文章整体大纲】
-{outline_content}
-
-【当前段落信息】
-- 段落主题：{paragraph_title}
-- 段落描述：{paragraph_description}
-- 包含的子主题：
-{sub_topics}
+-------------------
 
 【参考资料】
 {rag_context}
 
-【写作要求】
+-------------------
+
+【文章整体大纲】
+{outline_content}
+
+-------------------
+
+【当前段落信息】
+- 段落主题：{paragraph_title}
+- 段落描述：{paragraph_description}
+- 大纲中定义的子主题：
+{sub_topics}
+
+-------------------
+
 
 【内容要求】
 - 字数范围：{word_count_range}字
@@ -43,6 +50,7 @@ PARAGRAPH_GENERATION_TEMPLATE = """
 - 充分展开每个子主题，确保逻辑清晰
 - 与文章其他部分建立明确的逻辑关联
 - 适当引用参考资料中的内容，但不要出现引用说明
+- 层级结构以段落信息为准
 
 【格式要求】
 - 使用markdown格式
@@ -305,6 +313,21 @@ class OutlineGenerator:
             logger.error(f"获取RAG搜索结果失败: {str(e)}")
             return None
 
+    def _clean_rag_content(self, rag_content: str) -> str:
+        """清理RAG返回的内容格式"""
+        # 移除markdown标题标记
+        cleaned = re.sub(r'^#+\s+', '', rag_content, flags=re.MULTILINE)
+        
+        # 移除元信息标记
+        cleaned = re.sub(r'\[无参考文档 ID\]', '', cleaned)
+        
+        # 移除编号格式
+        cleaned = re.sub(r'^[一二三四五六七八九十]+、', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'^（[一二三四五六七八九十]+）', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'^\d+[.、]', '', cleaned, flags=re.MULTILINE)
+        
+        return cleaned.strip()
+
     def _get_rag_context(self, question: str, user_id: Optional[str], kb_ids: Optional[List[str]], context_msg: str = "") -> str:
         """
         获取RAG上下文的通用方法
@@ -333,8 +356,10 @@ class OutlineGenerator:
             )
             
             if rag_response:
-                rag_context = f"\n{rag_response}\n\n"
-                logger.info("已将RAG响应文本添加到上下文中")
+                # 清理RAG返回的内容
+                cleaned_response = self._clean_rag_content(rag_response)
+                rag_context = f"\n{cleaned_response}\n\n"
+                logger.info("已清理并添加RAG响应文本到上下文中")
             else:
                 logger.warning("RAG响应内容无效或为空")
                 rag_context = "知识库搜索未返回有效内容。"
@@ -398,6 +423,14 @@ class OutlineGenerator:
             2. 多个段落，每个段落可以有不同的级别:
                - 1级段落: 主要段落，包含标题、描述和篇幅风格(short/medium/long)
                - 2级及以上段落: 子段落，包含标题和描述，但没有篇幅风格
+            3. 严格禁止在标题或层级标题中使用任何形式的编号，包括但不限于：
+               - 不要使用"第一章"、"第二章"等章节编号
+               - 不要使用"（一）"、"（二）"等中文编号
+               - 不要使用"1."、"2."等数字编号
+               - 不要使用"一、"、"二、"等中文序号
+               - 不要使用"1、"、"2、"等数字序号
+               - 不要使用"①"、"②"等特殊符号编号
+            4. 标题，描述中不能包含参考资料的应用的文件名称
             
            【返回格式】
            以JSON格式返回，格式如下:
@@ -771,7 +804,7 @@ class OutlineGenerator:
             rag_context = ""
             if self.use_rag:
                 # 构建完整的搜索查询，使用生成的标题
-                search_query = f"关于主题：{full_content['title']}，需要生成一篇完整的文章。"
+                search_query = f"关于主题：{full_content['title']}，需要生成一篇完整的文章。请提供参考资料，参考资料的文件名称不能出现在标题或描述中。并按照安条目顺序输出"
                 if user_prompt:
                     search_query += f"\n用户需求：{user_prompt}"
                 search_query += "\n文章大纲如下：\n"
@@ -961,7 +994,7 @@ class OutlineGenerator:
         clean_title = clean_numbering_from_title(paragraph.title)
         
         # 格式化子主题列表
-        sub_topics = "\n".join([f"- {clean_numbering_from_title(title)}" for title in sub_titles])
+        sub_topics = "\n".join([f"  - {clean_numbering_from_title(title)}" for title in sub_titles])
         logger.info(f"段落包含 {len(sub_titles)} 个子主题")
         
         # 使用常量模板
