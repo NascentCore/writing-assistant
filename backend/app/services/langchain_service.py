@@ -8,12 +8,104 @@ import re
 import markdown
 import concurrent.futures
 import json
+import time
 
 from app.utils.outline import build_paragraph_key, build_paragraph_data
 from app.models.outline import SubParagraph, Outline
 from app.rag.rag_api import rag_api
 
 logger = logging.getLogger(__name__)
+
+# 段落生成的提示词模板常量
+PARAGRAPH_GENERATION_TEMPLATE = """
+你是一位专业的写作助手，正在为一篇题为"{article_title}"的文章撰写内容。
+
+【文章整体大纲】
+{outline_content}
+
+【当前段落信息】
+- 段落主题：{paragraph_title}
+- 段落描述：{paragraph_description}
+- 包含的子主题：
+{sub_topics}
+
+【参考资料】
+{rag_context}
+
+【写作要求】
+
+【内容要求】
+- 字数范围：{word_count_range}字
+- 内容必须与文章主题"{article_title}"保持一致性
+- 充分展开每个子主题，确保逻辑清晰
+- 与文章其他部分建立明确的逻辑关联
+- 适当引用参考资料中的内容，但不要出现引用说明
+
+【格式要求】
+- 使用markdown格式
+- 不要添加任何编号，最终会通过markdown自动处理编号格式
+- 不要在内容开头重复章节标题，直接从正文内容开始
+- 不要包含"参考文档"、"参考文献"等辅助说明文本
+- 不要出现"根据xxx标准"、"参考了xxx文件"等说明性文字
+- 遵循以下层级规范来组织内容：
+  * 文章主标题使用"#"（已添加）
+  * 当前段落标题使用"##"（已添加）
+  * 如果有子主题，可以使用"###"来标记
+  * 更深层次的内容可以使用"####"及更多"#"
+- 注意：大纲中的描述内容已用括号括起来，以区分标题和描述
+
+【段落结构要求】
+- 每个段落必须有清晰的主题句
+- 每个观点必须有具体的论据和例子支持
+- 使用恰当的过渡词衔接段落
+- 保持统一的写作语气和风格
+- 根据提供的子主题列表自然组织内容，如有必要可使用适当的标题层级
+
+请生成一段专业、严谨且内容丰富的文本，根据提供的子主题自然组织内容。
+"""
+
+# 直接生成内容的提示词模板常量
+DIRECT_CONTENT_GENERATION_TEMPLATE = """
+你是一位专业的写作助手，请根据用户的写作需求生成一篇完整的文章。
+
+【用户需求】
+{prompt}
+
+【参考文件】
+{file_context}
+
+【参考资料】
+{rag_context}
+
+【写作要求】
+
+【内容要求】
+- 内容必须与用户需求保持一致
+- 确保文章结构完整，逻辑清晰
+- 适当引用参考资料中的内容，但不要出现引用说明
+- 每个段落都要有明确的主题和充分的论述
+
+【格式要求】
+- 使用markdown格式组织文章
+- 文章主标题使用"#"
+- 主要段落标题使用"##"
+- 如果有子主题，可以使用"###"来标记
+- 更深层次的内容可以使用"####"及更多"#"
+- 根据内容自然组织层级结构
+- 如果需要添加描述性内容，请使用括号将其括起来，以区分标题和描述，避免层级结构的歧义
+
+【段落结构要求】
+- 每个段落必须有清晰的主题句
+- 每个观点必须有具体的论据和例子支持
+- 使用恰当的过渡词衔接段落
+- 保持统一的写作语气和风格
+- 根据内容自然组织段落结构，确保层次分明
+
+请生成一篇结构完整、内容丰富的文章，确保符合以上要求。
+"""
+
+# 最大并发生成段落数
+MAX_CONCURRENT_GENERATIONS = 3
 
 def get_sub_paragraph_titles(paragraph: SubParagraph) -> List[str]:
     """
@@ -35,6 +127,32 @@ def get_sub_paragraph_titles(paragraph: SubParagraph) -> List[str]:
     
     collect_titles(paragraph)
     return titles
+
+# 清理标题中的编号
+def clean_numbering_from_title(title: str) -> str:
+    """
+    清理标题中的编号格式，如"第一章"、"（一）"、"1."等
+    
+    Args:
+        title: 原始标题
+        
+    Returns:
+        str: 清理后的标题
+    """
+    # 清理常见的编号格式
+    patterns = [
+        r'^第[零一二三四五六七八九十百千万亿]+章\s*',  # 第一章
+        r'^[（(][零一二三四五六七八九十]+[）)]\s*',    # （一）或(一)
+        r'^\d+[、.．]\s*',                           # 1、或1.
+        r'^\([0-9]+\)\s*',                          # (1)
+        r'^[①②③④⑤⑥⑦⑧⑨⑩]\s*'                       # ①②③等
+    ]
+    
+    result = title
+    for pattern in patterns:
+        result = re.sub(pattern, '', result)
+    
+    return result.strip()
 
 class OutlineGenerator:
     """使用LangChain调用大模型生成结构化大纲"""
@@ -205,7 +323,7 @@ class OutlineGenerator:
             )
             
             if rag_response:
-                rag_context = f"大模型回答:\n{rag_response}\n\n"
+                rag_context = f"\n{rag_response}\n\n"
                 logger.info("已将RAG响应文本添加到上下文中")
             else:
                 logger.warning("RAG响应内容无效或为空")
@@ -255,18 +373,23 @@ class OutlineGenerator:
             template = """
             你是一个专业的写作助手，请根据用户的写作需求生成一个结构化的文章大纲。
             
-            用户的写作需求是: {prompt}
+            【用户需求】
+            {prompt}
             
+            【参考文件】
             {file_context}
             
+            【参考资料】
             {rag_context}
             
+            【大纲要求】
             请生成一个包含以下内容的结构化大纲:
             1. 文章标题
             2. 多个段落，每个段落可以有不同的级别:
                - 1级段落: 主要段落，包含标题、描述和篇幅风格(short/medium/long)
                - 2级及以上段落: 子段落，包含标题和描述，但没有篇幅风格
             
+           【返回格式】
            以JSON格式返回，格式如下:
             {{
                 "title": "文章标题",
@@ -288,11 +411,12 @@ class OutlineGenerator:
                 ]
             }}
             
+            【注意事项】
             确保返回的是有效的JSON格式，不要包含任何注释或额外的文本。
-            注意:
             1. 只有1级段落才有 count_style 属性
             2. 所有段落都必须有 level 属性
             3. 所有段落都必须有 children 数组，即使为空
+            4. 在最终生成的文档中，描述内容将用括号括起来，以区分标题和描述，避免层级结构的歧义
             """
             
             # 创建提示
@@ -456,6 +580,78 @@ class OutlineGenerator:
             logger.error(f"保存大纲到数据库时出错: {str(e)}")
             raise
 
+    def _build_outline_content(self, outline: Outline, paragraphs: List[SubParagraph]) -> str:
+        """
+        构建完整的大纲内容，用于生成提示词
+        
+        Args:
+            outline: 大纲对象
+            paragraphs: 段落列表
+            
+        Returns:
+            str: 格式化的大纲内容
+        """
+        logger.info(f"开始构建大纲内容 [outline_id={outline.id}]")
+        
+        try:
+            # 构建段落树
+            paragraph_map = {p.id: p for p in paragraphs}
+            root_paragraphs = [p for p in paragraphs if p.parent_id is None]
+            
+            # 构建段落树结构
+            for p in paragraphs:
+                if p.parent_id:
+                    parent = paragraph_map.get(p.parent_id)
+                    if parent:
+                        if not hasattr(parent, 'children'):
+                            parent.children = []
+                        # 检查是否已经添加过这个子段落
+                        if p not in parent.children:
+                            parent.children.append(p)
+            
+            # 开始构建大纲内容
+            outline_content = f"# {outline.title}\n"
+            
+            def build_outline_text(paragraphs, level=0):
+                """
+                递归构建大纲文本
+                
+                Args:
+                    paragraphs: 段落列表
+                    level: 当前层级（0表示一级段落，1表示二级段落，以此类推）
+                """
+                result = []
+                for p in paragraphs:
+                    # 清理标题中的编号
+                    clean_title = clean_numbering_from_title(p.title)
+                    # 添加标题，一级段落使用二级标题(##)，子段落依次增加层级
+                    prefix = "#" * (level + 2)  # 一级段落使用##，二级段落使用###，依此类推
+                    result.append(f"{prefix} {clean_title}")
+                    
+                    # 添加描述（如果有）
+                    if p.description:
+                        # 将描述用括号括起来，避免层级结构歧义
+                        result.append(f"({p.description})")
+                    
+                    # 递归处理子段落
+                    if hasattr(p, 'children') and p.children:
+                        # 确保子段落按顺序排序
+                        sorted_children = sorted(p.children, key=lambda x: x.title)
+                        result.extend(build_outline_text(sorted_children, level + 1))
+                return result
+            
+            # 构建大纲文本
+            outline_text = build_outline_text(root_paragraphs)
+            outline_content += "\n".join(outline_text)
+            
+            logger.info(f"大纲内容构建完成 [outline_id={outline.id}, content_length={len(outline_content)}]")
+            return outline_content
+            
+        except Exception as e:
+            logger.error(f"构建大纲内容时出错: {str(e)}")
+            # 返回一个基本的大纲结构，避免完全失败
+            return f"# {outline.title}\n## 大纲生成失败，请重试\n(构建大纲内容时发生错误: {str(e)})"
+
     def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         根据大纲生成完整内容
@@ -485,17 +681,8 @@ class OutlineGenerator:
             if not paragraphs:
                 raise ValueError(f"大纲没有段落: {outline_id}")
             
-            # 构建段落树
-            paragraph_map = {p.id: p for p in paragraphs}
-            root_paragraphs = [p for p in paragraphs if p.parent_id is None]
-            
-            for p in paragraphs:
-                if p.parent_id:
-                    parent = paragraph_map.get(p.parent_id)
-                    if parent:
-                        if not hasattr(parent, 'children'):
-                            parent.children = []
-                        parent.children.append(p)
+            # 构建完整大纲内容（用于提示词）
+            outline_content = self._build_outline_content(outline, paragraphs)
             
             # 一次性获取RAG搜索结果（如果启用）
             rag_context = ""
@@ -528,17 +715,12 @@ class OutlineGenerator:
             
             # 构建大纲结构
             outline_structure = []
-            markdown_content = []  # 使用列表存储各部分内容
             
-            # 添加文档标题
-            markdown_content.append(f"# {outline.title}\n")
+            # 获取根段落
+            root_paragraphs = [p for p in paragraphs if p.parent_id is None]
             
-            # 递归生成内容
-            def generate_content_for_paragraph(paragraph, level=1, parent_structure=None):
-                # 获取子标题
-                sub_titles = get_sub_paragraph_titles(paragraph)
-                
-                # 创建结构节点
+            # 构建结构节点的函数
+            def build_structure_node(paragraph, level=1, parent_structure=None):
                 structure_node = {
                     "id": paragraph.id,
                     "title": paragraph.title,
@@ -551,33 +733,121 @@ class OutlineGenerator:
                 else:
                     parent_structure["children"].append(structure_node)
                 
-                # 只为1级段落生成内容
-                if level == 1:
-                    # 为1级段落生成内容
-                    count_style = paragraph.count_style or "medium"
-                    
-                    # 使用全局RAG上下文生成内容
-                    content = self._generate_paragraph_content(
-                        outline.title, 
-                        paragraph, 
-                        sub_titles, 
-                        count_style,
-                        rag_context
-                    )
-                    
-                    # 添加章节标题和内容
-                    chapter_number = len(outline_structure)
-                    markdown_content.append(f"\n## 第{self._number_to_chinese(chapter_number)}章 {paragraph.title}\n")
-                    markdown_content.append(f"\n{content}\n")
-                
                 # 递归处理子段落
                 if hasattr(paragraph, 'children') and paragraph.children:
                     for child in paragraph.children:
-                        generate_content_for_paragraph(child, level + 1, structure_node)
+                        build_structure_node(child, level + 1, structure_node)
+                        
+                return structure_node
             
-            # 开始递归生成
+            # 构建结构树
             for root_paragraph in root_paragraphs:
-                generate_content_for_paragraph(root_paragraph)
+                build_structure_node(root_paragraph)
+            
+            # 准备并发生成内容
+            markdown_content = []  # 使用列表存储各部分内容
+            
+            # 收集需要生成内容的段落（只处理1级段落）
+            paragraphs_to_generate = []
+            for i, root_paragraph in enumerate(root_paragraphs):
+                chapter_number = i + 1
+                paragraphs_to_generate.append({
+                    "paragraph": root_paragraph,
+                    "chapter_number": chapter_number,
+                    "index": i
+                })
+            
+            # 并发生成段落内容
+            def generate_paragraph_worker(item):
+                paragraph = item["paragraph"]
+                chapter_number = item["chapter_number"]
+                index = item["index"]
+                
+                logger.info(f"开始处理段落 [ID={paragraph.id}, 标题='{paragraph.title}', 序号={chapter_number}, 索引={index}]")
+                
+                # 获取子标题
+                sub_titles = get_sub_paragraph_titles(paragraph)
+                logger.info(f"段落 [ID={paragraph.id}] 包含 {len(sub_titles)} 个子主题")
+                
+                # 为1级段落生成内容
+                count_style = paragraph.count_style or "medium"
+                
+                # 使用全局RAG上下文生成内容
+                logger.info(f"调用_generate_paragraph_content生成段落内容 [ID={paragraph.id}]")
+                content = self._generate_paragraph_content(
+                    outline.title, 
+                    paragraph, 
+                    sub_titles, 
+                    count_style,
+                    rag_context,
+                    outline_content
+                )
+                
+                # 清理标题中的编号
+                clean_title = clean_numbering_from_title(paragraph.title)
+                logger.info(f"清理后的标题: '{clean_title}' [原标题: '{paragraph.title}']")
+                
+                # 返回章节标题和内容
+                # 使用二级标题(##)作为章节标题，因为一级标题(#)已用于文章标题
+                # 不添加"第X章"等层级编号，保持纯标题
+                chapter_title = f"\n## {clean_title}\n"
+                
+                content_length = len(content)
+                logger.info(f"段落处理完成 [ID={paragraph.id}, 内容长度={content_length}字符]")
+                
+                return {
+                    "index": item["index"],
+                    "title": chapter_title,
+                    "content": f"\n{content}\n"
+                }
+            
+            # 使用线程池并发生成内容
+            logger.info(f"开始并发生成段落内容，最大并发数: {MAX_CONCURRENT_GENERATIONS}, 总段落数: {len(paragraphs_to_generate)}")
+            results = []
+            start_time = time.time()
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_GENERATIONS) as executor:
+                # 创建future到段落的映射
+                future_to_paragraph = {
+                    executor.submit(generate_paragraph_worker, item): item 
+                    for item in paragraphs_to_generate
+                }
+                logger.info(f"已提交 {len(future_to_paragraph)} 个段落生成任务到线程池")
+                
+                completed_count = 0
+                for future in concurrent.futures.as_completed(future_to_paragraph):
+                    item = future_to_paragraph[future]
+                    completed_count += 1
+                    
+                    try:
+                        # 记录任务完成进度
+                        progress = (completed_count / len(paragraphs_to_generate)) * 100
+                        elapsed_time = time.time() - start_time
+                        logger.info(f"段落生成进度: {completed_count}/{len(paragraphs_to_generate)} ({progress:.1f}%), 已用时间: {elapsed_time:.1f}秒")
+                        
+                        result = future.result()
+                        results.append(result)
+                        logger.info(f"完成段落生成: {item['paragraph'].title} [ID={item['paragraph'].id}]")
+                    except Exception as e:
+                        logger.error(f"生成段落内容时出错 [ID={item['paragraph'].id}, 标题='{item['paragraph'].title}']: {str(e)}")
+                        # 添加错误信息作为内容，使用二级标题(##)保持一致性
+                        # 清理标题中的编号
+                        clean_title = clean_numbering_from_title(item['paragraph'].title)
+                        results.append({
+                            "index": item["index"],
+                            "title": f"\n## {clean_title}\n",
+                            "content": f"\n生成内容失败: {str(e)}\n"
+                        })
+            
+            total_time = time.time() - start_time
+            logger.info(f"所有段落生成完成，总用时: {total_time:.1f}秒，平均每段用时: {total_time/len(paragraphs_to_generate):.1f}秒")
+            
+            # 按原始顺序排序结果
+            results.sort(key=lambda x: x["index"])
+            
+            # 将结果添加到markdown内容中
+            for result in results:
+                markdown_content.append(result["content"])
             
             # 合并所有内容
             final_content = ''.join(markdown_content)
@@ -598,8 +868,11 @@ class OutlineGenerator:
             logger.error(f"生成全文内容时出错: {str(e)}")
             raise
 
-    def _generate_paragraph_content(self, article_title: str, paragraph: SubParagraph, sub_titles: List[str], count_style: str, rag_context: str = "") -> str:
+    def _generate_paragraph_content(self, article_title: str, paragraph: SubParagraph, sub_titles: List[str], count_style: str, rag_context: str = "", outline_content: str = "") -> str:
         """生成段落内容"""
+        # 记录开始生成段落内容
+        logger.info(f"开始生成段落内容 [段落ID={paragraph.id}, 标题='{paragraph.title}', 字数范围={count_style}]")
+        
         # 根据count_style确定字数范围
         word_count_range = {
             "short": "800-1200",
@@ -607,51 +880,28 @@ class OutlineGenerator:
             "long": "2500-3000"
         }.get(count_style, "1500-2000")
         
-        template = f"""
-        你是一个专业的写作助手。现在正在写一篇题为"{article_title}"的文章。
+        # 清理标题中的编号
+        clean_title = clean_numbering_from_title(paragraph.title)
         
-        当前需要生成的是一个段落，主题是"{paragraph.title}"。
-        段落描述：{paragraph.description or '无'}
+        # 格式化子主题列表
+        sub_topics = "\n".join([f"- {clean_numbering_from_title(title)}" for title in sub_titles])
+        logger.info(f"段落包含 {len(sub_titles)} 个子主题")
         
-        这个段落包含以下子主题：
-        {chr(10).join([f'- {title}' for title in sub_titles])}
+        # 使用常量模板
+        template = PARAGRAPH_GENERATION_TEMPLATE.format(
+            article_title=article_title,
+            outline_content=outline_content,
+            paragraph_title=clean_title,
+            paragraph_description=paragraph.description or "无",
+            sub_topics=sub_topics,
+            rag_context=rag_context,
+            word_count_range=word_count_range
+        )
         
-        {rag_context}
-        
-        请遵循以下要求生成内容：
-        1. 格式要求：
-           - 每个段落必须有清晰的主题句
-           - 每个观点必须有具体的论据和例子支持
-           - 段落之间使用恰当的过渡词衔接
-           - 使用统一的写作语气和风格
-           
-           段落层级编号规范：
-           - 二级标题使用：（一）（二）（三）（四）...
-           - 三级标题使用：1、2、3、4...
-           - 四级标题使用：(1)(2)(3)(4)...
-           - 五级标题使用：①②③④...
-           严格遵循以上编号规范，确保全文格式统一。
-           
-           注意：
-           - 不要在内容开头重复章节标题，因为标题会在其他地方自动添加。直接从正文内容开始。
-           - 不要包含"参考文档说明"、"参考文档"、"参考文献"等辅助说明文本。
-           - 不要出现类似"根据xxx标准"、"参考了xxx文件"等说明性文字。
-        
-        2. 内容要求：
-           - 字数控制在{word_count_range}字之间
-           - 确保内容与整体文章主题"{article_title}"保持一致
-           - 与文章其他部分建立明确的逻辑关联
-           - 合理引用和整合知识库提供的相关内容，但不要出现引用说明
-           - 每个子主题都要得到充分展开
-           - 所有子主题必须按照上述编号规范进行编号
-        
-        3. 连贯性要求：
-           - 在开头部分，简要回顾上文的关键内容（如果不是第一个段落）
-           - 在结尾部分，预示下文将要讨论的内容（如果不是最后一个段落）
-           - 使用适当的过渡语句，确保段落间的自然衔接
-        
-        请生成符合以上要求的段落内容。内容应该专业、严谨，同时保持生动有趣。确保严格遵循段落编号规范，不得混用不同的编号方式。记住：不要在内容中包含章节标题，直接从正文内容开始。生成的内容应该是完整的正文，不要包含任何参考说明、文档说明等辅助文本。
-        """
+        # 记录提示词长度和内容
+        prompt_length = len(template)
+        logger.info(f"生成的提示词长度: {prompt_length} 字符")
+        logger.info(f"提示词内容 [段落ID={paragraph.id}]:\n{'-'*80}\n{template}\n{'-'*80}")
         
         try:
             # 创建提示
@@ -660,34 +910,30 @@ class OutlineGenerator:
             # 创建链
             chain = prompt_template | self.llm
             
+            # 记录开始调用LLM
+            logger.info(f"开始调用LLM生成段落内容 [段落ID={paragraph.id}]")
+            
             # 执行链
             result = chain.invoke({})
             
-            # 过滤掉可能出现的参考说明文本
+            # 记录LLM响应
+            response_length = len(result.content) if hasattr(result, 'content') else 0
+            logger.info(f"LLM响应完成 [段落ID={paragraph.id}], 响应长度: {response_length} 字符")
+            logger.info(f"LLM响应内容 [段落ID={paragraph.id}]:\n{'-'*80}\n{result.content}\n{'-'*80}")
+            
+            # 检查生成的内容中是否包含子标题
             content = result.content
-            filtered_lines = []
-            skip_line = False
+            heading_count = content.count('###')
+            if heading_count > 0:
+                logger.info(f"生成内容包含 {heading_count} 个子标题(###) [段落ID={paragraph.id}]")
+            else:
+                logger.info(f"生成内容未包含子标题(###) [段落ID={paragraph.id}]")
             
-            for line in content.split('\n'):
-                # 跳过包含特定关键词的行
-                if any(keyword in line for keyword in [
-                    "参考文档", "参考文献", "参考说明", "文档说明",
-                    "根据标准", "依据标准", "参考了", "参考资料"
-                ]):
-                    skip_line = True
-                    continue
-                    
-                if skip_line and not line.strip():
-                    skip_line = False
-                    continue
-                    
-                if not skip_line:
-                    filtered_lines.append(line)
-            
-            return '\n'.join(filtered_lines)
+            # 直接返回LLM的原始响应内容，不进行过滤
+            return content
             
         except Exception as e:
-            logger.error(f"生成段落内容时出错: {str(e)}")
+            logger.error(f"生成段落内容时出错 [段落ID={paragraph.id}]: {str(e)}")
             return f"生成内容失败: {str(e)}"
 
     def generate_content_directly(self, prompt: str, file_contents: List[str] = None, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -705,41 +951,37 @@ class OutlineGenerator:
         """
         logger.info(f"开始直接生成内容 [prompt_length={len(prompt)}, use_rag={self.use_rag}]")
         
-        # 处理文件内容
-        file_context = ""
-        if file_contents and len(file_contents) > 0:
-            file_context = "参考以下文件内容:\n" + "\n".join(file_contents)
-            logger.info(f"使用参考文件内容 [files_count={len(file_contents)}]")
-        else:
-            file_context = "没有提供参考文件内容。"
-            logger.info("无参考文件内容")
-        
-        # 获取RAG搜索结果（如果启用）
-        rag_context = ""
-        if self.use_rag:
-            rag_context = self._get_rag_context(
-                question=prompt,
-                user_id=user_id,
-                kb_ids=kb_ids,
-                context_msg="直接生成内容"
-            )
-        
         try:
-            # 构建提示模板
-            template = """
-            你是一个专业的写作助手，请根据用户的写作需求生成一篇完整的文章。
+            # 处理文件内容
+            file_context = ""
+            if file_contents and len(file_contents) > 0:
+                file_context = "参考以下文件内容:\n" + "\n".join(file_contents)
+                logger.info(f"使用参考文件内容 [files_count={len(file_contents)}]")
+            else:
+                file_context = "没有提供参考文件内容。"
+                logger.info("无参考文件内容")
             
-            用户的写作需求是: {prompt}
+            # 获取RAG搜索结果（如果启用）
+            rag_context = ""
+            if self.use_rag:
+                rag_context = self._get_rag_context(
+                    question=prompt,
+                    user_id=user_id,
+                    kb_ids=kb_ids,
+                    context_msg="直接生成内容"
+                )
             
-            {file_context}
-            
-            {rag_context}
-            
-            请生成一篇结构良好、内容丰富的文章，包括标题和正文。文章应该有清晰的段落划分，每个段落都有明确的主题。
-            """
+            # 生成内容
+            full_content = {
+                "title": "",
+                "content": "",
+                "markdown": "",
+                "html": "",
+                "outline_structure": []
+            }
             
             # 创建提示
-            prompt_template = ChatPromptTemplate.from_template(template)
+            prompt_template = ChatPromptTemplate.from_template(DIRECT_CONTENT_GENERATION_TEMPLATE)
             logger.info("创建提示模板完成")
             
             # 创建链
@@ -757,43 +999,15 @@ class OutlineGenerator:
             if not title or len(title) > 100:
                 title = "生成的文章"
             
-            # 构建返回结果
-            result = {
-                "title": title,
-                "content": content.content,
-                "markdown": content.content,
-                "html": markdown.markdown(content.content, extensions=['extra']),
-                "outline_structure": []
-            }
+            # 设置内容
+            full_content["title"] = title
+            full_content["content"] = content.content
+            full_content["markdown"] = content.content
+            full_content["html"] = markdown.markdown(content.content, extensions=['extra'])
             
             logger.info("直接生成内容完成")
-            return result
+            return full_content
             
         except Exception as e:
             logger.error(f"直接生成内容时出错: {str(e)}")
             raise
-
-    def _number_to_chinese(self, num):
-        """将数字转换为中文数字"""
-        chinese_nums = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
-        chinese_units = ['', '十', '百', '千']
-        
-        if num == 0:
-            return chinese_nums[0]
-        
-        result = ''
-        unit_pos = 0
-        while num > 0:
-            digit = num % 10
-            if digit != 0:
-                result = chinese_nums[digit] + chinese_units[unit_pos] + result
-            elif result and result[0] not in chinese_units:
-                result = chinese_nums[0] + result
-            num //= 10
-            unit_pos += 1
-        
-        # 处理十几的特殊情况
-        if len(result) >= 2 and result[0] == '一' and result[1] == '十':
-            result = result[1:]
-        
-        return result 
