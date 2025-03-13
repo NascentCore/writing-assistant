@@ -289,6 +289,13 @@ async def get_document(
     ).first()
     if not document:
         return APIResponse.error(message="文档不存在或无权访问")
+
+    # 获取文档的session_id
+    sessions = db.query(ChatSession).filter(
+        ChatSession.user_id == current_user.user_id,
+        ChatSession.doc_id == doc_id,
+        ChatSession.session_type == ChatSessionType.WRITING
+    ).order_by(desc(ChatSession.id)).all()
     
     return APIResponse.success(
         message="获取成功",
@@ -296,6 +303,7 @@ async def get_document(
             "doc_id": document.doc_id,
             "title": document.title,
             "content": document.content,
+            "session_ids": [session.session_id for session in sessions],
             "updated_at": (document.updated_at or document.created_at).strftime("%Y-%m-%d %H:%M:%S")
         }
     )
@@ -322,36 +330,3 @@ async def delete_document(
         db.rollback()
         return APIResponse.error(message=f"删除失败: {str(e)}")
 
-@router.post("/documents/generate_outline", summary="生成文档大纲")
-async def generate_outline(
-    prompt: str = Body(..., description="提示词"),
-    tpl_id: str = Body(..., description="模板ID"),
-    outline_id: str = Body(..., description="大纲ID"),
-    file_ids: Optional[List[str]] = Body(None, description="参考文件ID列表"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    pass
-
-@router.post("/documents/generate", summary="生成文档内容", response_model=APIResponse)
-async def generate_document(
-    prompt: str = Body(..., description="提示词"),
-    outline: str = Body(..., description="大纲"),
-    file_ids: Optional[List[str]] = Body(None, description="参考文件ID列表"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    pass
-
-class TemplateDetail(BaseModel):
-    tpl_id: str
-    name: str
-    content: str
-    
-@router.get("/documents/templates", summary="获取模板列表", response_model=APIResponse[List[TemplateDetail]])
-async def get_templates(
-    category: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    pass

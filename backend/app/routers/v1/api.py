@@ -539,6 +539,50 @@ async def get_models():
             ]
         }
     )
+class CreateSessionRequest(BaseModel):
+    doc_id: str = Field(..., description="文档ID")
+
+@router.post("/sessions", summary="创建新会话")
+async def create_session(
+    request: CreateSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    创建新的聊天会话
+    
+    Args:
+        doc_id: 文档ID
+        
+    Returns:
+        session_id: 新创建的会话ID
+    """
+    try:
+        # 生成新的会话ID
+        session_id = f"chat-{shortuuid.uuid()}"
+        
+        # 创建新会话
+        chat_session = ChatSession(
+            session_id=session_id,
+            user_id=current_user.user_id,
+            session_type=ChatSessionType.WRITING,
+            doc_id=request.doc_id
+        )
+        
+        db.add(chat_session)
+        db.commit()
+        
+        return APIResponse.success(
+            message="会话创建成功",
+            data={
+                "session_id": session_id,
+                "created_at": chat_session.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"创建会话失败: {str(e)}")
+        return APIResponse.error(message=f"创建会话失败: {str(e)}")
 
 @router.get("/sessions")
 async def get_sessions(
