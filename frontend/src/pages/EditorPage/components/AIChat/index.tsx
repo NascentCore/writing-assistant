@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '@/config';
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
+  CloseCircleOutlined,
   CloudUploadOutlined,
   CopyOutlined,
   // PlusCircleOutlined,
@@ -70,7 +71,7 @@ interface AIChatRef {
   addSelectedFile: (file: FileItem) => void;
 }
 
-const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
+const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
   // 获取当前路由信息
   const location = useLocation();
 
@@ -552,6 +553,12 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                   ))}
                 </Select>
               </div>
+              <Button
+                icon={<CloseCircleOutlined />}
+                type="text"
+                style={{ marginTop: -6 }}
+                onClick={() => setShowAIChat(false)}
+              />
             </Flex>
             <div className={styles.scrollContainer} ref={scrollContainerRef}>
               <Bubble.List

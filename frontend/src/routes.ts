@@ -1,7 +1,7 @@
 export const routes = [
   {
     path: '/',
-    redirect: '/PersonalKnowledge',
+    redirect: '/WritingAssistant',
   },
   {
     name: '登录',
