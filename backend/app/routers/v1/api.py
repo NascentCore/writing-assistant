@@ -24,6 +24,7 @@ import logging
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.scrape.web import scraper
 from app.models.web_page import WebPage
+from app.models.rag import RagFile
 
 
 router = APIRouter()
@@ -192,10 +193,10 @@ async def completions(
             if isinstance(file_ids, list):
                 # 获取所有引用文件的内容
                 files = db.query(
-                    UploadFile.file_id,  # 添加 file_id 字段
-                    UploadFile.file_name,
-                    UploadFile.content
-                ).filter(UploadFile.file_id.in_(file_ids)).all()
+                    RagFile.file_id,
+                    RagFile.file_name,
+                    RagFile.content
+                ).filter(RagFile.file_id.in_(file_ids)).all()
                 
                 # 检查是否所有请求的文件都存在
                 found_file_ids = {file.file_id for file in files}
