@@ -191,7 +191,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
     // 准备请求数据
     const requestData = {
       model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
-      doc_id: localStorage.getItem('current_document_id') || '',
+      doc_id:
+        new URLSearchParams(window.location.search).get('document_id') || '',
       file_ids: selectedFiles
         .filter((file) => file.type === 'docx' || file.type === 'pdf')
         .map((file) => file.file_id),

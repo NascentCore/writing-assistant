@@ -9,16 +9,18 @@ interface ExportBtnGroupProps {
 }
 
 const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
-  const { getDocumentTitle } = useModel('EditorPage.model');
+  const { document } = useModel('EditorPage.model');
 
   // 处理导出逻辑
   const handleExport = async (format: string) => {
     if (!editorRef.current) return;
 
-    const currentDocId = localStorage.getItem('current_document_id');
+    const currentDocId = new URLSearchParams(window.location.search).get(
+      'document_id',
+    );
     if (!currentDocId) return;
 
-    const docTitle = getDocumentTitle(currentDocId);
+    const docTitle = document.title;
 
     try {
       if (format === 'pdf') {

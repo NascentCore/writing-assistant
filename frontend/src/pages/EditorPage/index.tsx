@@ -1,6 +1,6 @@
 import { API_BASE_URL } from '@/config';
 import { fetchWithAuth } from '@/utils/fetch';
-import { useLocation, useNavigate } from '@umijs/max';
+import { useLocation, useModel, useNavigate } from '@umijs/max';
 import { useDebounceFn } from 'ahooks';
 import { AiEditor } from 'aieditor';
 import 'aieditor/dist/style.css';
@@ -14,9 +14,6 @@ import OutLine from './components/OutLine';
 import VersionHistory from './components/VersionHistory';
 import { getEditorConfig } from './editorConfig';
 import './index.less';
-
-// 定义存储当前文档ID的key
-const CURRENT_DOC_KEY = 'current_document_id';
 
 interface OutlineNode extends DataNode {
   pos: number;
@@ -42,8 +39,8 @@ function App() {
     if (docIdFromQuery) {
       return docIdFromQuery;
     }
-    // 如果 URL 查询参数中没有 document_id，则从 localStorage 中获取
-    return localStorage.getItem(CURRENT_DOC_KEY) || null;
+    // 如果 URL 查询参数中没有 document_id，则返回null
+    return null;
   });
 
   const navigate = useNavigate();
@@ -51,6 +48,7 @@ function App() {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [outlineData, setOutlineData] = useState<OutlineNode[]>([]);
   const [showAIChat, setShowAIChat] = useState(false);
+  const { setDocument } = useModel('EditorPage.model');
   const [showFileModal, setShowFileModal] = useState(false);
   // 是否是编辑器内容发生变化, 防止重复保存
   const [changeAction, setChangeAction] = useState(false);
@@ -108,6 +106,7 @@ function App() {
         if (response && response.ok) {
           const result = await response.json();
           const content = result.data.content || '';
+          setDocument(result.data);
           // 创建临时 div 来解析内容
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = content;
@@ -254,21 +253,6 @@ function App() {
       setCurrentDocId(docIdFromQuery);
     }
   }, [location.search]);
-
-  // 监听 currentDocId 变化，保存到 localStorage
-  useEffect(() => {
-    // 只有当 currentDocId 不是从 URL 查询参数中获取的时候，才保存到 localStorage
-    const docIdFromQuery = getDocumentIdFromQuery();
-    if (currentDocId && currentDocId !== docIdFromQuery) {
-      localStorage.setItem(CURRENT_DOC_KEY, currentDocId);
-    } else if (!currentDocId) {
-      localStorage.removeItem(CURRENT_DOC_KEY);
-      if (editorRef.current) {
-        editorRef.current.destroy();
-        editorRef.current = null;
-      }
-    }
-  }, [currentDocId, location.search]);
 
   // 添加键盘事件监听
   useEffect(() => {

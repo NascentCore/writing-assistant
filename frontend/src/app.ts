@@ -108,7 +108,9 @@ window.fetch = async function (...args) {
               return msg;
             });
             body.selected_contents = selectedContents;
-            body.doc_id = localStorage.getItem('current_document_id')!;
+            body.doc_id =
+              new URLSearchParams(window.location.search).get('document_id') ||
+              localStorage.getItem('current_document_id')!;
           }
         }
 

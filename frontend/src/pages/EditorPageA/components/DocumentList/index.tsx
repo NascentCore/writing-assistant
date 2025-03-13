@@ -27,7 +27,7 @@ const DocumentList: React.FC<DocumentListProps> = ({
   currentDocId,
   onDocumentSelect,
 }) => {
-  const { documents, setDocuments } = useModel('EditorPage.model');
+  const { documents, setDocuments } = useModel('EditorPageA.model');
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [newDocModalVisible, setNewDocModalVisible] = useState(false);

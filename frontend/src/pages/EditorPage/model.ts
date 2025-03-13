@@ -9,15 +9,11 @@ interface Document {
 }
 
 export default () => {
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const [document, setDocument] = useState<Document>({} as Document);
 
   return {
-    documents,
-    setDocuments,
+    document,
+    setDocument,
     // 根据 id 获取文档标题
-    getDocumentTitle: (id: string) => {
-      const doc = documents.find((doc) => doc.id === id || doc.doc_id === id);
-      return doc?.title || '未命名文档';
-    },
   };
 };

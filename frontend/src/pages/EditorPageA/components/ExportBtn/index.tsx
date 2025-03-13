@@ -1,5 +1,5 @@
 import { saveAsDocx, saveAsPdf } from '@/utils/utils'; // 引入导出函数
-import { useModel, useSearchParams } from '@umijs/max';
+import { useModel } from '@umijs/max';
 import { AiEditor } from 'aieditor';
 import { Button, Dropdown, Menu } from 'antd';
 import React from 'react';
@@ -9,14 +9,12 @@ interface ExportBtnGroupProps {
 }
 
 const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
-  const { getDocumentTitle } = useModel('EditorPage.model');
-  const [searchParams] = useSearchParams();
+  const { getDocumentTitle } = useModel('EditorPageA.model');
 
   // 处理导出逻辑
   const handleExport = async (format: string) => {
     if (!editorRef.current) return;
-
-    const currentDocId = searchParams.get('id');
+    const currentDocId = localStorage.getItem('current_document_id');
     if (!currentDocId) return;
 
     const docTitle = getDocumentTitle(currentDocId);
