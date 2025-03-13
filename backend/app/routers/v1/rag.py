@@ -276,8 +276,12 @@ async def delete_files(
         logger.error(f"删除文件事务失败: {str(e)}")
         return APIResponse.error(message="删除文件失败")
 
+class CreateChatSessionRequest(BaseModel):
+    doc_id: Optional[str] = Field(None, description="文档ID")
+
 @router.post("/chat/session", summary="创建知识库对话会话")
 async def create_chat_session(
+    request: CreateChatSessionRequest = Body(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -288,6 +292,8 @@ async def create_chat_session(
             session_type=ChatSessionType.KNOWLEDGE_BASE,
             user_id=current_user.user_id,
         )
+        if request.doc_id:
+            chat_session.doc_id = request.doc_id
 
         db.add(chat_session)
         db.commit()
@@ -314,7 +320,6 @@ async def delete_chat_session(
         session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
             ChatSession.user_id == current_user.user_id,
-            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
             ChatSession.is_deleted.is_(False)  # 遵循 PEP 8
         ).first()
         
@@ -340,6 +345,7 @@ async def delete_chat_session(
 
 @router.get("/chat/sessions", summary="获取知识库会话列表")
 async def get_chat_sessions(
+    doc_id: Optional[str] = Query(None, description="文档ID"),
     page: int = 1,
     page_size: int = 10,
     current_user: User = Depends(get_current_user),
@@ -349,9 +355,13 @@ async def get_chat_sessions(
         # 构建基础查询
         query = db.query(ChatSession).filter(
             ChatSession.user_id == current_user.user_id,
-            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
             ChatSession.is_deleted == False
         )
+        if doc_id:
+            query = query.filter(ChatSession.doc_id == doc_id, 
+                                 ChatSession.session_type == ChatSessionType.EDITING_ASSISTANT)
+        else:
+            query = query.filter(ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE)
         
         # 获取总记录数
         total = query.count()
@@ -422,7 +432,6 @@ async def get_chat_session_detail(
         session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
             ChatSession.user_id == current_user.user_id,
-            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
             ChatSession.is_deleted == False
         ).first()
         if not session:
