@@ -48,8 +48,7 @@ PARAGRAPH_GENERATION_TEMPLATE = """
 - 使用markdown格式
 - 不要添加任何编号，最终会通过markdown自动处理编号格式
 - 不要在内容开头重复章节标题，直接从正文内容开始
-- 不要包含"参考文档"、"参考文献"等辅助说明文本
-- 不要出现"根据xxx标准"、"参考了xxx文件"等说明性文字
+- 不要包含"参考文档"、"参考文献2025-03-13 12:24:54,176 - app.services.langchain_service - ERROR - 解析大模型输出时出错: Error code: 403 - {'error': {'code': 'AccountOverdueError', 'message': 'The request failed because your account has an overdue balance. Request id: 0217418686941560f69f8e3142d9169909794ce9545a99516c466', 'param': '', 'type': 'Forbidden'}}了xxx文件"等说明性文字
 - 严格禁止在标题或层级标题中使用任何形式的编号，包括但不限于：
   * 不要使用"第一章"、"第二章"等章节编号
   * 不要使用"（一）"、"（二）"等中文编号
