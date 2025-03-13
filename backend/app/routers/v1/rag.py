@@ -289,7 +289,6 @@ async def create_chat_session(
         session_id = f"chat-{shortuuid.uuid()}"
         chat_session = ChatSession(
             session_id=session_id,
-            session_type=ChatSessionType.KNOWLEDGE_BASE,
             user_id=current_user.user_id,
         )
         if request.doc_id:
@@ -301,6 +300,9 @@ async def create_chat_session(
             if not doc:
                 return APIResponse.error(message="文档不存在")
             chat_session.doc_id = request.doc_id
+            chat_session.session_type = ChatSessionType.EDITING_ASSISTANT
+        else:
+            chat_session.session_type = ChatSessionType.KNOWLEDGE_BASE
 
         db.add(chat_session)
         db.commit()
