@@ -528,12 +528,13 @@ class OutlineGenerator:
             
             # 构建大纲结构
             outline_structure = []
-            markdown_content = f"# {outline.title}\n\n"
+            markdown_content = []  # 使用列表存储各部分内容
+            
+            # 添加文档标题
+            markdown_content.append(f"# {outline.title}\n")
             
             # 递归生成内容
             def generate_content_for_paragraph(paragraph, level=1, parent_structure=None):
-                nonlocal markdown_content
-                
                 # 获取子标题
                 sub_titles = get_sub_paragraph_titles(paragraph)
                 
@@ -564,8 +565,10 @@ class OutlineGenerator:
                         rag_context
                     )
                     
-                    # 添加到Markdown
-                    markdown_content += f"## {paragraph.title}\n\n{content}\n\n"
+                    # 添加章节标题和内容
+                    chapter_number = len(outline_structure)
+                    markdown_content.append(f"\n## 第{self._number_to_chinese(chapter_number)}章 {paragraph.title}\n")
+                    markdown_content.append(f"\n{content}\n")
                 
                 # 递归处理子段落
                 if hasattr(paragraph, 'children') and paragraph.children:
@@ -576,10 +579,13 @@ class OutlineGenerator:
             for root_paragraph in root_paragraphs:
                 generate_content_for_paragraph(root_paragraph)
             
+            # 合并所有内容
+            final_content = ''.join(markdown_content)
+            
             # 设置内容
-            full_content["content"] = markdown_content
-            full_content["markdown"] = markdown_content
-            full_content["html"] = markdown.markdown(markdown_content, extensions=['extra'])
+            full_content["content"] = final_content
+            full_content["markdown"] = final_content
+            full_content["html"] = markdown.markdown(final_content, extensions=['extra'])
             logger.info("Markdown转HTML完成")
             
             # 添加大纲结构
@@ -765,4 +771,29 @@ class OutlineGenerator:
             
         except Exception as e:
             logger.error(f"直接生成内容时出错: {str(e)}")
-            raise 
+            raise
+
+    def _number_to_chinese(self, num):
+        """将数字转换为中文数字"""
+        chinese_nums = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+        chinese_units = ['', '十', '百', '千']
+        
+        if num == 0:
+            return chinese_nums[0]
+        
+        result = ''
+        unit_pos = 0
+        while num > 0:
+            digit = num % 10
+            if digit != 0:
+                result = chinese_nums[digit] + chinese_units[unit_pos] + result
+            elif result and result[0] not in chinese_units:
+                result = chinese_nums[0] + result
+            num //= 10
+            unit_pos += 1
+        
+        # 处理十几的特殊情况
+        if len(result) >= 2 and result[0] == '一' and result[1] == '十':
+            result = result[1:]
+        
+        return result 
