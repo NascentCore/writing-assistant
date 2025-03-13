@@ -20,6 +20,7 @@ from app.rag.parser import get_parser, get_file_format
 from app.rag.rag_api_async import rag_api_async
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.models.task import Task, TaskStatus
+from app.models.document import Document
 
 logger = logging.getLogger("app")
 
@@ -32,6 +33,7 @@ class ChatRequest(BaseModel):
     question: str = Field(description="问题内容")
     model_name: str = Field(description="模型名称")
     session_id: str = Field(description="会话ID")
+    doc_id: Optional[str] = Field(default=None, description="文档ID")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
     streaming: Optional[bool] = Field(default=True, description="是否使用流式返回")
@@ -41,8 +43,9 @@ class ChatRequest(BaseModel):
             "example": {
                 "question": "这是一个问题",
                 "model_name": "deepseek-v3",
-                "file_ids": [],
-                "session_id": None,
+                "doc_id": "doc-1234567890",
+                "file_ids": ["file-1234567890", "file-1234567891"],
+                "session_id": "chat-1234567890",
                 "streaming": True
             }
         }
@@ -273,8 +276,12 @@ async def delete_files(
         logger.error(f"删除文件事务失败: {str(e)}")
         return APIResponse.error(message="删除文件失败")
 
+class CreateChatSessionRequest(BaseModel):
+    doc_id: Optional[str] = Field(None, description="文档ID")
+
 @router.post("/chat/session", summary="创建知识库对话会话")
 async def create_chat_session(
+    request: CreateChatSessionRequest = Body(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -282,9 +289,20 @@ async def create_chat_session(
         session_id = f"chat-{shortuuid.uuid()}"
         chat_session = ChatSession(
             session_id=session_id,
-            session_type=ChatSessionType.KNOWLEDGE_BASE,
             user_id=current_user.user_id,
         )
+        if request.doc_id:
+            # 检查文档是否存在
+            doc = db.query(Document).filter(
+                Document.doc_id == request.doc_id,
+                Document.user_id == current_user.user_id,
+            ).first()
+            if not doc:
+                return APIResponse.error(message="文档不存在")
+            chat_session.doc_id = request.doc_id
+            chat_session.session_type = ChatSessionType.EDITING_ASSISTANT
+        else:
+            chat_session.session_type = ChatSessionType.KNOWLEDGE_BASE
 
         db.add(chat_session)
         db.commit()
@@ -311,7 +329,6 @@ async def delete_chat_session(
         session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
             ChatSession.user_id == current_user.user_id,
-            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
             ChatSession.is_deleted.is_(False)  # 遵循 PEP 8
         ).first()
         
@@ -337,6 +354,7 @@ async def delete_chat_session(
 
 @router.get("/chat/sessions", summary="获取知识库会话列表")
 async def get_chat_sessions(
+    doc_id: Optional[str] = Query(None, description="文档ID"),
     page: int = 1,
     page_size: int = 10,
     current_user: User = Depends(get_current_user),
@@ -346,9 +364,13 @@ async def get_chat_sessions(
         # 构建基础查询
         query = db.query(ChatSession).filter(
             ChatSession.user_id == current_user.user_id,
-            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
             ChatSession.is_deleted == False
         )
+        if doc_id:
+            query = query.filter(ChatSession.doc_id == doc_id, 
+                                 ChatSession.session_type == ChatSessionType.EDITING_ASSISTANT)
+        else:
+            query = query.filter(ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE)
         
         # 获取总记录数
         total = query.count()
@@ -419,7 +441,6 @@ async def get_chat_session_detail(
         session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
             ChatSession.user_id == current_user.user_id,
-            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
             ChatSession.is_deleted == False
         ).first()
         if not session:
@@ -522,7 +543,6 @@ async def chat(
         session_id = request.session_id
         chat_session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
-            ChatSession.session_type == ChatSessionType.KNOWLEDGE_BASE,
             ChatSession.user_id == current_user.user_id,
             ChatSession.is_deleted == False
         ).first()
@@ -539,6 +559,14 @@ async def chat(
         for file in reference_files:
             content_preview = file.content[:settings.RAG_CHAT_PER_FILE_MAX_LENGTH]
             custom_prompt += f"文件名: {file.file_name}\n文件内容: {content_preview}\n\n"
+
+        if request.doc_id:
+            doc = db.query(Document).filter(
+                Document.doc_id == request.doc_id,
+                Document.user_id == current_user.user_id,
+            ).first()
+            if doc:
+                custom_prompt += f"当前编辑的文档内容: {doc.content}\n\n"
 
         recent_answers = db.query(ChatMessage).filter(
             ChatMessage.session_id == session_id,

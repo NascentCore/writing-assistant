@@ -4,8 +4,9 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 class ChatSessionType(Enum):
-    WRITING = 1
-    KNOWLEDGE_BASE = 2
+    WRITING = 1             # 全文生成相关
+    KNOWLEDGE_BASE = 2      # 知识库会话
+    EDITING_ASSISTANT = 3   # 文档编辑AI对话
 
 class ContentType(str, Enum):
     TEXT = "text"

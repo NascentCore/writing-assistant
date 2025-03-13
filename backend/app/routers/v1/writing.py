@@ -1113,7 +1113,7 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
                 kb_ids.append(kb.kb_id)
             
             # 生成内容
-            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids)
+            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids, session_id)
             
             # 保存文档并更新消息
             document_id = await _save_document_and_update_message(
@@ -1161,13 +1161,26 @@ async def _generate_content(
     file_contents: List[str],
     db: Session,
     user_id: Optional[str] = None,
-    kb_ids: Optional[List[str]] = None
+    kb_ids: Optional[List[str]] = None,
+    session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """根据模式生成内容"""
     if outline_id:
         # 基于大纲生成模式
         logger.info(f"开始基于大纲生成全文 [outline_id={outline_id}]")
-        full_content = outline_generator.generate_full_content(outline_id, db, user_id, kb_ids)
+        
+        # 查询会话的第一条用户消息
+        first_user_message = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.role == "user",
+            ChatMessage.is_deleted == False
+        ).order_by(ChatMessage.id).first()
+        
+        # 构建提示词
+        user_prompt = first_user_message.content if first_user_message else ""
+        logger.info(f"获取到用户第一条消息: {user_prompt}")
+        
+        full_content = outline_generator.generate_full_content(outline_id, db, user_id, kb_ids, user_prompt)
     else:
         # 直接生成模式
         logger.info("开始直接生成全文")
