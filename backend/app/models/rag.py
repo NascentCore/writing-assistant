@@ -6,6 +6,36 @@ class RagKnowledgeBaseType(Enum):
     NONE = 0
     SYSTEM = 1
     USER = 2
+    INDUSTRY = 3
+    COMPANY = 4
+    DEPARTMENT = 5
+    USER_SHARED = 6
+
+    @classmethod
+    def type_to_name(cls, type: int):
+        type_name_map = {
+            cls.NONE: "none",
+            cls.SYSTEM: "system",
+            cls.USER: "user",
+            cls.INDUSTRY: "industry",
+            cls.COMPANY: "company",
+            cls.DEPARTMENT: "department",
+            cls.USER_SHARED: "user_shared"
+        }
+        return type_name_map.get(type, "unknown")
+
+
+    @classmethod
+    def name_to_type(cls, name: str):
+        name_type_map = {
+            "system": cls.SYSTEM,
+            "user": cls.USER,
+            "industry": cls.INDUSTRY,
+            "company": cls.COMPANY,
+            "department": cls.DEPARTMENT,
+            "user_shared": cls.USER_SHARED
+        }
+        return name_type_map.get(name, cls.NONE)
 
 class RagFileStatus(Enum):
     FAILED = 0
@@ -67,7 +97,8 @@ class RagKnowledgeBase(Base):
     
     id = Column(Integer, primary_key=True, index=True, comment="主键ID")
     kb_id = Column(String(100), unique=True, index=True, comment="知识库ID")
-    kb_type = Column(SmallInteger, default=1, nullable=False, comment="知识库类型 1: 系统, 2: 用户")
+    kb_type = Column(SmallInteger, default=1, nullable=False, comment="知识库类型 1系统 2用户 3行业 4公司 5部门")
+    owner_id = Column(String(100), index=True, default="", comment="所有者ID")
     user_id = Column(String(100), index=True, default="", comment="用户ID")
     kb_name = Column(String(150), default="", comment="知识库名称")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
