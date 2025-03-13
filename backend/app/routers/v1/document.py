@@ -294,7 +294,7 @@ async def get_document(
     sessions = db.query(ChatSession).filter(
         ChatSession.user_id == current_user.user_id,
         ChatSession.doc_id == doc_id,
-        ChatSession.session_type == ChatSessionType.WRITING
+        ChatSession.session_type == ChatSessionType.EDITING_ASSISTANT
     ).order_by(desc(ChatSession.id)).all()
     
     return APIResponse.success(
