@@ -542,14 +542,14 @@ async def get_models():
 class CreateSessionRequest(BaseModel):
     doc_id: str = Field(..., description="文档ID")
 
-@router.post("/sessions", summary="创建新会话")
+@router.post("/session", summary="创建新会话")
 async def create_session(
     request: CreateSessionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    创建新的聊天会话
+    创建文档编辑的AI会话
     
     Args:
         doc_id: 文档ID
@@ -560,12 +560,20 @@ async def create_session(
     try:
         # 生成新的会话ID
         session_id = f"chat-{shortuuid.uuid()}"
+
+        # 检查文档是否存在
+        doc = db.query(Document).filter(
+            Document.doc_id == request.doc_id,
+            Document.user_id == current_user.user_id,
+        ).first()
+        if not doc:
+            return APIResponse.error(message="文档不存在")
         
         # 创建新会话
         chat_session = ChatSession(
             session_id=session_id,
             user_id=current_user.user_id,
-            session_type=ChatSessionType.WRITING,
+            session_type=ChatSessionType.EDITING_ASSISTANT,
             doc_id=request.doc_id
         )
         
@@ -581,8 +589,8 @@ async def create_session(
         )
         
     except Exception as e:
-        logger.error(f"创建会话失败: {str(e)}")
-        return APIResponse.error(message=f"创建会话失败: {str(e)}")
+        logger.error(f"创建文档编辑的AI会话失败: {str(e)}")
+        return APIResponse.error(message=f"创建文档编辑的AI会话失败: {str(e)}")
 
 @router.get("/sessions")
 async def get_sessions(
@@ -593,7 +601,7 @@ async def get_sessions(
     current_user: User = Depends(get_current_user)
 ):
     """
-    获取用户的对话会话列表
+    获取用户的文档编辑的AI会话列表
     
     Args:
         doc_id: 可选的文档ID，如果提供则只返回与该文档相关的会话
@@ -611,16 +619,13 @@ async def get_sessions(
         # 构建基础查询
         query = db.query(ChatSession).filter(
             ChatSession.user_id == current_user.user_id,
-            ChatSession.session_type == ChatSessionType.WRITING,
+            ChatSession.session_type == ChatSessionType.EDITING_ASSISTANT,
             ChatSession.is_deleted == False
         )
         
         # 如果提供了doc_id，添加文档过滤条件
         if doc_id:
-            # 通过消息元数据中的doc_id字段过滤
-            query = query.join(ChatMessage, ChatSession.session_id == ChatMessage.session_id)\
-                .filter(ChatMessage.meta.contains(f'"doc_id": "{doc_id}"'))\
-                .distinct()
+            query = query.filter(ChatSession.doc_id == doc_id)
         
         # 获取总记录数
         total = query.count()
@@ -692,7 +697,7 @@ async def get_session_messages(
         # 验证会话是否存在且属于当前用户
         session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
-            ChatSession.session_type == ChatSessionType.WRITING,
+            ChatSession.session_type == ChatSessionType.EDITING_ASSISTANT,
             ChatSession.user_id == current_user.user_id,
             ChatSession.is_deleted == False
         ).first()
