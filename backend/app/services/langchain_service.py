@@ -528,12 +528,13 @@ class OutlineGenerator:
             
             # 构建大纲结构
             outline_structure = []
-            markdown_content = f"# {outline.title}\n\n"
+            markdown_content = []  # 使用列表存储各部分内容
+            
+            # 添加文档标题
+            markdown_content.append(f"# {outline.title}\n")
             
             # 递归生成内容
             def generate_content_for_paragraph(paragraph, level=1, parent_structure=None):
-                nonlocal markdown_content
-                
                 # 获取子标题
                 sub_titles = get_sub_paragraph_titles(paragraph)
                 
@@ -564,8 +565,10 @@ class OutlineGenerator:
                         rag_context
                     )
                     
-                    # 添加到Markdown
-                    markdown_content += f"## {paragraph.title}\n\n{content}\n\n"
+                    # 添加章节标题和内容
+                    chapter_number = len(outline_structure)
+                    markdown_content.append(f"\n## 第{self._number_to_chinese(chapter_number)}章 {paragraph.title}\n")
+                    markdown_content.append(f"\n{content}\n")
                 
                 # 递归处理子段落
                 if hasattr(paragraph, 'children') and paragraph.children:
@@ -576,10 +579,13 @@ class OutlineGenerator:
             for root_paragraph in root_paragraphs:
                 generate_content_for_paragraph(root_paragraph)
             
+            # 合并所有内容
+            final_content = ''.join(markdown_content)
+            
             # 设置内容
-            full_content["content"] = markdown_content
-            full_content["markdown"] = markdown_content
-            full_content["html"] = markdown.markdown(markdown_content, extensions=['extra'])
+            full_content["content"] = final_content
+            full_content["markdown"] = final_content
+            full_content["html"] = markdown.markdown(final_content, extensions=['extra'])
             logger.info("Markdown转HTML完成")
             
             # 添加大纲结构
@@ -626,13 +632,16 @@ class OutlineGenerator:
            - 五级标题使用：①②③④...
            严格遵循以上编号规范，确保全文格式统一。
            
-           注意：不要在内容开头重复章节标题，因为标题会在其他地方自动添加。直接从正文内容开始。
+           注意：
+           - 不要在内容开头重复章节标题，因为标题会在其他地方自动添加。直接从正文内容开始。
+           - 不要包含"参考文档说明"、"参考文档"、"参考文献"等辅助说明文本。
+           - 不要出现类似"根据xxx标准"、"参考了xxx文件"等说明性文字。
         
         2. 内容要求：
            - 字数控制在{word_count_range}字之间
            - 确保内容与整体文章主题"{article_title}"保持一致
            - 与文章其他部分建立明确的逻辑关联
-           - 合理引用和整合知识库提供的相关内容
+           - 合理引用和整合知识库提供的相关内容，但不要出现引用说明
            - 每个子主题都要得到充分展开
            - 所有子主题必须按照上述编号规范进行编号
         
@@ -641,7 +650,7 @@ class OutlineGenerator:
            - 在结尾部分，预示下文将要讨论的内容（如果不是最后一个段落）
            - 使用适当的过渡语句，确保段落间的自然衔接
         
-        请生成符合以上要求的段落内容。内容应该专业、严谨，同时保持生动有趣。确保严格遵循段落编号规范，不得混用不同的编号方式。记住：不要在内容中包含章节标题，直接从正文内容开始。
+        请生成符合以上要求的段落内容。内容应该专业、严谨，同时保持生动有趣。确保严格遵循段落编号规范，不得混用不同的编号方式。记住：不要在内容中包含章节标题，直接从正文内容开始。生成的内容应该是完整的正文，不要包含任何参考说明、文档说明等辅助文本。
         """
         
         try:
@@ -654,7 +663,28 @@ class OutlineGenerator:
             # 执行链
             result = chain.invoke({})
             
-            return result.content
+            # 过滤掉可能出现的参考说明文本
+            content = result.content
+            filtered_lines = []
+            skip_line = False
+            
+            for line in content.split('\n'):
+                # 跳过包含特定关键词的行
+                if any(keyword in line for keyword in [
+                    "参考文档", "参考文献", "参考说明", "文档说明",
+                    "根据标准", "依据标准", "参考了", "参考资料"
+                ]):
+                    skip_line = True
+                    continue
+                    
+                if skip_line and not line.strip():
+                    skip_line = False
+                    continue
+                    
+                if not skip_line:
+                    filtered_lines.append(line)
+            
+            return '\n'.join(filtered_lines)
             
         except Exception as e:
             logger.error(f"生成段落内容时出错: {str(e)}")
@@ -741,4 +771,29 @@ class OutlineGenerator:
             
         except Exception as e:
             logger.error(f"直接生成内容时出错: {str(e)}")
-            raise 
+            raise
+
+    def _number_to_chinese(self, num):
+        """将数字转换为中文数字"""
+        chinese_nums = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+        chinese_units = ['', '十', '百', '千']
+        
+        if num == 0:
+            return chinese_nums[0]
+        
+        result = ''
+        unit_pos = 0
+        while num > 0:
+            digit = num % 10
+            if digit != 0:
+                result = chinese_nums[digit] + chinese_units[unit_pos] + result
+            elif result and result[0] not in chinese_units:
+                result = chinese_nums[0] + result
+            num //= 10
+            unit_pos += 1
+        
+        # 处理十几的特殊情况
+        if len(result) >= 2 and result[0] == '一' and result[1] == '十':
+            result = result[1:]
+        
+        return result 

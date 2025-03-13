@@ -327,6 +327,7 @@ const Sender = forwardRef<any, SenderProps>(
                       onChange={handleOutlineChange}
                       popupMatchSelectWidth={false}
                       placeholder="选择大纲"
+                      allowClear
                       prefix={<FileOutlined />}
                       style={{ minWidth: '120px' }}
                     >
