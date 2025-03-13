@@ -259,9 +259,7 @@ const Sender = forwardRef<any, SenderProps>(
           data: requestData,
         });
         history.push(
-          `/WritingHistory?task_id=${
-            response.task_id
-          }&id=${response.session_id.replace('chat-', '')}`,
+          `/WritingHistory?task_id=${response.task_id}&id=${response.session_id}`,
         );
         console.log('response', response);
       } catch (error) {

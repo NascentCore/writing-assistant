@@ -234,12 +234,11 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
       // 获取当前 URL 中的会话 ID
       const query = new URLSearchParams(location.search);
       const currentSessionIdFromUrl = query.get('id');
-      const sessionIdWithoutPrefix = sessionId.replace('chat-', '');
 
       // 只有当 URL 中的会话 ID 与要切换的会话 ID 不同时，才更新 URL
-      if (currentSessionIdFromUrl !== sessionIdWithoutPrefix) {
+      if (currentSessionIdFromUrl !== sessionId) {
         // 只更新路由，不请求会话详情
-        history.push(`/WritingHistory?id=${sessionIdWithoutPrefix}`);
+        history.push(`/WritingHistory?id=${sessionId}`);
       }
 
       // 不在这里请求会话详情，而是由 URL 监听函数来触发
@@ -331,11 +330,8 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
             // 清除当前轮询的任务ID
             setPollingTaskId(null);
 
-            // 从会话ID中提取不带前缀的ID
-            const sessionIdWithoutPrefix = sessionId.replace('chat-', '');
-
-            // 更新URL，移除task_id参数
-            history.push(`/WritingHistory?id=${sessionIdWithoutPrefix}`);
+            // 更新URL，移除task_id参数，直接使用原始会话ID
+            history.push(`/WritingHistory?id=${sessionId}`);
 
             // 重新加载会话详情
             loadSessionDetail(sessionId);
@@ -449,14 +445,14 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
     // 如果没有会话 ID 参数，不做任何处理
     if (!sessionIdFromUrl) return;
 
-    const fullSessionId = `chat-${sessionIdFromUrl}`;
+    const sessionId = sessionIdFromUrl;
 
     // 如果 URL 中的会话 ID 与当前活动会话相同，不做任何处理
-    if (fullSessionId === activeSessionId) return;
+    if (sessionId === activeSessionId) return;
 
     // 检查这个会话 ID 是否在当前会话列表中
     const sessionExists = sessions.some(
-      (session) => session.session_id === fullSessionId,
+      (session) => session.session_id === sessionId,
     );
 
     // 如果会话不在列表中，可能需要刷新会话列表
@@ -466,13 +462,13 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
       // 等待会话列表刷新后再加载会话
       setTimeout(() => {
         // 加载会话详情
-        loadSessionDetail(fullSessionId);
+        loadSessionDetail(sessionId);
       }, 500); // 给会话列表刷新一些时间
       return;
     }
 
     // 加载会话详情
-    loadSessionDetail(fullSessionId);
+    loadSessionDetail(sessionId);
   }, [
     location.search,
     activeSessionId,
@@ -509,18 +505,15 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
       setTaskPollingInterval(null);
     }
 
-    // 如果有任务 ID 且会话 ID 不为空，开始轮询任务状态
-    const fullSessionId = `chat-${sessionId}`;
-
     // 设置当前正在轮询的任务ID
     setPollingTaskId(taskId);
 
     // 立即执行一次轮询
-    pollTaskStatus(taskId, fullSessionId);
+    pollTaskStatus(taskId, sessionId);
 
     // 设置定时器，每 5 秒轮询一次任务状态
     const intervalId = setInterval(() => {
-      pollTaskStatus(taskId, fullSessionId);
+      pollTaskStatus(taskId, sessionId);
     }, 5000);
 
     // 保存定时器 ID
@@ -542,12 +535,8 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
     // 如果URL没有id参数，会话列表不为空，且没有活动会话，则选择第一个会话
     if (!sessionIdFromUrl && sessions.length > 0 && !activeSessionId) {
       const firstSession = sessions[0];
-      const sessionIdWithoutPrefix = firstSession.session_id.replace(
-        'chat-',
-        '',
-      );
       // 更新URL，添加会话ID参数
-      history.push(`/WritingHistory?id=${sessionIdWithoutPrefix}`);
+      history.push(`/WritingHistory?id=${firstSession.session_id}`);
     }
   }, [sessions, activeSessionId, location.search, history, loadSessionDetail]);
 

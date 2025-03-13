@@ -282,10 +282,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     if (!sessionIdFromUrl && !activeSessionId) {
       const savedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
       if (savedSessionId) {
-        // 从savedSessionId中提取不带前缀的ID部分
-        const sessionIdWithoutPrefix = savedSessionId.replace('chat-', '');
         // 更新URL，添加会话ID参数
-        history.push(`/AiChat?id=${sessionIdWithoutPrefix}`);
+        history.push(`/AiChat?id=${savedSessionId}`);
       }
     }
   }, [location.search, activeSessionId, history]);
@@ -321,9 +319,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           }
 
           // 更新路由，添加会话ID参数
-          // 使用非空断言，因为我们已经检查了 sessionResponse.session_id 存在
-          const sessionIdWithoutPrefix = currentSessionId!.replace('chat-', '');
-          history.push(`/AiChat?id=${sessionIdWithoutPrefix}`);
+          history.push(`/AiChat?id=${currentSessionId}`);
         }
       } catch (error) {
         console.error('创建会话失败:', error);

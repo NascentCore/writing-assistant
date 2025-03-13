@@ -208,12 +208,11 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
       // 获取当前 URL 中的会话 ID
       const query = new URLSearchParams(location.search);
       const currentSessionIdFromUrl = query.get('id');
-      const sessionIdWithoutPrefix = sessionId.replace('chat-', '');
 
       // 只有当 URL 中的会话 ID 与要切换的会话 ID 不同时，才更新 URL
-      if (currentSessionIdFromUrl !== sessionIdWithoutPrefix) {
+      if (currentSessionIdFromUrl !== sessionId) {
         // 只更新路由，不请求会话详情
-        history.push(`/AiChat?id=${sessionIdWithoutPrefix}`);
+        history.push(`/AiChat?id=${sessionId}`);
       }
 
       // 不在这里请求会话详情，而是由 URL 监听函数来触发
@@ -354,14 +353,14 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
     // 如果没有会话 ID 参数，不做任何处理
     if (!sessionIdFromUrl) return;
 
-    const fullSessionId = `chat-${sessionIdFromUrl}`;
+    const sessionId = sessionIdFromUrl;
 
     // 如果 URL 中的会话 ID 与当前活动会话相同，不做任何处理
-    if (fullSessionId === activeSessionId) return;
+    if (sessionId === activeSessionId) return;
 
     // 检查这个会话 ID 是否在当前会话列表中
     const sessionExists = sessions.some(
-      (session) => session.session_id === fullSessionId,
+      (session) => session.session_id === sessionId,
     );
 
     // 如果会话不在列表中，可能需要刷新会话列表
@@ -371,13 +370,13 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
       // 等待会话列表刷新后再加载会话
       setTimeout(() => {
         // 加载会话详情
-        loadSessionDetail(fullSessionId);
+        loadSessionDetail(sessionId);
       }, 500); // 给会话列表刷新一些时间
       return;
     }
 
     // 加载会话详情
-    loadSessionDetail(fullSessionId);
+    loadSessionDetail(sessionId);
   }, [
     location.search,
     activeSessionId,

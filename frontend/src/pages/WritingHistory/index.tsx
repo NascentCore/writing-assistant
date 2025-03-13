@@ -349,10 +349,10 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
         setMessages((prev: ChatMessage[]) => [...prev, newMessage]);
 
         // 更新URL，添加task_id参数，触发轮询
-        const sessionIdWithoutPrefix =
-          activeSessionId?.replace('chat-', '') || '';
         history.push(
-          `/WritingHistory?id=${sessionIdWithoutPrefix}&task_id=${response.task_id}`,
+          `/WritingHistory?id=${activeSessionId || ''}&task_id=${
+            response.task_id
+          }`,
         );
       }
     } catch (error) {
@@ -387,9 +387,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           setActiveSessionId(currentSessionId);
 
           // 更新路由，添加会话ID参数
-          // 使用非空断言，因为我们已经检查了 sessionResponse.session_id 存在
-          const sessionIdWithoutPrefix = currentSessionId!.replace('chat-', '');
-          history.push(`/WritingHistory?id=${sessionIdWithoutPrefix}`);
+          history.push(`/WritingHistory?id=${currentSessionId}`);
         }
       } catch (error) {
         console.error('创建会话失败:', error);

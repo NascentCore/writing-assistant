@@ -225,9 +225,7 @@ const Layout: React.FC = () => {
                     }`}
                     onClick={() => {
                       setSelectedMenu(child.key);
-                      // 从 chat-01 这样的格式中提取出数字部分作为 chatId
-                      const chatId = child.key.split('-')[1];
-                      history.push(`/AiChat?chatId=${chatId}`);
+                      history.push(`/AiChat?chatId=${child.key}`);
                     }}
                   >
                     {child.title}
