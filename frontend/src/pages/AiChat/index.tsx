@@ -1,6 +1,7 @@
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
   CloudUploadOutlined,
+  CopyOutlined,
   // PlusCircleOutlined,
   PaperClipOutlined,
   SwapOutlined,
@@ -19,6 +20,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { CopyToClipboard } from 'react-copy-to-clipboard';
 import { API_BASE_URL } from '../../config';
 import ChatSessionList, { ChatMessage } from './components/ChatSessionList';
 import styles from './index.module.less';
@@ -562,6 +564,24 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                       icon: <UserOutlined />,
                       style: { background: isUser ? '#87d068' : '#fde3cf' },
                     },
+                    // 为 assistant 角色添加 footer，包含复制按钮
+                    footer:
+                      !isUser && bubble.content ? (
+                        <Flex justify="flex-end">
+                          <CopyToClipboard
+                            text={String(bubble.content || '')}
+                            onCopy={() => message.success('复制成功')}
+                          >
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<CopyOutlined />}
+                            >
+                              复制
+                            </Button>
+                          </CopyToClipboard>
+                        </Flex>
+                      ) : undefined,
                     messageRender: () => {
                       // 使用 bubble.key 查找对应的消息
                       const currentMessage = messages.find(

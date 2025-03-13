@@ -2,7 +2,7 @@ import { fetchWithAuthNew } from '@/utils/fetch';
 import { DeleteOutlined } from '@ant-design/icons';
 import { history, useLocation } from '@umijs/max';
 import { Button, Empty, Spin, Typography, message } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './index.module.less';
 
 // 会话历史接口返回类型
@@ -168,6 +168,9 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
   // 添加一个状态来跟踪会话列表是否需要刷新
   const [needRefresh, setNeedRefresh] = useState(false);
 
+  // 添加一个ref来跟踪已加载的会话ID
+  const loadedSessionsRef = useRef<Set<string>>(new Set());
+
   // 获取会话历史
   const fetchSessions = useCallback(async (page = 1) => {
     setSessionsLoading(true);
@@ -213,6 +216,9 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
       if (currentSessionIdFromUrl !== sessionId) {
         // 只更新路由，不请求会话详情
         history.push(`/AiChat?id=${sessionId}`);
+
+        // 从已加载集合中移除，以便可以重新加载
+        loadedSessionsRef.current.delete(sessionId);
       }
 
       // 不在这里请求会话详情，而是由 URL 监听函数来触发
@@ -357,6 +363,12 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
 
     // 如果 URL 中的会话 ID 与当前活动会话相同，不做任何处理
     if (sessionId === activeSessionId) return;
+
+    // 检查这个会话是否已经加载过
+    if (loadedSessionsRef.current.has(sessionId)) return;
+
+    // 将当前会话ID添加到已加载集合中
+    loadedSessionsRef.current.add(sessionId);
 
     // 检查这个会话 ID 是否在当前会话列表中
     const sessionExists = sessions.some(
