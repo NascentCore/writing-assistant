@@ -132,7 +132,7 @@ const KnowledgeBaseList: React.FC = () => {
         }}
         rowKey="file_id"
         pagination={{
-          pageSize: 10,
+          showSizeChanger: true,
         }}
         dateFormatter="string"
         headerTitle="知识库文件列表"
