@@ -1,8 +1,6 @@
-FROM sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app-backend:d4aac26
+FROM sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app-backend:c6ca5fb
 
 WORKDIR /app
-
-RUN apk add --no-cache libreoffice
 
 # 复制 Python 应用和依赖
 COPY app /app/
