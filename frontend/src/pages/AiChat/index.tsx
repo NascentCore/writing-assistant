@@ -772,8 +772,16 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                           : {
                               icon: <CloudUploadOutlined />,
                               title: '上传文件',
-                              description:
-                                '点击或拖拽文件到此区域上传,此处仅上传背景资料，字数不宜超过2000字,相关参考文件提前上传至个人知识库并自动解析',
+                              description: (
+                                <div>
+                                  <div>
+                                    点击或拖拽文件到此区域上传，此处仅上传背景资料，字数不宜超过2000字
+                                  </div>
+                                  <div>
+                                    相关参考文件提前上传至个人知识库并自动解析
+                                  </div>
+                                </div>
+                              ),
                             }
                       }
                       getDropContainer={() => senderRef.current?.nativeElement}

@@ -208,7 +208,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
       setMessages(sessionMessages);
 
       // 保存当前会话ID到localStorage
-      localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+      // localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
 
       // 使用 requestAnimationFrame 确保在DOM更新后再滚动
       // 延迟稍微长一点，确保内容已完全渲染
@@ -317,9 +317,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
           setActiveSessionId(currentSessionId);
 
           // 保存会话ID到localStorage
-          if (currentSessionId) {
-            localStorage.setItem(SESSION_STORAGE_KEY, currentSessionId);
-          }
+          // if (currentSessionId) {
+          //   localStorage.setItem(SESSION_STORAGE_KEY, currentSessionId);
+          // }
 
           // 更新路由，添加会话ID参数
           const query = new URLSearchParams(location.search);
@@ -789,8 +789,16 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                           : {
                               icon: <CloudUploadOutlined />,
                               title: '上传文件',
-                              description:
-                                '点击或拖拽文件到此区域上传,此处仅上传背景资料，字数不宜超过2000字,相关参考文件提前上传至个人知识库并自动解析',
+                              description: (
+                                <div>
+                                  <div>
+                                    点击或拖拽文件到此区域上传，此处仅上传背景资料，字数不宜超过2000字
+                                  </div>
+                                  <div>
+                                    相关参考文件提前上传至个人知识库并自动解析
+                                  </div>
+                                </div>
+                              ),
                             }
                       }
                       getDropContainer={() => senderRef.current?.nativeElement}
