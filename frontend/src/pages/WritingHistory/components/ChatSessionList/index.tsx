@@ -331,16 +331,18 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
             setPollingTaskId(null);
 
             // 更新URL，移除task_id参数，直接使用原始会话ID
-            history.push(`/WritingHistory?id=${sessionId}`);
+            if (location.pathname === '/WritingHistory') {
+              history.push(`/WritingHistory?id=${sessionId}`);
+            }
 
             // 重新加载会话详情
             loadSessionDetail(sessionId);
 
             // 如果任务失败，显示错误消息
             if (response.status === 'failed') {
-              message.error('任务处理失败: ' + (response.error || '未知错误'));
+              // message.error('任务处理失败: ' + (response.error || '未知错误'));
             } else if (response.status === 'completed') {
-              message.success('任务处理完成');
+              // message.success('任务处理完成');
             }
           }
         }
