@@ -21,6 +21,7 @@ from app.rag.rag_api_async import rag_api_async
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.models.task import Task, TaskStatus
 from app.models.document import Document
+import re
 
 logger = logging.getLogger("app")
 
@@ -207,7 +208,9 @@ async def get_files(
         query_filter = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False)
         
         if file_name:
-            query_filter = query_filter.filter(RagFile.file_name.contains(file_name))
+            query_list = re.split(r'[,\s、]+', file_name)
+            for term in query_list:
+                query_filter = query_filter.filter(RagFile.file_name.contains(term))
         
         total = query_filter.count()
         total_pages = (total + page_size - 1) // page_size
