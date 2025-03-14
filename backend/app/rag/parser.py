@@ -1,4 +1,5 @@
 import asyncio
+import os
 import PyPDF2
 from docx import Document
 from app.config import settings
@@ -205,7 +206,7 @@ def get_parser(file_type: str) -> FileParser:
 
 def get_file_format(file_path: str) -> str:
     """
-    通过读取文件头部信息来判断文件格式
+    通过文件的扩展名来判断文件格式
     
     Args:
         file_path: 文件路径
@@ -213,17 +214,16 @@ def get_file_format(file_path: str) -> str:
     Returns:
         str: 文件格式 ('pdf' 或 'docx')
     """
-    with open(file_path, 'rb') as f:
-        header = f.read(4)
-        
-    # PDF文件头: %PDF (25 50 44 46)
-    if header.startswith(b'%PDF'):
+    _, file_extension = os.path.splitext(file_path)
+    
+    if file_extension.lower() == '.pdf':
         return 'pdf'
-    # DOCX文件头: PK (50 4B)
-    elif header.startswith(b'PK'):
+    elif file_extension.lower() == '.docx':
         return 'docx'
+    elif file_extension.lower() == '.doc':
+        return 'doc'
     else:
-        raise ValueError(f"不支持的文件格式")
+        raise ValueError(f"不支持的文件格式: {file_extension}")
 
 class BaseParser:
     async def content(self, file_path: str) -> str:
@@ -231,3 +231,24 @@ class BaseParser:
         async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
             return await f.read()
 
+
+async def convert_doc_to_docx(doc_path: str, docx_path: str = None):
+    if not os.path.isfile(doc_path):
+        raise FileNotFoundError(f"Input file '{doc_path}' not found.")
+
+    output_file = docx_path or os.path.splitext(doc_path)[0] + ".docx"
+    
+    process = await asyncio.create_subprocess_exec(
+        "unoconv",
+        "-f", "docx",
+        "-o", output_file,
+        doc_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await process.communicate()
+    
+    if process.returncode != 0:
+        raise RuntimeError(f"Conversion failed: {stderr.decode()}")
+
+    return output_file

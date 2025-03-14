@@ -16,12 +16,13 @@ from app.models.chat import ChatMessage, ChatSession, ChatSessionType
 from app.models.rag import RagFile, RagFileStatus, RagKnowledgeBase, RagKnowledgeBaseType
 from app.models.user import User
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
-from app.rag.parser import get_parser, get_file_format
+from app.rag.parser import convert_doc_to_docx, get_parser, get_file_format
 from app.rag.rag_api_async import rag_api_async
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.models.task import Task, TaskStatus
 from app.models.document import Document
 import re
+import hashlib
 
 logger = logging.getLogger("app")
 
@@ -105,29 +106,47 @@ async def upload_files(
             db.add(kb)
             db.commit()
         
-        # 过滤已存在的文件
-        file_names = [file.filename for file in files]
-        existing_files = db.query(RagFile).filter(RagFile.kb_id == kb_id, RagFile.file_name.in_(file_names), RagFile.is_deleted == False).all()
-        existing_file_names = [file.file_name for file in existing_files]
-        files = [file for file in files if file.filename not in existing_file_names]
-        
+        existing_files = []
         result = []
         for file in files:
             file_id = f"file-{shortuuid.uuid()}"
             file_location = upload_dir / f"{file_id}_{file.filename}" # 文件存储路径
+            file_name = file.filename
             # 保存文件到磁盘
             try:
                 contents = await file.read()
                 with open(file_location, "wb") as f:
                     f.write(contents)
-                # 从文件内容判断格式
+                
+                # 计算文件的哈希值
+                file_hash = hashlib.sha256(contents).hexdigest()
+                # 查询文件是否存在
+                existing_file = db.query(RagFile).filter(RagFile.hash == file_hash, RagFile.is_deleted == False).first()
+                if existing_file:
+                    logger.warning(f"文件 {file.filename} 已存在, 跳过上传")
+                    existing_files.append({
+                        "file_id": existing_file.file_id,
+                        "file_name": existing_file.file_name,
+                        "size": existing_file.file_size,
+                        "content_type": existing_file.file_ext,
+                        "path": existing_file.file_path,
+                        "hash": existing_file.hash
+                    })
+                    continue
+
                 file_format = get_file_format(str(file_location))
+                if file_format == "doc":
+                    docx_file_location = await convert_doc_to_docx(str(file_location))
+                    file_location = docx_file_location
+                    file_format = "docx"
+                    file_name = file_name.replace(".doc", ".docx")
                 result.append({
                     "file_id": file_id,
-                    "file_name": file.filename,
+                    "file_name": file_name,
                     "size": len(contents),
                     "content_type": file_format,
-                    "path": str(file_location)
+                    "path": str(file_location),
+                    "hash": file_hash
                 })
             except Exception as e:
                 logger.error(f"上传文件 {file.filename} 时发生错误: {str(e)}")
@@ -140,7 +159,7 @@ async def upload_files(
                 kb_id=kb_id,
                 kb_type=RagKnowledgeBaseType.SYSTEM if category == "system" else RagKnowledgeBaseType.USER,
                 user_id=current_user.user_id,
-                file_name=file.filename,
+                file_name=file_name,
                 file_size=len(contents),
                 file_ext=file_format, 
                 file_path=str(file_location),
@@ -150,14 +169,18 @@ async def upload_files(
                 summary_large='',
                 content='',
                 meta='',
+                hash=file_hash  # 保存哈希值到数据库
             )
         
             db.add(db_file)
             db.commit() 
 
         return APIResponse.success(
-            message=f"文件上传成功, 正在解析中。已经存在文件: {existing_file_names}",
-            data=result
+            message=f"文件上传成功, 正在解析中。",
+            data={
+                "files": result,
+                "existing_files": existing_files
+            }
         )
     except Exception as e:
         logger.error(f"上传文件时发生异常: {str(e)}")
@@ -747,40 +770,57 @@ async def upload_attachment(
             db.commit()
 
         # 过滤已存在的文件
-        file_names = [file.filename for file in files]
-        existing_files = db.query(RagFile).filter(RagFile.file_name.in_(file_names), RagFile.user_id == current_user.user_id, RagFile.is_deleted == False).all()
-        existing_file_names = [file.file_name for file in existing_files]
-        new_files = [file for file in files if file.filename not in existing_file_names]
+        # file_names = [file.filename for file in files]
+        # existing_files = db.query(RagFile).filter(RagFile.file_name.in_(file_names), RagFile.user_id == current_user.user_id, RagFile.is_deleted == False).all()
+        # existing_file_names = [file.file_name for file in existing_files]
+        # new_files = [file for file in files if file.filename not in existing_file_names]
         
-        result = []
+        new_files = []
+        existing_files = []
         update_content_files = []
-        for new_file in new_files:
+        for file in files:
             file_id = f"file-{shortuuid.uuid()}"
-            file_location = upload_dir / f"{file_id}_{new_file.filename}" # 文件存储路径
+            file_location = upload_dir / f"{file_id}_{file.filename}" # 文件存储路径
+            file_name = file.filename
             # 保存文件到磁盘
             try:
-                contents = await new_file.read()
+                contents = await file.read()
                 with open(file_location, "wb") as f:
                     f.write(contents)
-                # 从文件内容判断格式
+                
+                # 计算文件的哈希值
+                file_hash = hashlib.sha256(contents).hexdigest()
+                db_file = db.query(RagFile).filter(RagFile.hash == file_hash, RagFile.is_deleted == False).first()
+                if db_file:
+                    existing_files.append(db_file)
+                    continue
+                
                 file_format = get_file_format(str(file_location))
-                result.append({
+                if file_format == 'doc':
+                    docx_file_location = await convert_doc_to_docx(str(file_location))
+                    file_location = docx_file_location
+                    file_format = "docx"
+                    file_name = file_name.replace(".doc", ".docx")
+
+                new_files.append({
                     "file_id": file_id,
-                    "file_name": new_file.filename,
+                    "file_name": file_name,
                     "size": len(contents),
                     "content_type": file_format,
+                    "path": str(file_location),
+                    "hash": file_hash 
                 })
             except Exception as e:
-                logger.error(f"上传文件 {new_file.filename} 时发生错误: {str(e)}")
-                return APIResponse.error(message=f"上传文件 {new_file.filename} 时发生错误: {str(e)}")
+                logger.error(f"上传文件 {file.filename} 时发生错误: {str(e)}")
+                return APIResponse.error(message=f"上传文件 {file.filename} 时发生错误: {str(e)}")
             finally:
-                await new_file.close()
+                await file.close()
         
             # 提交RAG解析任务
             db_file = RagFile(
                 file_id=file_id,    
                 user_id=current_user.user_id,
-                file_name=new_file.filename,
+                file_name=file_name,
                 file_size=len(contents),
                 file_ext=file_format, 
                 file_path=str(file_location),
@@ -789,6 +829,7 @@ async def upload_attachment(
                 summary_large='',
                 content='',
                 meta='',
+                hash=file_hash 
             )
             if save_to_kb:
                 db_file.kb_id = kb_id
@@ -807,28 +848,22 @@ async def upload_attachment(
                 continue
             content = await parser.async_content(file_location)
             if not content.strip():
-                logger.error(f"upload_attachment 解析文件 {new_file.filename} 时发生错误: 文件内容为空")
+                logger.error(f"upload_attachment 解析文件 {file.filename} 时发生错误: 文件内容为空")
                 continue
             # 添加到更新内容列表
             update_content_files.append((file_id, content))
 
-        for new_file in existing_files:
-            result.append({
-                "file_id": new_file.file_id,
-                "file_name": new_file.file_name,
-                "size": new_file.file_size,
-                "content_type": new_file.file_ext,
-            })
-            if not new_file.content.strip():
-                parser = get_parser(new_file.file_ext)
+        for file in existing_files:
+            if not file.content.strip():
+                parser = get_parser(file.file_ext)
                 if not parser:
-                    logger.error(f"upload_attachment 不支持解析的文件格式: {new_file.file_ext}")
+                    logger.error(f"upload_attachment 不支持解析的文件格式: {file.file_ext}")
                     continue
-                content = await parser.async_content(new_file.file_path)
+                content = await parser.async_content(file.file_path)
                 if not content.strip():
-                    logger.error(f"upload_attachment 解析文件 {new_file.file_name} 时发生错误: 文件内容为空")
+                    logger.error(f"upload_attachment 解析文件 {file.file_name} 时发生错误: 文件内容为空")
                     continue
-                update_content_files.append((new_file.file_id, content))
+                update_content_files.append((file.file_id, content))
         
         # 更新内容
         for file_id, content in update_content_files:
@@ -841,8 +876,18 @@ async def upload_attachment(
             db.commit()
         
         return APIResponse.success(
-            message=f"文件上传成功, 正在解析中。已经存在文件: {existing_file_names}",
-            data=result
+            message=f"文件上传成功, 正在解析中。",
+            data={
+                "files": new_files,
+                "existing_files": [{
+                    "file_id": file.file_id, 
+                    "file_name": file.file_name,
+                    "size": file.file_size,
+                    "content_type": file.file_ext,
+                    "path": file.file_path,
+                    "hash": file.hash
+                } for file in existing_files]
+            }
         )
     except Exception as e:
         logger.error(f"上传文件时发生异常: {str(e)}")
