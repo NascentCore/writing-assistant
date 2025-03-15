@@ -88,8 +88,6 @@ const TreeWrapper = forwardRef<
   }
 >(({ outlineId, readOnly, onGenerateLongDocument, currentMessage }, ref) => {
   const handleGenerateDocument = async () => {
-    onGenerateLongDocument(currentMessage);
-
     try {
       // 先获取大纲数据
       const outlineResponse = (ref as any)?.current?.getInteractiveTreeData();
@@ -104,6 +102,7 @@ const TreeWrapper = forwardRef<
       });
 
       // 调用父组件的生成长文档方法
+      onGenerateLongDocument(currentMessage);
     } catch (error) {
       console.error('更新大纲失败', error);
       message.error('更新大纲失败');
@@ -317,8 +316,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
 
   // 处理生成长文档
   const handleGenerateLongDocument = async (currentMessage: ChatMessage) => {
-    console.log('currentMessage', currentMessage);
-
     try {
       // 添加一条用户消息"请基于大纲生成全文"
       const userMessage = createMessage('请基于大纲生成全文', true);

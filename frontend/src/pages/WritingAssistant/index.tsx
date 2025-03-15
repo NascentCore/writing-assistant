@@ -105,10 +105,9 @@ const Home: React.FC = () => {
 
   // 处理卡片点击事件
   const handleCardClick = (card: WritingCard) => {
-    console.log('点击卡片:', card);
     // 设置选中的卡片ID
     setSelectedCardId(card.id);
-    
+
     if (card.value) {
       setSelectedTemplateValue(card.value);
     }
@@ -124,7 +123,7 @@ const Home: React.FC = () => {
     }
 
     // 设置是否分步骤
-    console.log('设置分步骤:', card.tag === '分步骤');
+
     setHasSteps(card.tag === '分步骤');
   };
 
@@ -159,7 +158,9 @@ const Home: React.FC = () => {
               allCards.map((card) => (
                 <div
                   key={card.id}
-                  className={`${styles.card} ${selectedCardId === card.id ? styles.selectedCard : ''}`}
+                  className={`${styles.card} ${
+                    selectedCardId === card.id ? styles.selectedCard : ''
+                  }`}
                   onClick={() => handleCardClick(card)}
                 >
                   <div className={styles.cardIcon}>
