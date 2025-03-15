@@ -36,6 +36,14 @@ def add_numbering_to_headers(html_text):
         text = re.sub(r'^\d+\.\d*\s*', '', text)
         return text
     
+    # 检查标题文本是否包含数字序号模式
+    def extract_numbering_pattern(text):
+        # 匹配如 "2.1" 或 "2.1.1" 的模式
+        match = re.match(r'^(\d+\.\d+(\.\d+)*)[\s\.]+', text)
+        if match:
+            return match.group(1)
+        return None
+    
     # 检查标题是否已经有明显的标题格式（如"一、标题"或"第一章 标题"）
     def is_already_formatted_title(text):
         # 检查是否以中文数字加顿号开头，如"一、"、"二、"等
@@ -51,6 +59,11 @@ def add_numbering_to_headers(html_text):
     
     # 收集所有标题并按文档顺序排序
     headers = []
+    
+    # 获取所有标签，用于后续排序
+    all_tags = list(soup.find_all())
+    
+    # 首先处理常规标题标签
     for tag in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
         # 获取原始文本
         original_text = tag.get_text().strip()
@@ -59,14 +72,42 @@ def add_numbering_to_headers(html_text):
         # 一级标题不添加序号，直接保留原始文本
         if level == 1:
             headers.append((tag, level, original_text, original_text, True))
-        # # 检查是否已经是格式化的标题
-        # elif is_already_formatted_title(original_text):
-        #     # 如果已经是格式化的标题，则跳过添加序号
-        #     headers.append((tag, level, original_text, original_text, True))
         else:
             # 去除标题中已有的序号
             clean_text = remove_existing_numbering(original_text)
             headers.append((tag, level, clean_text, original_text, False))
+    
+    # 然后处理带有strong标签的段落标题
+    for p_tag in soup.find_all('p'):
+        strong_tags = p_tag.find_all(['strong', 'b'])
+        if strong_tags and len(strong_tags) == 1 and strong_tags[0].get_text().strip() == p_tag.get_text().strip():
+            # 这是一个带有strong标签的标题段落
+            original_text = p_tag.get_text().strip()
+            
+            # 检查标题文本是否包含数字序号模式（如"2.1"）
+            numbering_pattern = extract_numbering_pattern(original_text)
+            
+            # 如果标题包含数字序号模式，则根据模式确定级别
+            if numbering_pattern:
+                # 计算点的数量来确定级别（如"2.1"有1个点，所以是2级标题）
+                dots_count = numbering_pattern.count('.')
+                level = dots_count + 1
+                # 确保级别在合理范围内
+                level = max(2, min(level, 6))
+            else:
+                # 如果没有明确的序号模式，则使用默认逻辑
+                # 默认作为三级标题处理
+                level = 3
+            
+            # 去除标题中已有的序号
+            clean_text = remove_existing_numbering(original_text)
+            
+            # 将其添加到headers列表中
+            headers.append((p_tag, level, clean_text, original_text, False))
+    
+    # 按文档顺序排序headers
+    # 使用标签在文档中的位置进行排序
+    headers.sort(key=lambda x: all_tags.index(x[0]) if x[0] in all_tags else float('inf'))
     
     # 创建标题层级结构
     header_hierarchy = {}
@@ -173,6 +214,191 @@ def add_numbering_to_headers(html_text):
     # 返回处理后的 HTML
     return str(soup)
 
+def fix_document_numbering(doc):
+    """
+    修复文档中的标题编号问题，确保标题层级正确：
+    - 形如"二、"的标题为二级标题
+    - 形如"2.3"的标题为三级标题
+    - 形如"9.2.1"的标题为四级标题
+    
+    Args:
+        doc: 要修复的文档对象
+    
+    Returns:
+        修复的标题数量
+    """
+    # 记录修复的标题数量
+    fixed_count = 0
+    
+    # 遍历所有段落
+    for para in doc.paragraphs:
+        # 获取标题文本
+        text = para.text.strip()
+        
+        # 检查是否是形如"9.2.1"的四级标题
+        four_level_match = re.match(r'^(\d+)\.(\d+)\.(\d+)[\s\.]*(.*)$', text)
+        if four_level_match:
+            # 这是一个形如"9.2.1"的四级标题
+            section, subsection, subsubsection, title_text = four_level_match.groups()
+            
+            # 清除段落内容
+            para.clear()
+            
+            # 添加标题文本
+            run = para.add_run(f"{section}.{subsection}.{subsubsection} {title_text}")
+            
+            # 设置字体
+            font = run.font
+            font.size = Pt(12)  # 四级标题字体大小
+            font.color.rgb = RGBColor(0, 64, 128)  # 统一颜色（蓝色）
+            run.bold = True  # 统一加粗
+            
+            # 设置对齐方式
+            para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+            
+            # 确保使用相同的标题样式
+            para.style = 'Heading 4'  # 使用四级标题样式
+            
+            # 确保没有缩进
+            para.paragraph_format.left_indent = Pt(0)
+            para.paragraph_format.first_line_indent = Pt(0)
+            
+            fixed_count += 1
+            continue
+        
+        # 检查是否是形如"2.3"或"3.1"的三级标题
+        three_level_match = re.match(r'^(\d+)\.(\d+)[\s\.]*(.*)$', text)
+        
+        # 也检查中文标题格式，如"二.三"
+        if not three_level_match:
+            # 尝试匹配中文数字格式
+            chinese_match = re.match(r'^([一二三四五六七八九十]+)[\.．。]([一二三四五六七八九十]+)[\s\.]*(.*)$', text)
+            if chinese_match:
+                # 处理中文标题
+                section, subsection, title_text = chinese_match.groups()
+                # 清除段落内容
+                para.clear()
+                
+                # 添加标题文本
+                run = para.add_run(f"{section}.{subsection} {title_text}")
+                
+                # 设置字体
+                font = run.font
+                font.size = Pt(13)  # 三级标题字体大小
+                font.color.rgb = RGBColor(0, 64, 128)  # 统一颜色（蓝色）
+                run.bold = True  # 统一加粗
+                
+                # 设置对齐方式
+                para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+                
+                # 确保使用相同的标题样式
+                para.style = 'Heading 3'  # 使用三级标题样式
+                
+                # 确保没有缩进
+                para.paragraph_format.left_indent = Pt(0)
+                para.paragraph_format.first_line_indent = Pt(0)
+                
+                fixed_count += 1
+                continue
+        
+        # 检查是否是段落中的标题文本
+        if not three_level_match and len(text) > 0:
+            # 先尝试匹配四级标题模式
+            paragraph_four_level_match = re.search(r'(\d+)\.(\d+)\.(\d+)\s+(.*?)(?:\s|$)', text)
+            if paragraph_four_level_match:
+                # 这是一个包含四级标题模式的段落
+                section, subsection, subsubsection, title_text = paragraph_four_level_match.groups()
+                
+                # 如果这个段落看起来像是一个标题（比如它很短，或者只包含这个标题模式）
+                if len(text) < 50 or paragraph_four_level_match.group(0).strip() == text:
+                    # 清除段落内容
+                    para.clear()
+                    
+                    # 添加标题文本
+                    run = para.add_run(f"{section}.{subsection}.{subsubsection} {title_text}")
+                    
+                    # 设置字体
+                    font = run.font
+                    font.size = Pt(12)  # 四级标题字体大小
+                    font.color.rgb = RGBColor(0, 64, 128)  # 统一颜色（蓝色）
+                    run.bold = True  # 统一加粗
+                    
+                    # 设置对齐方式
+                    para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+                    
+                    # 确保使用相同的标题样式
+                    para.style = 'Heading 4'  # 使用四级标题样式
+                    
+                    # 确保没有缩进
+                    para.paragraph_format.left_indent = Pt(0)
+                    para.paragraph_format.first_line_indent = Pt(0)
+                    
+                    fixed_count += 1
+                    continue
+            
+            # 再尝试匹配三级标题模式
+            paragraph_three_level_match = re.search(r'(\d+)\.(\d+)\s+(.*?)(?:\s|$)', text)
+            if paragraph_three_level_match:
+                # 这是一个包含三级标题模式的段落
+                section, subsection, title_text = paragraph_three_level_match.groups()
+                
+                # 如果这个段落看起来像是一个标题（比如它很短，或者只包含这个标题模式）
+                if len(text) < 50 or paragraph_three_level_match.group(0).strip() == text:
+                    # 清除段落内容
+                    para.clear()
+                    
+                    # 添加标题文本
+                    run = para.add_run(f"{section}.{subsection} {title_text}")
+                    
+                    # 设置字体
+                    font = run.font
+                    font.size = Pt(13)  # 三级标题字体大小
+                    font.color.rgb = RGBColor(0, 64, 128)  # 统一颜色（蓝色）
+                    run.bold = True  # 统一加粗
+                    
+                    # 设置对齐方式
+                    para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+                    
+                    # 确保使用相同的标题样式
+                    para.style = 'Heading 3'  # 使用三级标题样式
+                    
+                    # 确保没有缩进
+                    para.paragraph_format.left_indent = Pt(0)
+                    para.paragraph_format.first_line_indent = Pt(0)
+                    
+                    fixed_count += 1
+                    continue
+        
+        if three_level_match:
+            # 这是一个形如"2.3"或"3.1"的三级标题
+            section, subsection, title_text = three_level_match.groups()
+            
+            # 清除段落内容
+            para.clear()
+            
+            # 添加标题文本
+            run = para.add_run(f"{section}.{subsection} {title_text}")
+            
+            # 设置字体
+            font = run.font
+            font.size = Pt(13)  # 三级标题字体大小
+            font.color.rgb = RGBColor(0, 64, 128)  # 统一颜色（蓝色）
+            run.bold = True  # 统一加粗
+            
+            # 设置对齐方式
+            para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+            
+            # 确保使用相同的标题样式
+            para.style = 'Heading 3'  # 使用三级标题样式
+            
+            # 确保没有缩进
+            para.paragraph_format.left_indent = Pt(0)
+            para.paragraph_format.first_line_indent = Pt(0)
+            
+            fixed_count += 1
+    
+    return fixed_count
+
 def html_to_docx(
     html_content: str, 
     title: str = "Document", 
@@ -228,6 +454,43 @@ def html_to_docx(
     
     # 使用 BeautifulSoup 解析处理后的 HTML
     soup = BeautifulSoup(html_text_with_numbers, 'html.parser')
+    
+    # 收集所有标题信息，用于后续处理
+    headers = []
+    for tag in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+        level = int(tag.name[1])
+        headers.append((tag, level))
+    
+    # 收集带有strong标签的段落标题
+    for p_tag in soup.find_all('p'):
+        strong_tags = p_tag.find_all(['strong', 'b'])
+        if strong_tags and len(strong_tags) == 1 and strong_tags[0].get_text().strip() == p_tag.get_text().strip():
+            # 这是一个带有strong标签的标题段落
+            text = p_tag.get_text().strip()
+            
+            # 检查标题文本是否包含数字序号模式（如"2.1"）
+            def extract_numbering_pattern(text):
+                # 匹配如 "2.1" 或 "2.1.1" 的模式
+                match = re.match(r'^(\d+\.\d+(\.\d+)*)[\s\.]+', text)
+                if match:
+                    return match.group(1)
+                return None
+            
+            numbering_pattern = extract_numbering_pattern(text)
+            
+            # 如果标题包含数字序号模式，则根据模式确定级别
+            if numbering_pattern:
+                # 计算点的数量来确定级别（如"2.1"有1个点，所以是2级标题）
+                dots_count = numbering_pattern.count('.')
+                level = dots_count + 1
+                # 确保级别在合理范围内
+                level = max(2, min(level, 6))
+            else:
+                # 如果没有明确的序号模式，则使用默认逻辑
+                # 默认作为三级标题处理
+                level = 3
+            
+            headers.append((p_tag, level))
     
     # 创建样式
     def create_styles(doc):
@@ -356,6 +619,43 @@ def html_to_docx(
         # 处理段落
         if element.name == 'p':
             text = element.get_text().strip()
+            
+            # 检查段落中是否包含strong标签，且strong标签内容符合标题格式
+            strong_tags = element.find_all(['strong', 'b'])
+            if strong_tags and len(strong_tags) == 1 and strong_tags[0].get_text().strip() == text:
+                # 这是一个带有strong标签的标题段落
+                p = doc.add_paragraph()
+                
+                # 根据标题级别设置样式
+                # 查找该段落对应的标题级别
+                level = 3  # 默认值
+                for tag, lvl in headers:
+                    if tag == element:
+                        level = lvl
+                        break
+                
+                p.style = f'Heading {min(level, 9)}'  # Word最多支持9级标题
+                
+                # 添加标题文本
+                run = p.add_run(text)
+                
+                # 设置字体
+                font = run.font
+                font.size = Pt(16 - level)  # 根据级别调整字体大小
+                
+                # 设置颜色
+                if level == 1:
+                    font.color.rgb = RGBColor(0, 0, 128)  # 深蓝色
+                elif level == 2:
+                    font.color.rgb = RGBColor(0, 64, 128)  # 蓝色
+                
+                # 一级标题居中，其他左对齐
+                if level == 1:
+                    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                else:
+                    p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+                
+                return
             
             # 检查是否是重复序号的列表项
             if is_duplicate_numbered_list_item(text):
@@ -496,6 +796,9 @@ def html_to_docx(
                     font.size = Pt(10.5)  # 正文字体大小
         else:
             process_element(element)
+    
+    # 修复文档中的标题格式
+    fix_document_numbering(doc)
     
     # 如果需要添加版本历史
     if versions:
