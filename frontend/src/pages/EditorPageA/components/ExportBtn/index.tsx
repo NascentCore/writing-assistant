@@ -1,4 +1,5 @@
-import { saveAsDocx, saveAsPdf } from '@/utils/utils'; // 引入导出函数
+import { API_BASE_URL } from '@/config';
+import { saveAsPdf } from '@/utils/utils'; // 引入导出函数
 import { useModel } from '@umijs/max';
 import { AiEditor } from 'aieditor';
 import { Button, Dropdown, Menu } from 'antd';
@@ -23,8 +24,9 @@ const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
       if (format === 'pdf') {
         saveAsPdf();
       } else if (format === 'docx') {
-        const content = editorRef.current.getHtml();
-        saveAsDocx(content, docTitle);
+        window.open(`${API_BASE_URL}/api/v1/files/${currentDocId}/download`);
+        // const content = editorRef.current.getHtml();
+        // saveAsDocx(content, docTitle);
       }
     } catch (error) {
       console.error('Export error:', error);
