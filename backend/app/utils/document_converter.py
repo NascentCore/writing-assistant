@@ -515,3 +515,173 @@ def html_to_docx(
     docx_bytes.seek(0)
     
     return docx_bytes
+
+def html_to_pdf(
+    html_content: str, 
+    title: str = "Document", 
+    author: str = "System",
+    versions: Optional[List[dict]] = None
+) -> BytesIO:
+    """
+    将HTML内容转换为PDF格式
+    
+    Args:
+        html_content: HTML格式的文档内容
+        title: 文档标题
+        author: 文档作者
+        versions: 可选的版本历史列表，每个版本是一个包含version, content, comment, created_at的字典
+        
+    Returns:
+        BytesIO: 包含PDF文件内容的二进制流
+    """
+    try:
+        import pdfkit
+        from io import BytesIO
+        import tempfile
+        
+        # 预处理HTML，合并列表项后的内容
+        def preprocess_html(html_text):
+            # 使用正则表达式查找列表项模式并合并后续内容
+            # 匹配列表项后跟换行和非列表项内容的模式
+            pattern = r'(\d+\.)\s*\n+\s*([^<>\d\n][^<>\n]*)'
+            # 替换为列表项和内容在同一行
+            processed_html = re.sub(pattern, r'\1 \2', html_text)
+            
+            # 处理HTML中的有序列表
+            soup = BeautifulSoup(processed_html, 'html.parser')
+            
+            # 查找所有有序列表
+            for ol in soup.find_all('ol'):
+                # 处理每个列表项
+                for li in ol.find_all('li'):
+                    # 确保列表项中的内容不换行
+                    # 移除列表项中的段落标签，保留内容
+                    for p in li.find_all('p'):
+                        p.replace_with(p.get_text())
+            
+            return str(soup)
+        
+        # 预处理HTML
+        preprocessed_html = preprocess_html(html_content)
+        
+        # 添加标题编号
+        html_text_with_numbers = add_numbering_to_headers(preprocessed_html)
+        
+        # 检查文档是否有h1标题
+        soup_check = BeautifulSoup(html_text_with_numbers, 'html.parser')
+        has_h1_title = bool(soup_check.find('h1'))
+        
+        # 如果没有h1标题，添加传入的title作为文档标题
+        if not has_h1_title and title:
+            title_html = f"<h1 style='text-align:center;color:#000080;'>{title}</h1>"
+            html_text_with_numbers = title_html + html_text_with_numbers
+        
+        # 添加版本历史（如果需要）
+        if versions:
+            versions_html = "<div style='page-break-before: always;'>"
+            versions_html += "<h1 style='text-align:center;'>版本历史</h1>"
+            for v in versions:
+                versions_html += f"<p><strong>版本 {v['version']} - {v['created_at']}</strong>"
+                if v.get('comment'):
+                    versions_html += f" - {v['comment']}"
+                versions_html += "</p>"
+            versions_html += "</div>"
+            html_text_with_numbers += versions_html
+        
+        # 添加基本样式
+        css_text = """
+        body {
+            font-family: SimSun, Arial, sans-serif;
+            font-size: 10.5pt;
+            line-height: 1.5;
+            margin: 2cm;
+        }
+        h1 {
+            font-size: 16pt;
+            color: #000080;
+            text-align: center;
+            margin-top: 24pt;
+            margin-bottom: 12pt;
+        }
+        h2 {
+            font-size: 14pt;
+            color: #004080;
+            margin-top: 18pt;
+            margin-bottom: 9pt;
+        }
+        h3, h4, h5, h6 {
+            font-size: 12pt;
+            margin-top: 12pt;
+            margin-bottom: 6pt;
+        }
+        p {
+            margin-top: 6pt;
+            margin-bottom: 6pt;
+        }
+        ol, ul {
+            margin-left: 18pt;
+        }
+        li {
+            margin-bottom: 6pt;
+        }
+        strong {
+            font-weight: bold;
+        }
+        em {
+            font-style: italic;
+        }
+        """
+        
+        # 创建完整的HTML文档
+        complete_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>{title}</title>
+            <style>
+                {css_text}
+            </style>
+        </head>
+        <body>
+            {html_text_with_numbers}
+        </body>
+        </html>
+        """
+        
+        # 配置pdfkit选项
+        options = {
+            'page-size': 'A4',
+            'margin-top': '2cm',
+            'margin-right': '2cm',
+            'margin-bottom': '2cm',
+            'margin-left': '2cm',
+            'encoding': 'UTF-8',
+            'no-outline': None,
+            'quiet': ''
+        }
+        
+        # 创建临时文件来保存PDF
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
+            temp_pdf_path = temp_pdf.name
+        
+        # 生成PDF到临时文件
+        pdfkit.from_string(complete_html, temp_pdf_path, options=options)
+        
+        # 读取临时文件到内存
+        with open(temp_pdf_path, 'rb') as f:
+            pdf_bytes = BytesIO(f.read())
+        
+        # 删除临时文件
+        import os
+        os.unlink(temp_pdf_path)
+        
+        # 重置文件指针位置
+        pdf_bytes.seek(0)
+        return pdf_bytes
+        
+    except Exception as e:
+        # 如果pdfkit失败，记录错误并抛出异常
+        import logging
+        logging.error(f"PDF转换失败: {str(e)}")
+        raise Exception(f"PDF转换失败: {str(e)}")

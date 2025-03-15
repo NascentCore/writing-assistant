@@ -10,11 +10,13 @@ from app.schemas.response import APIResponse
 from app.auth import get_current_user
 from app.models.user import User
 from app.models.document import Document, DocumentVersion
+import logging
 import shortuuid
+from urllib.parse import quote
 from sqlalchemy import desc
 from sqlalchemy.sql import func
 from fastapi.responses import StreamingResponse
-from app.utils.document_converter import html_to_docx
+from app.utils.document_converter import html_to_docx, html_to_pdf
 
 
 router = APIRouter()
@@ -386,7 +388,6 @@ async def export_document_docx(
             safe_title = "document"
         
         # 处理中文文件名，使用URL编码
-        from urllib.parse import quote
         encoded_filename = quote(f"{safe_title}.docx")
 
         # 返回文件流
@@ -399,6 +400,74 @@ async def export_document_docx(
         )
     except Exception as e:
         # 记录错误并返回友好的错误信息
-        import logging
         logging.error(f"导出文档失败: {str(e)}")
         return APIResponse.error(message=f"导出文档失败，请稍后重试")
+    
+@router.get("/documents/{doc_id}/export/pdf")
+async def export_document_pdf(
+    doc_id: str,
+    include_versions: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """导出文档为PDF格式
+    
+    将HTML格式的文档转换并导出为PDF格式。
+    直接返回二进制文件流供下载。
+    
+    - **include_versions**: 是否包含历史版本信息
+    """
+    try:
+        # 检查文档所有权
+        document = db.query(Document).filter(
+            Document.doc_id == doc_id,
+            Document.user_id == current_user.user_id
+        ).first()
+        if not document:
+            return APIResponse.error(message="文档不存在或无权访问")
+        
+        # 获取版本历史（如果需要）
+        versions = None
+        if include_versions:
+            versions_query = db.query(DocumentVersion).filter(
+                DocumentVersion.doc_id == doc_id
+            ).order_by(desc(DocumentVersion.version)).all()
+            
+            versions = [
+                {
+                    "version": v.version,
+                    "content": v.content,
+                    "comment": v.comment,
+                    "created_at": v.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                for v in versions_query
+            ]
+        
+        # 转换HTML到PDF
+        pdf_bytes = html_to_pdf(
+            html_content=document.content,
+            title=document.title,
+            author=current_user.username,
+            versions=versions
+        )
+
+        # 设置文件名（处理可能的非法字符）
+        safe_title = "".join([c for c in document.title if c.isalnum() or c in " _-"]).strip()
+        if not safe_title:
+            safe_title = "document"
+        
+        # 处理中文文件名，使用URL编码
+        encoded_filename = quote(f"{safe_title}.pdf")
+
+        # 返回文件流
+        return StreamingResponse(
+            pdf_bytes, 
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+            }
+        )
+    except Exception as e:
+        # 记录错误并返回友好的错误信息
+        logging.error(f"导出PDF文档失败: {str(e)}")
+        return APIResponse.error(message=f"导出PDF文档失败: {str(e)}")
