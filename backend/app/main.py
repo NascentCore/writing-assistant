@@ -9,9 +9,11 @@ import uvicorn
 from app.routers.v1 import api, auth, users, prompt, document, rag, writing
 from fastapi.openapi.utils import get_openapi
 from app.config import settings
-from app.database import sync_engine, Base
+from app.database import get_db, sync_engine, Base
 from app.rag.process import rag_worker
+from app.rag.kb import ensure_knowledge_bases
 from fastapi.logger import logger as fastapi_logger
+
 logger = logging.getLogger("app")
 
 def setup_logging():
@@ -62,6 +64,13 @@ async def lifespan(app: FastAPI):
     
     # 创建数据库表
     create_tables()
+
+    # 确保系统基础知识库已创建
+    db = next(get_db())
+    try:
+        await ensure_knowledge_bases(db)
+    except Exception as e:
+        logger.error(f"系统知识库初始化失败: {str(e)}")
     
     # 启动知识库文件处理线程
     thread = threading.Thread(target=rag_worker, name="rag_worker")
@@ -181,9 +190,6 @@ app.openapi = custom_openapi
 
 # 启动服务器的入口点
 if __name__ == "__main__":
-    # 确保在启动时创建表
-    create_tables()
-
     # 启动FastAPI应用
     uvicorn.run(
         "main:app",

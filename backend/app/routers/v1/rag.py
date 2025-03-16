@@ -14,13 +14,15 @@ from app.config import settings
 from app.database import get_db
 from app.models.chat import ChatMessage, ChatSession, ChatSessionType
 from app.models.rag import RagFile, RagFileStatus, RagKnowledgeBase, RagKnowledgeBaseType
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from app.rag.parser import convert_doc_to_docx, get_parser, get_file_format
 from app.rag.rag_api_async import rag_api_async
+from app.rag.kb import create_user_knowledge_base, get_knowledge_base, has_permission_to_file, has_permission_to_kb
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.models.task import Task, TaskStatus
 from app.models.document import Document
+from app.models.department import Department, UserDepartment
 import re
 import hashlib
 
@@ -59,7 +61,8 @@ class DeleteFilesRequest(BaseModel):
 
 @router.post("/files", summary="知识库文件上传")
 async def upload_files(
-    category: str = Query(..., description="知识库类别", example="system", enum=["system", "user"]),
+    category: str = Query(..., description="知识库类别", example="system", enum=["system", "user", "user_shared", "department"]),
+    department_id: Optional[str] = Query(None, description="部门ID", example="dept-123"),
     files: List[FastAPIUploadFile] = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -68,46 +71,20 @@ async def upload_files(
         upload_dir = PathLib(settings.UPLOAD_DIR)
         upload_dir.mkdir(exist_ok=True) # 确保上传目录存在
 
-        kb_id = ''
-        if category == "system":
-            if not current_user.admin:
-                logger.warning(f"用户 {current_user.user_id} 尝试上传文件到系统知识库但没有管理员权限")
-                return APIResponse.error(message="系统知识库需要管理员权限")
-            # 查询系统知识库
-            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
-            if kb:
-                kb_id = kb.kb_id
-        elif category == "user":
-            # 查询用户知识库
-            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
-                                                   RagKnowledgeBase.user_id == current_user.user_id, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
-            if kb:
-                kb_id = kb.kb_id
-        
+        if not has_permission_to_kb(current_user, category, department_id, db):
+            return APIResponse.error(message="没有权限或知识库不存在")
+
+        kb_id = get_knowledge_base(current_user, category, department_id, db)
         if not kb_id:
-            kb_name = "系统知识库" if category == "system" else f"用户知识库-{current_user.user_id}"
-            create_kb_response = await rag_api_async.create_knowledge_base(kb_name=kb_name)
-            if create_kb_response["code"] != 200:
-                logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
-                return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
-            kb_id = create_kb_response["data"]["kb_id"]
-            if not kb_id:
-                logger.error(f"创建知识库成功, 但获取知识库ID失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
-                return APIResponse.error(message=f"创建知识库失败")
-            # 保存知识库到数据库
-            kb = RagKnowledgeBase(
-                kb_id=kb_id,
-                kb_type=RagKnowledgeBaseType.SYSTEM if category == "system" else RagKnowledgeBaseType.USER,
-                user_id=current_user.user_id,
-                kb_name=kb_name,
-            )
-            db.add(kb)
-            db.commit()
-        
+            if category == "user":
+                kb_id = await create_user_knowledge_base(current_user, db)
+                if not kb_id:
+                    return APIResponse.error(message="创建用户私有知识库失败")
+            else:
+                return APIResponse.error(message="知识库不存在")
+
         existing_files = []
-        result = []
+        new_files = []
         for file in files:
             file_id = f"file-{shortuuid.uuid()}"
             file_location = upload_dir / f"{file_id}_{file.filename}" # 文件存储路径
@@ -140,7 +117,7 @@ async def upload_files(
                     file_location = docx_file_location
                     file_format = "docx"
                     file_name = file_name.replace(".doc", ".docx")
-                result.append({
+                new_files.append({
                     "file_id": file_id,
                     "file_name": file_name,
                     "size": len(contents),
@@ -155,9 +132,9 @@ async def upload_files(
                 await file.close()
         
             db_file = RagFile(
-                file_id=file_id,    
+                file_id=file_id,
                 kb_id=kb_id,
-                kb_type=RagKnowledgeBaseType.SYSTEM if category == "system" else RagKnowledgeBaseType.USER,
+                kb_type=RagKnowledgeBaseType.name_to_type(category),
                 user_id=current_user.user_id,
                 file_name=file_name,
                 file_size=len(contents),
@@ -178,7 +155,7 @@ async def upload_files(
         return APIResponse.success(
             message=f"文件上传成功, 正在解析中。",
             data={
-                "files": result,
+                "new_files": new_files,
                 "existing_files": existing_files
             }
         )
@@ -188,7 +165,8 @@ async def upload_files(
 
 @router.get("/files", summary="获取知识库文件列表")
 async def get_files(
-    category: str = Query(..., description="知识库类别", example="system", enum=["system", "user"]),
+    category: str = Query(..., description="知识库类别", example="system", enum=["system", "user", "user_shared", "user_all", "department"]),
+    department_id: Optional[str] = Query(None, description="部门ID", example="dept-123"),
     page: Optional[int] = Query(default=1, ge=1, description="页码", example=1),
     page_size: Optional[int] = Query(default=10, ge=1, description="每页数量", example=10),
     current_user: User = Depends(get_current_user),
@@ -196,39 +174,33 @@ async def get_files(
     db: Session = Depends(get_db)
 ):
     try:
-        if category == "system" and not current_user.admin:
-            logger.warning(f"用户 {current_user.user_id} 尝试访问系统知识库但没有管理员权限")
-            return APIResponse.error(message="系统知识库需要管理员权限")
-        
-        if category == "user":
-            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
-                                                   RagKnowledgeBase.user_id == current_user.user_id, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
-        else:
-            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
-        
-        if not kb:
-            kb_name = "系统知识库" if category == "system" else f"用户知识库-{current_user.user_id}"
-            create_kb_response = await rag_api_async.create_knowledge_base(kb_name=kb_name)
-            if create_kb_response["code"] != 200:
-                logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
-                return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
-            kb_id = create_kb_response["data"]["kb_id"]
-            if not kb_id:
-                logger.error(f"创建知识库成功, 但获取知识库ID失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
-                return APIResponse.error(message=f"创建知识库失败")
-            # 保存知识库到数据库
-            kb = RagKnowledgeBase(
-                kb_id=kb_id,
-                kb_type=RagKnowledgeBaseType.SYSTEM if category == "system" else RagKnowledgeBaseType.USER,
-                user_id=current_user.user_id,
-                kb_name=kb_name,
-            )
-            db.add(kb)
-            db.commit()
+        if not has_permission_to_kb(current_user, category, department_id, db):
+            logger.error(f"获取知识库文件列表时没有权限: user_id={current_user.user_id}, category={category}")
+            return APIResponse.error(message="没有权限或知识库不存在")
 
-        query_filter = db.query(RagFile).filter(RagFile.kb_id == kb.kb_id, RagFile.is_deleted == False)
+        kb_ids = set()
+        if category == "user_all" or category == "user":
+            user_kb_id = get_knowledge_base(current_user, "user", department_id, db)
+            if not user_kb_id:
+                new_kb_id = await create_user_knowledge_base(current_user, db)
+                if not new_kb_id:
+                    logger.error(f"获取知识库文件列表时创建用户私有知识库失败: user_id={current_user.user_id}, category={category}")
+                    return APIResponse.error(message="创建用户私有知识库失败")
+                kb_ids.add(new_kb_id)
+            else:
+                kb_ids.add(user_kb_id)
+        if category == "user_all":
+            category = "user_shared" # 已经获取过用户私有知识库，所以后续只获取用户共享知识库
+
+        kb_id = get_knowledge_base(current_user, category, department_id, db)
+        if not kb_id:
+            logger.error(f"获取知识库文件列表时用户共享知识库不存在: user_id={current_user.user_id}, category={category}")
+            return APIResponse.error(message="用户共享知识库不存在")
+        kb_ids.add(kb_id)
+
+        query_filter = db.query(RagFile).filter(RagFile.kb_id.in_(kb_ids), RagFile.is_deleted == False)
+        if category == "user" or category == "user_shared":
+            query_filter = query_filter.filter(RagFile.user_id == current_user.user_id)
         
         if file_name:
             query_list = re.split(r'[,\s、]+', file_name)
@@ -243,6 +215,8 @@ async def get_files(
             data=PaginationData(
                 list=[{
                     "kb_id": file.kb_id,
+                    "kb_type": RagKnowledgeBaseType.type_to_name(file.kb_type),
+                    "user_id": file.user_id,
                     "file_id": file.file_id,
                     "file_name": file.file_name,
                     "file_size": file.file_size,
@@ -270,7 +244,6 @@ async def delete_files(
     if not request.file_ids:
         return APIResponse.error(message="文件ID列表不能为空")
 
-    # 检查文件是否存在且属于当前用户
     files = db.query(RagFile).filter(RagFile.file_id.in_(request.file_ids), RagFile.is_deleted == False).all()
     if not files:
         return APIResponse.error(message="未找到有效的文件")
@@ -281,11 +254,8 @@ async def delete_files(
         return APIResponse.error(message="不能同时删除不同知识库的文件")
 
     # 权限检查
-    for file in files:
-        if file.kb_type == RagKnowledgeBaseType.SYSTEM and not current_user.admin:
-            return APIResponse.error(message="系统知识库需要管理员权限")
-        if file.kb_type == RagKnowledgeBaseType.USER and file.user_id != current_user.user_id:
-            return APIResponse.error(message="用户知识库需要本人权限")
+    if not has_permission_to_file(current_user, files[0].file_id, db):
+        return APIResponse.error(message="没有权限删除文件")
 
     try:
         resp = await rag_api_async.delete_files(kb_id=files[0].kb_id, file_ids=[file.kb_file_id for file in files])
@@ -543,19 +513,44 @@ async def chat(
 ):
     try:
         kb_ids = []
+        # 系统知识库
         kb = db.query(RagKnowledgeBase).filter(
             RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
             RagKnowledgeBase.is_deleted == False
         ).first()
         if kb:
             kb_ids.append(kb.kb_id)
+        # 用户共享知识库
         kb = db.query(RagKnowledgeBase).filter(
-            RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
-            RagKnowledgeBase.user_id == current_user.user_id, 
+            RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER_SHARED, 
             RagKnowledgeBase.is_deleted == False
         ).first()
         if kb:
             kb_ids.append(kb.kb_id)
+        # 用户私有知识库
+        kb = db.query(RagKnowledgeBase).filter(
+            RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER,
+            RagKnowledgeBase.user_id == current_user.user_id,
+            RagKnowledgeBase.is_deleted == False
+        ).first()
+        if kb:
+            kb_ids.append(kb.kb_id)
+        # 部门知识库
+        department_ids = []
+        user_departments = db.query(UserDepartment).filter(
+            UserDepartment.user_id == current_user.user_id,
+        ).all()
+        if user_departments:
+            department_ids = [department.department_id for department in user_departments]
+            if department_ids:
+                department_kbs = db.query(RagKnowledgeBase).filter(
+                    RagKnowledgeBase.kb_type == RagKnowledgeBaseType.DEPARTMENT,
+                    RagKnowledgeBase.owner_id.in_(department_ids),
+                    RagKnowledgeBase.is_deleted == False
+                ).all()
+                if department_kbs:
+                    kb_ids.extend([kb.kb_id for kb in department_kbs])
+                
         if not kb_ids:
             logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到任何相关知识库")
             return APIResponse.error(message="未找到相关知识库")
@@ -746,35 +741,15 @@ async def upload_attachment(
         upload_dir.mkdir(exist_ok=True) # 确保上传目录存在
         
         kb_id = ''
-        # 查询用户知识库
-        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, 
-                                                   RagKnowledgeBase.user_id == current_user.user_id, 
+        kb_type = RagKnowledgeBaseType.USER_SHARED
+        # 查询用户共享知识库
+        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == kb_type, 
                                                    RagKnowledgeBase.is_deleted == False).first()
-        if kb:
-           kb_id = kb.kb_id
-        else:
-            kb_name = f"用户知识库-{current_user.user_id}"
-            create_kb_response = await rag_api_async.create_knowledge_base(kb_name=kb_name)
-            if create_kb_response["code"] != 200:
-                logger.error(f"创建知识库失败: kb_name={kb_name}, msg={create_kb_response['msg']}")
-                return APIResponse.error(message=f"创建知识库失败: {create_kb_response['msg']}")
-            kb_id = create_kb_response["data"]["kb_id"]
-            # 保存知识库到数据库
-            kb = RagKnowledgeBase(
-                kb_id=kb_id,
-                kb_type=RagKnowledgeBaseType.USER,
-                user_id=current_user.user_id,
-                kb_name=kb_name,
-            )
-            db.add(kb)
-            db.commit()
+        if not kb:
+            logger.error(f"上传附件时未找到用户共享知识库")
+            return APIResponse.error(message="用户共享知识库不存在")
+        kb_id = kb.kb_id
 
-        # 过滤已存在的文件
-        # file_names = [file.filename for file in files]
-        # existing_files = db.query(RagFile).filter(RagFile.file_name.in_(file_names), RagFile.user_id == current_user.user_id, RagFile.is_deleted == False).all()
-        # existing_file_names = [file.file_name for file in existing_files]
-        # new_files = [file for file in files if file.filename not in existing_file_names]
-        
         new_files = []
         existing_files = []
         update_content_files = []
@@ -833,7 +808,7 @@ async def upload_attachment(
             )
             if save_to_kb:
                 db_file.kb_id = kb_id
-                db_file.kb_type = RagKnowledgeBaseType.USER
+                db_file.kb_type = kb_type
                 db_file.status = RagFileStatus.LOCAL_SAVED
             else:
                 db_file.kb_id = ''

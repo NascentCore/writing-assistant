@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from app.database import get_db
 from app.models.user import User
+from app.models.department import Department, UserDepartment
 from app.auth import (
     verify_password,
     get_password_hash,
@@ -77,6 +78,13 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
         user = db.query(User).filter(User.username == form_data.username).first()
         if not user or not verify_password(form_data.password, user.hashed_password):
             return APIResponse.error(message="用户名或密码错误")
+
+        departments = []
+        user_departments = db.query(UserDepartment).filter(UserDepartment.user_id == user.user_id).all()
+        if user_departments:
+            department_ids = [department.department_id for department in user_departments]
+            if department_ids:
+                departments = db.query(Department).filter(Department.department_id.in_(department_ids)).all()
         
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
@@ -89,7 +97,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
             data={
                 "access_token": access_token,
                 "token_type": "bearer",
-                "admin": user.admin
+                "admin": user.admin,
+                "departments": [{
+                    "department_id": department.department_id,
+                    "department_name": department.name
+                } for department in departments]
             }
         )
     except Exception as e:

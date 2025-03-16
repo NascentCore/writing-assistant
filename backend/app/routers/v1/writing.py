@@ -37,6 +37,7 @@ from app.utils.outline import build_paragraph_key, build_paragraph_response
 from app.models.task import Task, TaskStatus, TaskType
 from app.models.document import Document, DocumentVersion
 from app.models.rag import RagFile, RagKnowledgeBase, RagKnowledgeBaseType
+from app.models.department import UserDepartment
 
 logger = logging.getLogger("app")
 
@@ -454,10 +455,28 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
 
             if kb:
                 kb_ids.append(kb.kb_id)
-            # 查询用户知识库
+            # 查询用户共享知识库
+            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER_SHARED, RagKnowledgeBase.is_deleted == False).first()
+            if kb:
+                kb_ids.append(kb.kb_id)
+            # 查询用户私有知识库
             kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, RagKnowledgeBase.user_id == user_id, RagKnowledgeBase.is_deleted == False).first()
             if kb:
                 kb_ids.append(kb.kb_id)
+            # 查询部门知识库
+            department_ids = []
+            user_departments = db.query(UserDepartment).filter(
+                UserDepartment.user_id == user_id,
+            ).all()
+            if user_departments:
+                department_ids = [department.department_id for department in user_departments]
+                if department_ids:
+                    department_kbs = db.query(RagKnowledgeBase).filter(
+                        RagKnowledgeBase.kb_type == RagKnowledgeBaseType.DEPARTMENT,
+                        RagKnowledgeBase.owner_id.in_(department_ids), 
+                        RagKnowledgeBase.is_deleted == False).all()
+                    if department_kbs:
+                        kb_ids.extend([kb.kb_id for kb in department_kbs])
             
             # 生成大纲
             outline_data = await _generate_outline(outline_generator, prompt, file_contents, user_id, kb_ids)
@@ -1107,10 +1126,27 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
 
             if kb:
                 kb_ids.append(kb.kb_id)
-            # 查询用户知识库
+            # 查询用户共享知识库
+            kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER_SHARED, RagKnowledgeBase.is_deleted == False).first()
+            if kb:
+                kb_ids.append(kb.kb_id)
+            # 查询用户私有知识库
             kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, RagKnowledgeBase.user_id == user_id, RagKnowledgeBase.is_deleted == False).first()
             if kb:
                 kb_ids.append(kb.kb_id)
+            # 查询部门知识库
+            department_ids = []
+            user_departments = db.query(UserDepartment).filter(
+                UserDepartment.user_id == user_id,
+            ).all()
+            if user_departments:
+                department_ids = [department.department_id for department in user_departments]
+                if department_ids:
+                    department_kbs = db.query(RagKnowledgeBase).filter(
+                        RagKnowledgeBase.kb_type == RagKnowledgeBaseType.DEPARTMENT,
+                        RagKnowledgeBase.owner_id.in_(department_ids), RagKnowledgeBase.is_deleted == False).all()
+                    if department_kbs:
+                        kb_ids.extend([kb.kb_id for kb in department_kbs])
             
             # 生成内容
             full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids, session_id)
