@@ -467,7 +467,6 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
             department_ids = []
             user_departments = db.query(UserDepartment).filter(
                 UserDepartment.user_id == user_id,
-                UserDepartment.is_deleted == False
             ).all()
             if user_departments:
                 department_ids = [department.department_id for department in user_departments]
@@ -1139,7 +1138,6 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
             department_ids = []
             user_departments = db.query(UserDepartment).filter(
                 UserDepartment.user_id == user_id,
-                UserDepartment.is_deleted == False
             ).all()
             if user_departments:
                 department_ids = [department.department_id for department in user_departments]

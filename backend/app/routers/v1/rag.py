@@ -539,7 +539,6 @@ async def chat(
         department_ids = []
         user_departments = db.query(UserDepartment).filter(
             UserDepartment.user_id == current_user.user_id,
-            UserDepartment.is_deleted == False
         ).all()
         if user_departments:
             department_ids = [department.department_id for department in user_departments]
