@@ -9,6 +9,7 @@ import markdown
 import concurrent.futures
 import json
 import time
+import uuid
 
 from app.utils.outline import build_paragraph_key, build_paragraph_data
 from app.models.outline import SubParagraph, Outline
@@ -51,6 +52,8 @@ PARAGRAPH_GENERATION_TEMPLATE = """
 - 与文章其他部分建立明确的逻辑关联
 - 适当引用参考资料中的内容，但不要出现引用说明
 - 层级结构以段落信息为准
+- 行文风格要求正式，不要出现『我们』、『总之』这样的口水化内容
+- 按照需求文档的类型组织合理的大纲，比如方案就要有方案的格式，标书就要有标书的格式
 
 【格式要求】
 - 使用markdown格式
@@ -102,6 +105,7 @@ DIRECT_CONTENT_GENERATION_TEMPLATE = """
 - 确保文章结构完整，逻辑清晰
 - 适当引用参考资料中的内容，但不要出现引用说明
 - 每个段落都要有明确的主题和充分的论述
+- 行文风格要求正式，不要出现『我们』、『总之』这样的口水化内容
 
 【格式要求】
 - 使用markdown格式组织文章
@@ -120,6 +124,39 @@ DIRECT_CONTENT_GENERATION_TEMPLATE = """
 - 根据内容自然组织段落结构，确保层次分明
 
 请生成一篇结构完整、内容丰富的文章，确保符合以上要求。
+"""
+
+# 全文优化提示词模板常量
+FULL_CONTENT_GENERATION_TEMPLATE = """
+你是一个专业的文档编辑助手。你的任务是对多个独立生成的章节内容拼接成的文档进行整体优化，确保文档的连贯性、一致性和流畅性。
+
+【用户需求】
+{prompt}
+
+【需要优化的全文内容】
+{final_content}
+
+请遵循以下步骤：
+1. 仔细分析提供的所有章节内容和大纲结构
+2. 检查并优化章节之间的过渡和衔接
+4. 确保整体文档的风格和语调一致
+5. 检查并修正可能的重复内容或逻辑矛盾
+6. 行文风格正式，尽量不要出现我们、总之这样较口水化的词语
+
+衔接优化要求：
+- 检查并优化章节之间的过渡，确保内容流畅自然
+- 添加必要的过渡句，使章节之间的连接更加平滑
+- 确保前后章节的内容没有明显的风格差异或逻辑断层
+- 修正可能的重复内容，确保信息不会冗余
+- 确保文档的整体逻辑结构清晰，论述连贯
+
+格式要求：
+- 使用Markdown格式输出完整文档
+- 为文档添加适当的标题和小标题
+- 确保标题层级结构清晰，符合大纲结构
+- 保持段落格式的一致性
+
+请直接输出优化后的完整文档内容，使用Markdown格式。
 """
 
 # 最大并发生成段落数
@@ -226,7 +263,9 @@ class OutlineGenerator:
         user_id: str,
         streaming: bool = True,
         only_need_search_results: bool = False,
-        context_msg: str = ""
+        context_msg: str = "",
+        networking: bool = False,
+        rerank: bool = False
     ) -> Optional[str]:
         """
         调用RAG API的通用方法
@@ -256,7 +295,9 @@ class OutlineGenerator:
                 max_token=settings.RAG_CHAT_MAX_TOKENS,
                 api_base=self.base_url,
                 api_key=self.api_key,
-                model=self.model
+                model=self.model,
+                networking=networking,
+                rerank=rerank
             )
 
             # 记录完整的RAG响应
@@ -328,7 +369,7 @@ class OutlineGenerator:
         
         return cleaned.strip()
 
-    def _get_rag_context(self, question: str, user_id: Optional[str], kb_ids: Optional[List[str]], context_msg: str = "") -> str:
+    def _get_rag_context(self, question: str, user_id: Optional[str], kb_ids: Optional[List[str]], context_msg: str = "", networking: bool = False, rerank: bool = False) -> str:
         """
         获取RAG上下文的通用方法
         
@@ -352,7 +393,9 @@ class OutlineGenerator:
                 question=question,
                 kb_ids=kb_ids,
                 user_id=user_id,
-                context_msg=context_msg
+                context_msg=context_msg,
+                networking=networking,
+                rerank=rerank
             )
             
             if rag_response:
@@ -423,14 +466,31 @@ class OutlineGenerator:
             2. 多个段落，每个段落可以有不同的级别:
                - 1级段落: 主要段落，包含标题、描述和篇幅风格(short/medium/long)
                - 2级及以上段落: 子段落，包含标题和描述，但没有篇幅风格
-            3. 严格禁止在标题或层级标题中使用任何形式的编号，包括但不限于：
+            
+            【大纲结构规范】
+            1. 严格禁止在标题或层级标题中使用任何形式的编号，包括但不限于：
                - 不要使用"第一章"、"第二章"等章节编号
                - 不要使用"（一）"、"（二）"等中文编号
                - 不要使用"1."、"2."等数字编号
                - 不要使用"一、"、"二、"等中文序号
                - 不要使用"1、"、"2、"等数字序号
                - 不要使用"①"、"②"等特殊符号编号
-            4. 标题，描述中不能包含参考资料的应用的文件名称
+            2. 标题，描述中不能包含参考资料的应用的文件名称
+            3. 确保每个主题只在适当的层级出现一次，避免标题重复
+            4. 使用具体的标题，避免过于宽泛或重复的标题
+            5. 保持清晰的层级关系，相关主题应该放在一起
+            6. 每个主题应该有明确的范围，避免内容重叠
+            
+            【避免常见问题】
+            1. 避免在不同层级重复相同的标题
+               - 错误示例: "监测系统" 作为一级标题，然后 "监测系统" 又作为其下的二级标题
+               - 正确示例: "监测系统概述" 作为一级标题，"监测系统组件" 作为二级标题
+            2. 避免过于宽泛的标题
+               - 错误示例: "监测" 作为标题
+               - 正确示例: "地质灾害监测系统" 作为具体标题
+            3. 避免内容重叠
+               - 错误示例: "数据分析" 和 "数据处理" 作为并列标题但内容高度重叠
+               - 正确示例: "数据采集与预处理" 和 "数据分析与可视化" 作为内容明确区分的标题
             
            【返回格式】
            以JSON格式返回，格式如下:
@@ -475,6 +535,10 @@ class OutlineGenerator:
             try:
                 result = chain.invoke({"prompt": prompt, "file_context": file_context, "rag_context": rag_context})
                 logger.info("大模型调用完成")
+                
+                # 验证大纲结构，检查是否有重复标题
+                self._validate_and_fix_outline(result)
+                
                 return result
             except Exception as parser_error:
                 logger.error(f"解析大模型输出时出错: {str(parser_error)}")
@@ -494,6 +558,10 @@ class OutlineGenerator:
                         # 尝试解析JSON
                         parsed_json = json.loads(cleaned_content)
                         logger.info("手动解析JSON成功")
+                        
+                        # 验证大纲结构，检查是否有重复标题
+                        self._validate_and_fix_outline(parsed_json)
+                        
                         return parsed_json
                     except Exception as json_error:
                         logger.error(f"手动解析JSON失败: {str(json_error)}")
@@ -516,7 +584,148 @@ class OutlineGenerator:
                     }
                 ]
             }
-    
+            
+    def _validate_and_fix_outline(self, outline_data: Dict[str, Any]) -> None:
+        """
+        验证大纲结构，检查是否有重复标题，并尝试修复问题
+        
+        Args:
+            outline_data: 大纲数据
+        """
+        logger.info("开始验证大纲结构")
+        
+        # 收集所有标题及其路径
+        all_titles = {}  # 标题 -> [路径列表]
+        duplicate_titles = set()
+        
+        def check_duplicates(paragraphs, parent_path="", level=1):
+            for para in paragraphs:
+                title = para.get("title", "").strip()
+                full_path = f"{parent_path}/{title}" if parent_path else title
+                
+                # 记录标题及其路径
+                if title in all_titles:
+                    all_titles[title].append({"path": full_path, "level": level, "para": para})
+                    duplicate_titles.add(title)
+                else:
+                    all_titles[title] = [{"path": full_path, "level": level, "para": para}]
+                
+                # 递归检查子段落
+                children = para.get("children", [])
+                if children:
+                    check_duplicates(children, full_path, level + 1)
+        
+        # 检查重复标题
+        check_duplicates(outline_data.get("sub_paragraphs", []))
+        
+        if duplicate_titles:
+            logger.warning(f"检测到{len(duplicate_titles)}个重复标题: {duplicate_titles}")
+            
+            # 尝试修复重复标题
+            for title in duplicate_titles:
+                occurrences = all_titles[title]
+                logger.info(f"处理重复标题 '{title}' ({len(occurrences)}次出现)")
+                
+                # 按层级排序，保持较高层级的标题不变，修改较低层级的标题
+                occurrences.sort(key=lambda x: x["level"])
+                
+                # 保留第一个出现的标题不变
+                for i in range(1, len(occurrences)):
+                    para = occurrences[i]["para"]
+                    level = occurrences[i]["level"]
+                    path = occurrences[i]["path"]
+                    
+                    # 获取父路径的最后一部分作为上下文
+                    parent_context = path.split('/')[-2] if '/' in path else ""
+                    
+                    # 根据上下文和层级选择合适的修改方式
+                    if parent_context and not title.startswith(parent_context):
+                        # 使用父标题作为上下文
+                        new_title = f"{title}（{parent_context}相关）"
+                    else:
+                        # 根据层级添加修饰词
+                        modifiers = ["概述", "详情", "分析", "实施", "评估", "方法", "技术", "应用", "原理", "框架"]
+                        modifier = modifiers[min(level-1, len(modifiers)-1)]
+                        
+                        # 避免重复添加相同的修饰词
+                        if not title.endswith(modifier):
+                            new_title = f"{title}{modifier}"
+                        else:
+                            # 如果已经有相同的修饰词，尝试使用不同的修饰词
+                            alt_modifiers = [m for m in modifiers if m != modifier]
+                            if alt_modifiers:
+                                new_title = f"{title.replace(modifier, '')}{alt_modifiers[0]}"
+                            else:
+                                # 最后的备选方案
+                                new_title = f"{title} ({level}级)"
+                    
+                    logger.info(f"修改重复标题: '{title}' -> '{new_title}' [路径: {path}, 层级: {level}]")
+                    para["title"] = new_title
+            
+            # 再次检查是否还有重复标题
+            all_titles_after_fix = set()
+            duplicate_after_fix = set()
+            
+            def check_duplicates_after_fix(paragraphs):
+                for para in paragraphs:
+                    title = para.get("title", "").strip()
+                    
+                    if title in all_titles_after_fix:
+                        duplicate_after_fix.add(title)
+                    else:
+                        all_titles_after_fix.add(title)
+                    
+                    # 递归检查子段落
+                    children = para.get("children", [])
+                    if children:
+                        check_duplicates_after_fix(children)
+            
+            check_duplicates_after_fix(outline_data.get("sub_paragraphs", []))
+            
+            if duplicate_after_fix:
+                logger.warning(f"修复后仍有{len(duplicate_after_fix)}个重复标题: {duplicate_after_fix}")
+                # 对于仍然重复的标题，添加唯一标识符
+                def add_unique_identifier(paragraphs):
+                    for para in paragraphs:
+                        title = para.get("title", "").strip()
+                        if title in duplicate_after_fix:
+                            # 添加唯一标识符
+                            para["title"] = f"{title} ({uuid.uuid4().hex[:4]})"
+                        
+                        # 递归处理子段落
+                        children = para.get("children", [])
+                        if children:
+                            add_unique_identifier(children)
+                
+                add_unique_identifier(outline_data.get("sub_paragraphs", []))
+                logger.info("已为剩余重复标题添加唯一标识符")
+            else:
+                logger.info("所有重复标题已成功修复")
+        else:
+            logger.info("未检测到重复标题")
+        
+        # 检查并修复空标题
+        def fix_empty_titles(paragraphs, parent_title=""):
+            for para in paragraphs:
+                title = para.get("title", "").strip()
+                if not title:
+                    # 为空标题生成一个基于父标题的新标题
+                    if parent_title:
+                        new_title = f"{parent_title}子项"
+                    else:
+                        new_title = "未命名段落"
+                    
+                    logger.warning(f"检测到空标题，已修改为: '{new_title}'")
+                    para["title"] = new_title
+                
+                # 递归处理子段落
+                children = para.get("children", [])
+                if children:
+                    fix_empty_titles(children, title)
+        
+        # 修复空标题
+        fix_empty_titles(outline_data.get("sub_paragraphs", []))
+
     def save_outline_to_db(self, outline_data: Dict[str, Any], db_session, outline_id: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         将生成的大纲保存到数据库
@@ -537,6 +746,9 @@ class OutlineGenerator:
         logger.info(f"开始保存大纲到数据库 [outline_id={outline_id}, user_id={user_id}]")
         
         try:
+            # 在保存前进行最终的大纲结构优化
+            self._optimize_outline_structure(outline_data)
+            
             # 创建或更新大纲
             if outline_id:
                 outline = db_session.query(Outline).filter(Outline.id == outline_id).first()
@@ -622,6 +834,75 @@ class OutlineGenerator:
             db_session.rollback()
             logger.error(f"保存大纲到数据库时出错: {str(e)}")
             raise
+            
+    def _optimize_outline_structure(self, outline_data: Dict[str, Any]) -> None:
+        """
+        优化大纲结构，确保层级合理，内容不重复
+        
+        Args:
+            outline_data: 大纲数据
+        """
+        logger.info("开始优化大纲结构")
+        
+        # 检查一级段落数量，如果太多可能需要合并
+        sub_paragraphs = outline_data.get("sub_paragraphs", [])
+        if len(sub_paragraphs) > 10:
+            logger.warning(f"一级段落数量过多 ({len(sub_paragraphs)}个)，考虑合并相似段落")
+            
+            # 这里可以实现合并逻辑，但需要复杂的相似度计算
+            # 简单起见，我们只记录警告，不实际合并
+        
+        # 确保每个段落都有描述
+        def ensure_descriptions(paragraphs):
+            for para in paragraphs:
+                # 如果没有描述，添加一个基于标题的简单描述
+                if not para.get("description"):
+                    para["description"] = f"关于{para.get('title', '此主题')}的详细内容"
+                
+                # 递归处理子段落
+                children = para.get("children", [])
+                if children:
+                    ensure_descriptions(children)
+        
+        # 确保所有段落都有描述
+        ensure_descriptions(sub_paragraphs)
+        
+        # 检查层级深度，避免过深的层级结构
+        def check_depth(paragraphs, current_depth=1, max_depth=4):
+            for para in paragraphs:
+                children = para.get("children", [])
+                
+                # 如果层级太深，将子段落提升或合并
+                if current_depth >= max_depth and children:
+                    logger.warning(f"段落 '{para.get('title')}' 层级过深，考虑简化结构")
+                    
+                    # 简单处理：如果子段落太多，只保留前几个
+                    if len(children) > 3:
+                        logger.info(f"段落 '{para.get('title')}' 子段落过多，保留前3个")
+                        para["children"] = children[:3]
+                
+                # 递归检查子段落
+                if children:
+                    check_depth(children, current_depth + 1, max_depth)
+        
+        # 检查层级深度
+        check_depth(sub_paragraphs)
+        
+        # 确保段落标题不包含编号
+        def clean_titles(paragraphs):
+            for para in paragraphs:
+                if "title" in para:
+                    para["title"] = clean_numbering_from_title(para["title"])
+                
+                # 递归处理子段落
+                children = para.get("children", [])
+                if children:
+                    clean_titles(children)
+        
+        # 清理标题中的编号
+        clean_titles(sub_paragraphs)
+        
+        logger.info("大纲结构优化完成")
 
     def _build_outline_content(self, outline: Outline, paragraphs: List[SubParagraph]) -> str:
         """
@@ -688,6 +969,7 @@ class OutlineGenerator:
             outline_content += "\n".join(outline_text)
             
             logger.info(f"大纲内容构建完成 [outline_id={outline.id}, content_length={len(outline_content)}]")
+            logger.info(f"{outline_content}")
             return outline_content
             
         except Exception as e:
@@ -752,243 +1034,370 @@ class OutlineGenerator:
 
     def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, user_prompt: str = "") -> Dict[str, Any]:
         """
-        根据大纲生成完整内容
+        生成完整的文章内容
         
         Args:
             outline_id: 大纲ID
             db_session: 数据库会话
-            user_id: 用户ID，用于RAG搜索（如果启用）
-            kb_ids: 知识库ID列表，用于RAG搜索（如果启用）
-            user_prompt: 用户的第一条消息，作为额外的提示词
+            user_id: 用户ID
+            kb_ids: 知识库ID列表
+            user_prompt: 用户提示
             
         Returns:
-            Dict: 包含生成内容的字典
+            Dict: 生成的内容
         """
-        logger.info(f"开始生成全文内容 [outline_id={outline_id}, use_rag={self.use_rag}]")
+        logger.info(f"开始生成完整内容 [outline_id={outline_id}]")
         
-        try:
-            # 获取大纲信息
-            outline = db_session.query(Outline).filter(Outline.id == outline_id).first()
-            if not outline:
-                raise ValueError(f"未找到大纲: {outline_id}")
+        # 获取大纲
+        outline = db_session.query(Outline).filter(Outline.id == outline_id).first()
+        if not outline:
+            raise ValueError(f"未找到ID为{outline_id}的大纲")
+        
+        # 获取大纲内容
+        outline_content = outline.markdown_content
+        
+        # 获取所有段落
+        all_paragraphs = db_session.query(SubParagraph).filter(
+            SubParagraph.outline_id == outline_id
+        ).all()
+        
+        # 构建段落字典
+        paragraphs_dict = {p.id: p for p in all_paragraphs}
+        
+        # 构建父子关系
+        for p in all_paragraphs:
+            if hasattr(p, 'children'):
+                continue  # 已经有children属性
             
-            # 获取所有段落
-            paragraphs = db_session.query(SubParagraph).filter(
-                SubParagraph.outline_id == outline_id
-            ).all()
-            
-            if not paragraphs:
-                raise ValueError(f"大纲没有段落: {outline_id}")
-            
-            # 构建完整大纲内容（用于提示词）
-            outline_content = self._build_outline_content(outline, paragraphs)
-            
-            # 生成内容
-            full_content = {
-                "title": "",
-                "outline_id": outline_id,
-                "content": "",
-                "markdown": "",
-                "html": "",
-                "outline_structure": []
-            }
-            
-            # 生成文章标题
-            full_content["title"] = self._generate_article_title(
-                user_prompt=user_prompt,
-                outline_title=outline.title,
-                outline_content=outline_content
+            # 添加children属性
+            p.children = [
+                paragraphs_dict[child.id] 
+                for child in all_paragraphs 
+                if child.parent_id == p.id
+            ]
+        
+        # 获取顶级段落
+        root_paragraphs = [p for p in all_paragraphs if p.parent_id is None]
+        
+        # 按ID排序
+        root_paragraphs.sort(key=lambda p: p.id)
+        
+        # 获取RAG上下文
+        rag_context = ""
+        if kb_ids:
+            logger.info(f"获取RAG上下文 [kb_ids={kb_ids}]")
+            rag_context = self._get_rag_context(
+                question=f"生成关于{outline.title}的文章",
+                user_id=user_id,
+                kb_ids=kb_ids,
+                context_msg=user_prompt
             )
+            logger.info(f"RAG上下文长度: {len(rag_context)} 字符")
+        
+        # 生成文章标题
+        article_title = self._generate_article_title(
+            user_prompt=user_prompt,
+            outline_title=outline.title,
+            outline_content=outline_content
+        )
+        logger.info(f"生成文章标题: {article_title}")
+        
+        # 存储生成的内容
+        markdown_content = []
+        
+        # 添加文章标题
+        markdown_content.append(f"# {article_title}\n")
+        
+        # 初始化全局上下文对象，用于在段落间传递信息
+        global_context = {
+            "previous_content_summary": "",  # 前一段落的内容摘要
+            "chapter_summaries": {},  # 已生成章节的摘要，格式为 {章节标题: 摘要内容}
+            "generated_contents": {},  # 已生成段落的内容，格式为 {段落ID: {title: 标题, content: 内容}}
+            "total_content_length": len(f"# {article_title}\n"),  # 当前已生成内容的总长度
+            "max_total_length": 100000,  # 内容总长度限制
+            "max_chapter_length": 5000,  # 单个章节长度限制
+            "duplicate_titles": set(),  # 记录重复的标题
+            "generated_titles": set()  # 记录已生成的标题
+        }
+        
+        logger.info(f"开始生成段落内容，共 {len(root_paragraphs)} 个顶级段落")
+        
+        # 顺序生成每个顶级段落的内容
+        for i, paragraph in enumerate(root_paragraphs):
+            logger.info(f"处理顶级段落 [{i+1}/{len(root_paragraphs)}] [ID={paragraph.id}, 标题='{paragraph.title}']")
             
-            # 一次性获取RAG搜索结果（如果启用）
-            rag_context = ""
-            if self.use_rag:
-                # 构建完整的搜索查询，使用生成的标题
-                search_query = f"关于主题：{full_content['title']}，需要生成一篇完整的文章。请提供参考资料，参考资料的文件名称不能出现在标题或描述中。并按照安条目顺序输出"
-                if user_prompt:
-                    search_query += f"\n用户需求：{user_prompt}"
-                search_query += "\n文章大纲如下：\n"
-                for p in paragraphs:
-                    search_query += f"- {p.title}"
-                    if p.description:
-                        search_query += f"：{p.description}"
-                    search_query += "\n"
+            # 检查总内容长度是否超过限制
+            if global_context["total_content_length"] >= global_context["max_total_length"]:
+                logger.warning(f"内容总长度已达到限制({global_context['total_content_length']}字符)，停止生成")
+                break
+            
+            # 生成段落内容
+            self._generate_paragraph_with_context(
+                paragraph,
+                global_context,
+                markdown_content,
+                article_title,
+                rag_context,
+                outline_content,
+                user_prompt,
+                is_root=True,
+                parent_content="",
+                chapter_index=i,
+                total_chapters=len(root_paragraphs)
+            )
+        
+        # 合并所有内容
+        final_content = "\n".join(markdown_content)
+        
+        # 记录生成的内容长度
+        logger.info(f"生成内容完成，总长度: {len(final_content)} 字符")
+        
+        # 记录重复标题情况
+        if global_context["duplicate_titles"]:
+            logger.warning(f"检测到 {len(global_context['duplicate_titles'])} 个重复标题: {', '.join(global_context['duplicate_titles'])}")
+        
+        # 记录章节摘要数量
+        logger.info(f"生成了 {len(global_context['chapter_summaries'])} 个章节摘要")
+        
+        # 记录已生成段落数量
+        logger.info(f"生成了 {len(global_context['generated_contents'])} 个段落内容")
+        
+        # 优化内容
+        # try:
+        #     logger.info("开始优化全文内容")
+        #     optimized_content = self._full_content_optimize(user_prompt, final_content)
+        #     logger.info(f"内容优化完成，优化后长度: {len(optimized_content)} 字符")
+            
+        #     # 将markdown转换为HTML
+        #     html_content = markdown.markdown(optimized_content)
+            
+        #     # 返回结果
+        #     return {
+        #         "title": article_title,
+        #         "markdown": optimized_content,
+        #         "html": html_content
+        #     }
+        # except Exception as e:
+        #     logger.error(f"优化内容时出错: {str(e)}")
+            
+            # 如果优化失败，返回原始内容
+        html_content = markdown.markdown(final_content)
+        return {
+            "title": article_title,
+            "markdown": final_content,
+            "html": html_content
+        }
+
+    def _generate_paragraph_with_context(
+        self,
+        paragraph,
+        global_context,
+        markdown_content,
+        article_title,
+        rag_context,
+        outline_content,
+        user_prompt,
+        is_root=False,
+        parent_content="",
+        chapter_index=0,
+        total_chapters=1
+    ):
+        """
+        生成段落内容，并递归生成子段落内容
+        
+        Args:
+            paragraph: 段落对象
+            global_context: 全局上下文对象，用于在段落间传递信息
+            markdown_content: 已生成的markdown内容列表
+            article_title: 文章标题
+            rag_context: RAG上下文
+            outline_content: 大纲内容
+            user_prompt: 用户提示
+            is_root: 是否为顶级段落
+            parent_content: 父段落内容
+            chapter_index: 章节索引
+            total_chapters: 总章节数
+        """
+        # 检查是否已经生成过该段落内容
+        if paragraph.id in global_context["generated_contents"]:
+            logger.warning(f"段落 '{paragraph.title}' (ID={paragraph.id}) 已经生成过内容，跳过")
+            return
+            
+        # 获取段落标题
+        title = paragraph.title
+        
+        # 检查标题是否已经存在于已生成的内容中
+        if title in global_context.get("generated_titles", set()):
+            logger.warning(f"检测到重复标题: '{title}'，添加唯一标识符")
+            # 为重复标题添加唯一标识符
+            # 确保paragraph.id是字符串类型
+            paragraph_id_str = str(paragraph.id)
+            # 安全地获取ID的最后4个字符
+            unique_suffix = paragraph_id_str[-4:] if len(paragraph_id_str) >= 4 else paragraph_id_str
+            title = f"{title} ({unique_suffix})"
+            global_context["duplicate_titles"].add(paragraph.title)
+        else:
+            # 记录已生成的标题
+            if "generated_titles" not in global_context:
+                global_context["generated_titles"] = set()
+            global_context["generated_titles"].add(title)
+        
+        # 获取段落级别
+        level = paragraph.level
+        
+        # 获取段落描述
+        description = paragraph.description or ""
+        
+        # 获取子段落标题
+        sub_titles = get_sub_paragraph_titles(paragraph)
+        
+        # 获取计数风格
+        count_style = paragraph.count_style or "medium"
+        
+        # 构建上下文信息
+        context_info = {
+            "previous_content_summary": global_context["previous_content_summary"],
+            "chapter_summaries": global_context["chapter_summaries"],
+            "chapter_position": {
+                "index": chapter_index,
+                "total": total_chapters,
+                "level": level
+            },
+            "parent_content": parent_content,
+            "already_generated_titles": list(global_context.get("generated_titles", set())),
+            "duplicate_warning": "请确保生成的内容与已生成的章节不重复，特别是避免与以下章节内容重复: " + 
+                               ", ".join([f"'{title}'" for title in list(global_context.get("generated_titles", set()))[-5:]])
+        }
+        
+        # 计算当前段落的最大长度
+        max_length = global_context["max_chapter_length"]
+        if level == 1:
+            # 一级标题段落长度可以更长
+            max_length = min(global_context["max_chapter_length"] * 1.5, 7500)
+        elif level == 2:
+            # 二级标题段落长度适中
+            max_length = min(global_context["max_chapter_length"], 5000)
+        else:
+            # 更深层级的段落长度更短
+            max_length = min(global_context["max_chapter_length"] * 0.7, 3500)
+        
+        # 检查总内容长度是否超过限制
+        if global_context["total_content_length"] >= global_context["max_total_length"]:
+            logger.warning(f"内容总长度已达到限制({global_context['total_content_length']}字符)，停止生成")
+            return
+        
+        # 生成段落内容
+        logger.info(f"生成段落内容 [标题='{title}', 级别={level}, ID={paragraph.id}]")
+        content = self._generate_paragraph_content_with_context(
+            article_title=article_title,
+            paragraph=paragraph,
+            sub_titles=sub_titles,
+            count_style=count_style,
+            rag_context=rag_context,
+            outline_content=outline_content,
+            user_prompt=user_prompt,
+            context_info=context_info,
+            max_length=max_length
+        )
+        
+        # 检查生成的内容与已有内容的相似度
+        content_too_similar = False
+        similar_content = None
+        similar_title = None
+        
+        for pid, content_info in global_context["generated_contents"].items():
+            if pid != paragraph.id:  # 不与自己比较
+                existing_content = content_info.get("content", "")
+                existing_title = content_info.get("title", "")
                 
-                logger.info(f"执行一次性RAG查询 [outline_id={outline_id}]")
-                rag_context = self._get_rag_context(
-                    question=search_query,
-                    user_id=user_id,
-                    kb_ids=kb_ids,
-                    context_msg="生成全文内容"
-                )
-            
-            # 构建大纲结构
-            outline_structure = []
-            
-            # 获取根段落
-            root_paragraphs = [p for p in paragraphs if p.parent_id is None]
-            
-            # 构建结构节点的函数
-            def build_structure_node(paragraph, level=1, parent_structure=None):
-                structure_node = {
-                    "id": paragraph.id,
-                    "title": paragraph.title,
-                    "level": level,
-                    "children": []
-                }
+                # 计算内容相似度
+                similarity = self._paragraph_similarity(content, existing_content)
                 
-                if parent_structure is None:
-                    outline_structure.append(structure_node)
-                else:
-                    parent_structure["children"].append(structure_node)
-                
-                # 递归处理子段落
-                if hasattr(paragraph, 'children') and paragraph.children:
-                    for child in paragraph.children:
-                        build_structure_node(child, level + 1, structure_node)
-                        
-                return structure_node
+                if similarity > 0.7:  # 相似度阈值
+                    content_too_similar = True
+                    similar_content = existing_content
+                    similar_title = existing_title
+                    logger.warning(f"生成的内容与已有内容 '{existing_title}' 相似度过高 ({similarity:.2f})，尝试重新生成")
+                    break
+        
+        # 如果内容相似度过高，尝试重新生成
+        if content_too_similar and similar_title:
+            # 更新上下文，明确指出需要避免与哪个章节重复
+            context_info["duplicate_warning"] = f"请确保生成的内容与已生成的章节不重复，特别是避免与 '{similar_title}' 章节内容重复。生成的内容必须是独特的，不能包含与其他章节相同的段落或观点。"
             
-            # 构建结构树
-            for root_paragraph in root_paragraphs:
-                build_structure_node(root_paragraph)
-            
-            # 准备并发生成内容
-            markdown_content = []  # 使用列表存储各部分内容
-            
-            # 收集需要生成内容的段落（只处理1级段落）
-            paragraphs_to_generate = []
-            for i, root_paragraph in enumerate(root_paragraphs):
-                chapter_number = i + 1
-                paragraphs_to_generate.append({
-                    "paragraph": root_paragraph,
-                    "chapter_number": chapter_number,
-                    "index": i
-                })
-            
-            # 并发生成段落内容
-            def generate_paragraph_worker(item):
-                paragraph = item["paragraph"]
-                chapter_number = item["chapter_number"]
-                index = item["index"]
-                
-                logger.info(f"开始处理段落 [ID={paragraph.id}, 标题='{paragraph.title}', 序号={chapter_number}, 索引={index}]")
-                
-                # 获取子标题
-                sub_titles = get_sub_paragraph_titles(paragraph)
-                logger.info(f"段落 [ID={paragraph.id}] 包含 {len(sub_titles)} 个子主题")
-                
-                # 为1级段落生成内容
-                count_style = paragraph.count_style or "medium"
-                
-                # 使用全局RAG上下文生成内容
-                logger.info(f"调用_generate_paragraph_content生成段落内容 [ID={paragraph.id}]")
-                content = self._generate_paragraph_content(
-                    article_title=full_content["title"], 
-                    paragraph=paragraph, 
-                    sub_titles=sub_titles, 
-                    count_style=count_style,
+            # 重新生成内容
+            logger.info(f"重新生成段落内容 [标题='{title}', 级别={level}, ID={paragraph.id}]")
+            content = self._generate_paragraph_content_with_context(
+                article_title=article_title,
+                paragraph=paragraph,
+                sub_titles=sub_titles,
+                count_style=count_style,
+                rag_context=rag_context,
+                outline_content=outline_content,
+                user_prompt=user_prompt,
+                context_info=context_info,
+                max_length=max_length
+            )
+        
+        # 提取内容摘要
+        content_summary = self._extract_content_summary(content)
+        
+        # 更新全局上下文
+        global_context["previous_content_summary"] = content_summary
+        global_context["chapter_summaries"][title] = content_summary
+        global_context["generated_contents"][paragraph.id] = {
+            "title": title,
+            "content": content,
+            "summary": content_summary
+        }
+        
+        # 更新总内容长度
+        global_context["total_content_length"] += len(content) + 100  # 100是标题和额外格式的估计长度
+        
+        # 根据段落级别添加标题，一级标题使用##，二级标题使用###，依此类推
+        header = "#" * (level + 1)  # 增加一个#，使一级标题变为##
+        markdown_content.append(f"{header} {title}\n\n{content}\n")
+        
+        # 递归生成子段落内容
+        if hasattr(paragraph, 'children') and paragraph.children:
+            children = paragraph.children
+            for i, child in enumerate(children):
+                self._generate_paragraph_with_context(
+                    paragraph=child,
+                    global_context=global_context,
+                    markdown_content=markdown_content,
+                    article_title=article_title,
                     rag_context=rag_context,
                     outline_content=outline_content,
-                    user_prompt=user_prompt
+                    user_prompt=user_prompt,
+                    is_root=False,
+                    parent_content=content_summary,
+                    chapter_index=i,
+                    total_chapters=len(children)
                 )
-                
-                # 清理标题中的编号
-                clean_title = clean_numbering_from_title(paragraph.title)
-                logger.info(f"清理后的标题: '{clean_title}' [原标题: '{paragraph.title}']")
-                
-                # 返回章节标题和内容
-                # 使用二级标题(##)作为章节标题，因为一级标题(#)已用于文章标题
-                # 不添加"第X章"等层级编号，保持纯标题
-                chapter_title = f"\n## {clean_title}\n"
-                
-                content_length = len(content)
-                logger.info(f"段落处理完成 [ID={paragraph.id}, 内容长度={content_length}字符]")
-                
-                return {
-                    "index": item["index"],
-                    "title": chapter_title,
-                    "content": f"\n{content}\n"
-                }
-            
-            # 使用线程池并发生成内容
-            logger.info(f"开始并发生成段落内容，最大并发数: {MAX_CONCURRENT_GENERATIONS}, 总段落数: {len(paragraphs_to_generate)}")
-            results = []
-            start_time = time.time()
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_GENERATIONS) as executor:
-                # 创建future到段落的映射
-                future_to_paragraph = {
-                    executor.submit(generate_paragraph_worker, item): item 
-                    for item in paragraphs_to_generate
-                }
-                logger.info(f"已提交 {len(future_to_paragraph)} 个段落生成任务到线程池")
-                
-                completed_count = 0
-                for future in concurrent.futures.as_completed(future_to_paragraph):
-                    item = future_to_paragraph[future]
-                    completed_count += 1
-                    
-                    try:
-                        # 记录任务完成进度
-                        progress = (completed_count / len(paragraphs_to_generate)) * 100
-                        elapsed_time = time.time() - start_time
-                        logger.info(f"段落生成进度: {completed_count}/{len(paragraphs_to_generate)} ({progress:.1f}%), 已用时间: {elapsed_time:.1f}秒")
-                        
-                        result = future.result()
-                        results.append(result)
-                        logger.info(f"完成段落生成: {item['paragraph'].title} [ID={item['paragraph'].id}]")
-                    except Exception as e:
-                        logger.error(f"生成段落内容时出错 [ID={item['paragraph'].id}, 标题='{item['paragraph'].title}']: {str(e)}")
-                        # 添加错误信息作为内容，使用二级标题(##)保持一致性
-                        # 清理标题中的编号
-                        clean_title = clean_numbering_from_title(item['paragraph'].title)
-                        results.append({
-                            "index": item["index"],
-                            "title": f"\n## {clean_title}\n",
-                            "content": f"\n生成内容失败: {str(e)}\n"
-                        })
-            
-            total_time = time.time() - start_time
-            logger.info(f"所有段落生成完成，总用时: {total_time:.1f}秒，平均每段用时: {total_time/len(paragraphs_to_generate):.1f}秒")
-            
-            # 按原始顺序排序结果
-            results.sort(key=lambda x: x["index"])
-            
-            # 将结果添加到markdown内容中
-            for result in results:
-                markdown_content.append(result["content"])
-            
-            # 合并所有内容
-            final_content = ''.join(markdown_content)
-            
-            # 设置内容
-            full_content["content"] = final_content
-            full_content["markdown"] = final_content
-            full_content["html"] = markdown.markdown(final_content, extensions=['extra'])
-            logger.info("Markdown转HTML完成")
-            
-            # 添加大纲结构
-            full_content["outline_structure"] = outline_structure
-            
-            logger.info("全文生成完成")
-            return full_content
-            
-        except Exception as e:
-            logger.error(f"生成全文内容时出错: {str(e)}")
-            raise
 
-    def _generate_paragraph_content(self, article_title: str, paragraph: SubParagraph, sub_titles: List[str], count_style: str, rag_context: str = "", outline_content: str = "", user_prompt: str = "") -> str:
-        """生成段落内容"""
+    def _generate_paragraph_content_with_context(
+        self, 
+        article_title: str, 
+        paragraph: SubParagraph, 
+        sub_titles: List[str], 
+        count_style: str, 
+        rag_context: str = "", 
+        outline_content: str = "", 
+        user_prompt: str = "",
+        context_info: dict = {},
+        max_length: int = 3000
+    ) -> str:
+        """生成段落内容，包含上下文信息"""
         # 记录开始生成段落内容
         logger.info(f"开始生成段落内容 [段落ID={paragraph.id}, 标题='{paragraph.title}', 字数范围={count_style}]")
         
         # 根据count_style确定字数范围
         word_count_range = {
-            "short": "800-1200",
-            "medium": "1500-2000",
-            "long": "2500-3000"
-        }.get(count_style, "1500-2000")
+            "short": "300-500",
+            "medium": "500-1000",
+            "long": "1000-1500"
+        }.get(count_style, "500-1000")
         
         # 清理标题中的编号
         clean_title = clean_numbering_from_title(paragraph.title)
@@ -997,128 +1406,526 @@ class OutlineGenerator:
         sub_topics = "\n".join([f"  - {clean_numbering_from_title(title)}" for title in sub_titles])
         logger.info(f"段落包含 {len(sub_titles)} 个子主题")
         
-        # 使用常量模板
-        template = PARAGRAPH_GENERATION_TEMPLATE.format(
-            article_title=article_title,
-            outline_content=outline_content,
-            paragraph_title=clean_title,
-            paragraph_description=paragraph.description or "无",
-            sub_topics=sub_topics,
-            rag_context=rag_context,
-            word_count_range=word_count_range,
-            user_prompt=user_prompt
-        )
+        # 获取段落描述
+        description = paragraph.description or ""
         
-        # 记录提示词长度和内容
-        prompt_length = len(template)
-        logger.info(f"生成的提示词长度: {prompt_length} 字符")
-        logger.info(f"提示词内容 [段落ID={paragraph.id}]:\n{'-'*80}\n{template}\n{'-'*80}")
+        # 获取段落级别
+        level = paragraph.level
+        
+        # 获取章节位置信息
+        chapter_position = context_info.get("chapter_position", {})
+        chapter_index = chapter_position.get("index", 0)
+        total_chapters = chapter_position.get("total", 1)
+        
+        # 获取父段落内容
+        parent_content = context_info.get("parent_content", "")
+        
+        # 获取已生成章节的摘要
+        chapter_summaries = context_info.get("chapter_summaries", {})
+        
+        # 获取前一段落的内容摘要
+        previous_content_summary = context_info.get("previous_content_summary", "")
+        
+        # 获取已生成的标题列表
+        already_generated_titles = context_info.get("already_generated_titles", [])
+        
+        # 获取重复警告
+        duplicate_warning = context_info.get("duplicate_warning", "")
+        
+        # 构建章节摘要字符串
+        chapter_summaries_str = ""
+        if chapter_summaries:
+            chapter_summaries_str = "已生成的章节摘要：\n"
+            for ch_title, ch_summary in list(chapter_summaries.items())[-5:]:  # 只取最近5个章节
+                chapter_summaries_str += f"- {ch_title}: {ch_summary}\n"
+        
+        # 构建已生成标题字符串
+        already_generated_titles_str = ""
+        if already_generated_titles:
+            already_generated_titles_str = "已生成的章节标题：" + ", ".join(already_generated_titles[-10:])  # 只取最近10个标题
+        
+        # 构建章节位置字符串
+        chapter_position_str = ""
+        if level == 1:
+            chapter_position_str = f"这是第{chapter_index + 1}章，共{total_chapters}章。"
+        elif level == 2:
+            # 使用章节索引和段落ID生成节号
+            paragraph_id_str = str(paragraph.id)
+            section_num = f"{chapter_index + 1}.{paragraph_id_str[-2:]}" if len(paragraph_id_str) >= 2 else f"{chapter_index + 1}.1"
+            chapter_position_str = f"这是{section_num}节。"
+        elif level == 3:
+            # 使用章节索引和段落ID生成小节号
+            paragraph_id_str = str(paragraph.id)
+            section_num = f"{chapter_index + 1}.{paragraph_id_str[-2:]}" if len(paragraph_id_str) >= 2 else f"{chapter_index + 1}.1"
+            subsection_num = paragraph_id_str[-1] if len(paragraph_id_str) >= 1 else "1"
+            chapter_position_str = f"这是{section_num}.{subsection_num}小节。"
+        
+        # 构建提示模板
+        template = f"""
+你是一位专业的内容创作者，现在需要你生成一篇文章的一个段落内容。
+
+【文章标题】
+{article_title}
+
+【当前段落标题】
+{clean_title}
+
+【段落描述】
+{description}
+
+【段落级别】
+{level}级标题
+
+【字数范围】
+{word_count_range}字
+
+【章节位置】
+{chapter_position_str}
+
+【父段落内容】
+{parent_content}
+
+【前一段落摘要】
+{previous_content_summary}
+
+{chapter_summaries_str}
+
+{already_generated_titles_str}
+
+{duplicate_warning}
+
+【子主题列表】
+{sub_topics}
+
+【参考资料】
+{rag_context}
+
+【用户需求】
+{user_prompt}
+
+请根据以上信息，生成该段落的详细内容，要求：
+1. 内容要紧扣段落标题和描述
+2. 内容要与文章整体主题保持一致
+3. 内容要与父段落内容保持连贯
+4. 内容不要重复已生成章节的内容
+5. 如果有子主题，内容要涵盖这些子主题
+6. 内容长度控制在{word_count_range}字左右
+7. 内容要专业、准确、有深度
+8. 不要在内容中包含标题，直接开始正文内容
+9. 不要使用"本章"、"本节"等指代词，直接陈述内容
+10. 不要在内容中重复段落标题
+
+请直接输出段落内容，不要包含任何解释或标记。
+"""
         
         try:
-            # 创建提示
-            prompt_template = ChatPromptTemplate.from_template(template)
-            
-            # 创建链
-            chain = prompt_template | self.llm
-            
-            # 记录开始调用LLM
+            # 直接调用LLM，不使用ChatPromptTemplate
             logger.info(f"开始调用LLM生成段落内容 [段落ID={paragraph.id}]")
+            result = self.llm.invoke(template)
             
-            # 执行链
-            result = chain.invoke({})
-            
-            # 记录LLM响应
-            response_length = len(result.content) if hasattr(result, 'content') else 0
-            logger.info(f"LLM响应完成 [段落ID={paragraph.id}], 响应长度: {response_length} 字符")
-            logger.info(f"LLM响应内容 [段落ID={paragraph.id}]:\n{'-'*80}\n{result.content}\n{'-'*80}")
-            
-            # 检查生成的内容中是否包含子标题
+            # 获取生成的内容
             content = result.content
-            heading_count = content.count('###')
-            if heading_count > 0:
-                logger.info(f"生成内容包含 {heading_count} 个子标题(###) [段落ID={paragraph.id}]")
-            else:
-                logger.info(f"生成内容未包含子标题(###) [段落ID={paragraph.id}]")
             
-            # 直接返回LLM的原始响应内容，不进行过滤
+            # 记录生成完成
+            logger.info(f"段落内容生成完成 [段落ID={paragraph.id}, 内容长度={len(content)}字符]")
+            
+            # 限制内容长度
+            if len(content) > max_length:
+                logger.warning(f"生成的内容超过最大长度限制，进行截断 [原长度={len(content)}, 最大长度={max_length}]")
+                content = content[:max_length]
+            
             return content
             
         except Exception as e:
             logger.error(f"生成段落内容时出错 [段落ID={paragraph.id}]: {str(e)}")
-            return f"生成内容失败: {str(e)}"
+            # 出错时返回简短内容
+            return f"内容生成失败: {str(e)}"
 
-    def generate_content_directly(self, prompt: str, file_contents: List[str] = None, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    def _calculate_title_retention(self, original_titles, optimized_titles=None):
         """
-        直接生成内容（不基于大纲）
+        计算标题保留率
         
         Args:
-            prompt: 用户提供的写作提示
-            file_contents: 用户上传的文件内容列表
-            user_id: 用户ID，用于RAG搜索（如果启用）
-            kb_ids: 知识库ID列表，用于RAG搜索（如果启用）
+            original_titles: 原始标题列表
+            optimized_titles: 优化后的标题列表，如果为None则计算原始标题中的唯一标题比例
             
         Returns:
-            Dict: 包含生成内容的字典
+            float: 标题保留率（0-1之间）
         """
-        logger.info(f"开始直接生成内容 [prompt_length={len(prompt)}, use_rag={self.use_rag}]")
+        if not original_titles:
+            return 1.0
+            
+        if optimized_titles is None:
+            # 计算原始标题中的唯一标题比例
+            unique_titles = set(original_titles)
+            return len(unique_titles) / len(original_titles)
+        else:
+            # 计算优化后保留的原始标题比例
+            retained_count = 0
+            for title in original_titles:
+                # 使用相似度比较，而不是精确匹配
+                if any(self._title_similarity(title, opt_title) > 0.8 for opt_title in optimized_titles):
+                    retained_count += 1
+            
+            return retained_count / len(original_titles)
+            
+    def _title_similarity(self, title1, title2):
+        """
+        计算两个标题的相似度
         
+        Args:
+            title1: 第一个标题
+            title2: 第二个标题
+            
+        Returns:
+            float: 相似度（0-1之间）
+        """
+        # 清理标题
+        title1 = clean_numbering_from_title(title1).lower()
+        title2 = clean_numbering_from_title(title2).lower()
+        
+        # 如果标题完全相同
+        if title1 == title2:
+            return 1.0
+            
+        # 如果一个标题包含另一个标题
+        if title1 in title2 or title2 in title1:
+            return 0.9
+            
+        # 计算词集合的Jaccard相似度
+        words1 = set(title1.split())
+        words2 = set(title2.split())
+        
+        if not words1 or not words2:
+            return 0.0
+            
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+        
+        return len(intersection) / len(union)
+            
+    def _calculate_repetition_score(self, content):
+        """
+        计算内容的重复度分数
+        
+        Args:
+            content: 文档内容
+            
+        Returns:
+            float: 重复度分数（0-1之间，越高表示重复度越高）
+        """
+        # 将内容分割成段落
+        paragraphs = [p for p in content.split('\n\n') if p.strip() and not p.strip().startswith('#')]
+        
+        if len(paragraphs) <= 1:
+            return 0.0
+            
+        # 计算段落间的相似度
+        similarity_sum = 0
+        comparison_count = 0
+        
+        # 限制比较的段落数，避免计算量过大
+        max_paragraphs = min(len(paragraphs), 20)
+        sample_paragraphs = paragraphs[:max_paragraphs]
+        
+        for i in range(len(sample_paragraphs)):
+            for j in range(i+1, len(sample_paragraphs)):
+                similarity = self._paragraph_similarity(sample_paragraphs[i], sample_paragraphs[j])
+                similarity_sum += similarity
+                comparison_count += 1
+                
+        if comparison_count == 0:
+            return 0.0
+            
+        # 返回平均相似度作为重复度分数
+        return similarity_sum / comparison_count
+        
+    def _paragraph_similarity(self, para1, para2):
+        """
+        计算两个段落之间的相似度
+        
+        Args:
+            para1: 第一个段落
+            para2: 第二个段落
+            
+        Returns:
+            float: 相似度分数，范围0-1
+        """
+        # 如果段落太短，不计算相似度
+        if len(para1) < 50 or len(para2) < 50:
+            return 0.0
+            
+        # 将段落分成句子
+        sentences1 = re.split(r'[。！？.!?]', para1)
+        sentences2 = re.split(r'[。！？.!?]', para2)
+        
+        # 过滤空句子
+        sentences1 = [s.strip() for s in sentences1 if s.strip()]
+        sentences2 = [s.strip() for s in sentences2 if s.strip()]
+        
+        # 如果没有有效句子，返回0
+        if not sentences1 or not sentences2:
+            return 0.0
+        
+        # 计算句子间的相似度
+        similarity_scores = []
+        for s1 in sentences1:
+            for s2 in sentences2:
+                if len(s1) > 10 and len(s2) > 10:  # 只比较长度足够的句子
+                    similarity_scores.append(self._sentence_similarity(s1, s2))
+        
+        # 如果没有有效的相似度分数，返回0
+        if not similarity_scores:
+            return 0.0
+            
+        # 返回最高的相似度分数
+        return max(similarity_scores)
+
+    def _sentence_similarity(self, s1, s2):
+        """
+        计算两个句子的相似度
+        
+        Args:
+            s1: 第一个句子
+            s2: 第二个句子
+            
+        Returns:
+            float: 相似度（0-1之间）
+        """
+        # 如果句子完全相同
+        if s1 == s2:
+            return 1.0
+            
+        # 如果一个句子包含另一个句子
+        if s1 in s2 or s2 in s1:
+            return 0.9
+            
+        # 计算词集合的Jaccard相似度
+        words1 = set(s1.split())
+        words2 = set(s2.split())
+        
+        if not words1 or not words2:
+            return 0.0
+            
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+        
+        return len(intersection) / len(union)
+
+    def _extract_content_summary(self, content: str, max_length: int = 500) -> str:
+        """
+        从段落内容中提取摘要，用于下一个段落的上下文
+        
+        Args:
+            content: 段落内容
+            max_length: 摘要最大长度
+            
+        Returns:
+            str: 内容摘要
+        """
+        # 如果内容较短，直接返回
+        if len(content) <= max_length:
+            return content
+            
+        # 简单的摘要提取：取前半部分和后半部分
+        first_part = content[:max_length//2]
+        last_part = content[-max_length//2:]
+        
+        return f"{first_part}...\n[中间内容省略]...\n{last_part}"
+
+    def _full_content_optimize(self, user_prompt: str, final_content: str) -> str:
+        """
+        优化全文内容，处理可能的重复标题和内容
+        
+        Args:
+            user_prompt: 用户提示
+            final_content: 生成的全文内容
+            
+        Returns:
+            str: 优化后的内容
+        """
+        logger.info("开始分析文档结构和内容...")
+        
+        # 提取文档中的标题及其结构
+        title_pattern = re.compile(r'^(#+)\s+(.+)$', re.MULTILINE)
+        titles = [(len(match.group(1)), match.group(2)) for match in title_pattern.finditer(final_content)]
+        
+        # 分析文档结构，查找重复标题
+        title_counts = {}
+        duplicate_titles = []
+        
+        for level, title in titles:
+            title_counts[title] = title_counts.get(title, 0) + 1
+            if title_counts[title] > 1:
+                duplicate_titles.append(title)
+        
+        if duplicate_titles:
+            logger.warning(f"发现重复标题: {duplicate_titles}")
+        
+        # 提取文档中的重要术语（引号中的内容和专有名词）
+        term_pattern = re.compile(r'[""「」\'](.*?)[\""「」\']|[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*')
+        terms = [match.group(0) for match in term_pattern.finditer(final_content)]
+        # 去重并限制数量
+        important_terms = list(set(terms))[:20]
+        
+        # 计算标题保留率
+        title_retention = self._calculate_title_retention(
+            [title for _, title in titles]
+        )
+        
+        # 计算内容重复度
+        repetition_score = self._calculate_repetition_score(final_content)
+        
+        # 根据重复度评分给出描述
+        if repetition_score < 0.1:
+            repetition_description = "内容重复度较低，整体内容质量良好"
+        elif repetition_score < 0.2:
+            repetition_description = "存在一定程度的内容重复，需要适当优化"
+        else:
+            repetition_description = "内容重复度较高，需要大幅优化减少重复内容"
+        
+        # 分析段落相似度，找出高度相似的段落
+        paragraphs = re.split(r'\n\n+', final_content)
+        similar_paragraphs = []
+        
+        for i in range(len(paragraphs)):
+            for j in range(i+1, len(paragraphs)):
+                if len(paragraphs[i]) > 50 and len(paragraphs[j]) > 50:  # 只比较较长的段落
+                    similarity = self._paragraph_similarity(paragraphs[i], paragraphs[j])
+                    if similarity > 0.7:  # 相似度阈值
+                        similar_paragraphs.append((i+1, j+1, similarity))
+        
+        # 构建优化提示
+        optimization_prompt = f"""
+请优化以下文档内容，使其更加连贯、一致，并消除重复内容。
+
+用户需求: {user_prompt}
+
+文档结构分析:
+- 总标题数: {len(titles)}
+- 标题保留率: {title_retention:.2f}
+- {"存在重复标题: " + ", ".join(duplicate_titles) if duplicate_titles else "无重复标题"}
+
+重要术语:
+{", ".join(important_terms)}
+
+内容重复度分析:
+- 重复度评分: {repetition_score:.2f}
+- {repetition_description}
+
+{f"高度相似段落位置 (段落索引, 相似度): {similar_paragraphs}" if similar_paragraphs else "未发现高度相似的段落"}
+
+优化要求:
+1. 必须严格保持原有的文档结构和主要内容
+2. 消除重复的内容，但不要过度精简
+3. 确保各部分之间的逻辑连贯性
+4. 保持专业术语的一致性
+5. 优化段落之间的过渡
+6. 确保内容完整，不遗漏重要信息
+7. 每个章节的内容必须保持丰富，不要将任何章节精简为只有几句话
+8. 后面章节的内容丰富度应与前面章节相当
+
+【内容丰富度要求】
+- 不要过度精简内容，每个章节都应保持足够的内容量
+- 对于每个章节，至少保留原文80%的内容量
+- 特别是后面的章节，不要因为前面已有类似内容就大幅精简
+- 即使内容有些重复，也要确保每个章节都有足够的实质内容
+
+【标题格式要求】
+- 必须严格保持Markdown标题格式
+- 只有文章总标题用一级标题，章节标题统一从二级标题开始
+- 一级标题使用"# 标题"格式
+- 二级标题使用"## 标题"格式
+- 三级标题使用"### 标题"格式
+- 四级标题使用"#### 标题"格式
+- 标题与内容之间必须有空行
+- 严格按照原文档的标题结构和层级，不要改变、删除或合并任何标题
+
+以下是需要优化的文档内容:
+
+{final_content}
+
+请直接输出优化后的完整文档内容，使用Markdown格式，确保所有标题都保持正确的Markdown格式，并且每个章节都有足够丰富的内容。
+"""
+        
+        # 调用语言模型进行优化
+        logger.info("调用语言模型优化内容...")
         try:
-            # 处理文件内容
-            file_context = ""
-            if file_contents and len(file_contents) > 0:
-                file_context = "参考以下文件内容:\n" + "\n".join(file_contents)
-                logger.info(f"使用参考文件内容 [files_count={len(file_contents)}]")
-            else:
-                file_context = "没有提供参考文件内容。"
-                logger.info("无参考文件内容")
+            response = self.llm.invoke(optimization_prompt)
+            optimized_content = response.content
             
-            # 获取RAG搜索结果（如果启用）
-            rag_context = ""
-            if self.use_rag:
-                rag_context = self._get_rag_context(
-                    question=prompt,
-                    user_id=user_id,
-                    kb_ids=kb_ids,
-                    context_msg="直接生成内容"
-                )
+            # 验证优化后的内容是否保留了标题格式
+            original_title_count = len(re.findall(r'^#+\s+.+$', final_content, re.MULTILINE))
+            optimized_title_count = len(re.findall(r'^#+\s+.+$', optimized_content, re.MULTILINE))
             
-            # 生成内容
-            full_content = {
-                "title": "",
-                "content": "",
-                "markdown": "",
-                "html": "",
-                "outline_structure": []
-            }
+            # 检查内容长度，确保没有过度精简
+            original_length = len(final_content)
+            optimized_length = len(optimized_content)
+            length_ratio = optimized_length / original_length if original_length > 0 else 0
             
-            # 创建提示
-            prompt_template = ChatPromptTemplate.from_template(DIRECT_CONTENT_GENERATION_TEMPLATE)
-            logger.info("创建提示模板完成")
+            logger.info(f"内容长度比较: 原始={original_length}, 优化后={optimized_length}, 比例={length_ratio:.2f}")
             
-            # 创建链
-            chain = prompt_template | self.llm
-            logger.info("创建处理链完成")
+            # 如果优化后的内容长度小于原始内容的70%，可能过度精简
+            if length_ratio < 0.7:
+                logger.warning(f"优化后的内容长度减少过多 [原始={original_length}, 优化后={optimized_length}, 比例={length_ratio:.2f}]")
+                
+                # 如果标题数量也减少，直接使用原始内容
+                if optimized_title_count < original_title_count * 0.9:
+                    logger.warning("优化后标题数量也减少，使用原始内容")
+                    return final_content
+                
+                # 尝试重新优化，强调保持内容丰富度
+                try:
+                    # 构建更强调保持内容量的提示
+                    retry_prompt = f"""
+请重新优化以下文档内容，之前的优化过度精简了内容。
+
+优化要求:
+1. 必须保持原文档的所有内容要点，不要过度精简
+2. 每个章节的内容量应至少保持原文的90%
+3. 可以改善表达方式，但不要删除实质内容
+4. 严格保持原有的标题结构和格式
+5. 确保后面章节的内容与前面章节一样丰富
+
+原始文档:
+{final_content}
+
+请输出优化后的完整文档，确保内容丰富度和完整性。
+"""
+                    logger.info("尝试重新优化，强调保持内容丰富度")
+                    retry_response = self.llm.invoke(retry_prompt)
+                    retry_content = retry_response.content
+                    
+                    # 检查重试后的内容长度
+                    retry_length = len(retry_content)
+                    retry_ratio = retry_length / original_length
+                    retry_title_count = len(re.findall(r'^#+\s+.+$', retry_content, re.MULTILINE))
+                    
+                    logger.info(f"重试优化结果: 长度={retry_length}, 比例={retry_ratio:.2f}, 标题数={retry_title_count}")
+                    
+                    # 如果重试后的内容更接近原始长度，且标题数量合理，使用重试结果
+                    if retry_ratio > length_ratio and retry_ratio > 0.8 and retry_title_count >= optimized_title_count:
+                        logger.info("使用重试优化结果")
+                        return retry_content
+                    else:
+                        logger.warning("重试优化效果不理想，使用原始内容")
+                        return final_content
+                        
+                except Exception as e:
+                    logger.error(f"重试优化失败: {str(e)}")
+                    return final_content
             
-            # 执行链
-            logger.info("开始执行大模型调用")
-            content = chain.invoke({"prompt": prompt, "file_context": file_context, "rag_context": rag_context})
-            logger.info("大模型调用完成")
+            # 如果优化后的标题数量明显减少，可能丢失了标题格式
+            if optimized_title_count < original_title_count * 0.8:
+                logger.warning(f"优化后的标题数量减少过多 [原始={original_title_count}, 优化后={optimized_title_count}]，使用原始内容")
+                # 如果优化后标题数量明显减少，可能是标题格式丢失，使用原始内容
+                optimized_content = final_content
+                logger.info("由于标题格式问题，使用原始未优化内容")
             
-            # 提取标题
-            lines = content.content.strip().split('\n')
-            title = lines[0].strip().replace('#', '').strip()
-            if not title or len(title) > 100:
-                title = "生成的文章"
-            
-            # 设置内容
-            full_content["title"] = title
-            full_content["content"] = content.content
-            full_content["markdown"] = content.content
-            full_content["html"] = markdown.markdown(content.content, extensions=['extra'])
-            
-            logger.info("直接生成内容完成")
-            return full_content
-            
+            logger.info("内容优化完成")
+            return optimized_content
         except Exception as e:
-            logger.error(f"直接生成内容时出错: {str(e)}")
-            raise
+            logger.error(f"内容优化失败: {str(e)}")
+            # 如果优化失败，返回原始内容
+            return final_content
+
