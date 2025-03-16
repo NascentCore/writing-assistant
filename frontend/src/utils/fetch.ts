@@ -147,3 +147,40 @@ export const fetchWithAuthStream = async (
     return;
   }
 };
+
+export const downloadFile = async (url: string) => {
+  const token = localStorage.getItem('token');
+  const fullUrl =
+    url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  const res = await fetch(fullUrl, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  // 1. 先读取 headers 里的 Content-Disposition
+  const contentDisposition = res.headers.get('Content-Disposition');
+
+  let filename = '未命名文件.docx'; // 兜底
+  if (contentDisposition) {
+    const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+    if (fileNameMatch && fileNameMatch[1]) {
+      filename = decodeURIComponent(fileNameMatch[1]);
+    }
+  }
+
+  const blob = await res.blob();
+  const blobUrl = window.URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  window.URL.revokeObjectURL(blobUrl);
+};

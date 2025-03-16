@@ -1,8 +1,10 @@
-import { saveAsDocx, saveAsPdf } from '@/utils/utils'; // 引入导出函数
+import { saveAsPdf } from '@/utils/utils'; // 引入导出函数
 import { useModel } from '@umijs/max';
 import { AiEditor } from 'aieditor';
 import { Button, Dropdown, Menu } from 'antd';
 import React from 'react';
+import { API_BASE_URL } from '../../../../config';
+import { downloadFile } from '../../../../utils/fetch';
 
 interface ExportBtnGroupProps {
   editorRef: React.MutableRefObject<AiEditor | null>; // 添加 editorRef
@@ -27,7 +29,14 @@ const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
         saveAsPdf();
       } else if (format === 'docx') {
         const content = editorRef.current.getHtml();
-        saveAsDocx(content, docTitle);
+        // saveAsDocx(content, docTitle);
+        console.log(1313, currentDocId);
+        // window.open(
+        //   `${API_BASE_URL}/api/v1/documents/${currentDocId}/export/docx`,
+        // );
+        downloadFile(
+          `${API_BASE_URL}/api/v1/documents/${currentDocId}/export/docx`,
+        );
       }
     } catch (error) {
       console.error('Export error:', error);
