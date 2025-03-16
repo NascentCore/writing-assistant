@@ -395,7 +395,9 @@ async def export_document_docx(
             docx_bytes, 
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={
-                "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+                "Content-Type": "application/octet-stream",
+                "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}',
+                "Access-Control-Expose-Headers": "Content-Disposition"
             }
         )
     except Exception as e:
@@ -464,7 +466,9 @@ async def export_document_pdf(
             pdf_bytes, 
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+                "Content-Type": "application/octet-stream",
+                "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}',
+                "Access-Control-Expose-Headers": "Content-Disposition"
             }
         )
     except Exception as e:
