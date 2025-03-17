@@ -37,6 +37,7 @@ class ChatRequest(BaseModel):
     question: str = Field(description="问题内容")
     model_name: str = Field(description="模型名称")
     session_id: str = Field(description="会话ID")
+    web_search: Optional[bool] = Field(default=False, description="是否使用web搜索")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
     streaming: Optional[bool] = Field(default=True, description="是否使用流式返回")
@@ -46,9 +47,10 @@ class ChatRequest(BaseModel):
             "example": {
                 "question": "这是一个问题",
                 "model_name": "deepseek-v3",
-                "doc_id": "doc-1234567890",
-                "file_ids": ["file-1234567890", "file-1234567891"],
                 "session_id": "chat-1234567890",
+                "web_search": False,
+                "file_ids": ["file-1234567890", "file-1234567891"],
+                "files": [],
                 "streaming": True
             }
         }
@@ -626,7 +628,7 @@ async def chat(
             "custom_prompt": custom_prompt,
             "history": history,
             "streaming": request.streaming,
-            "networking": settings.RAG_CHAT_NETWORKING,
+            "networking": request.web_search,
             "product_source": settings.RAG_CHAT_PRODUCT_SOURCE,
             "rerank": settings.RAG_CHAT_RERANK,
             "only_need_search_results": settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
@@ -650,7 +652,7 @@ async def chat(
             custom_prompt=custom_prompt,
             history=history,
             streaming=streaming,
-            networking=settings.RAG_CHAT_NETWORKING,
+            networking=request.web_search,
             product_source=settings.RAG_CHAT_PRODUCT_SOURCE,
             rerank=settings.RAG_CHAT_RERANK,
             only_need_search_results=settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
