@@ -112,6 +112,7 @@ class SubParagraph(Base):
     reference_status = Column(Enum(ReferenceStatus), nullable=False, default=ReferenceStatus.NOT_REFERENCED, comment="引用状态")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    sort_index = Column(Integer, nullable=True, comment="排序索引")
 
     # 关联
     outline = relationship("Outline", back_populates="sub_paragraphs")
