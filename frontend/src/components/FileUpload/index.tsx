@@ -7,14 +7,26 @@ import styles from './index.module.less';
 
 const { Dragger } = Upload;
 
-const FileUpload: React.FC = () => {
-  const props: UploadProps = {
+interface FileUploadProps extends Omit<UploadProps, 'value' | 'onChange'> {
+  url?: string;
+  category?: string;
+  value?: UploadFile[];
+  onChange?: (fileList: UploadFile[]) => void;
+}
+
+const FileUpload: React.FC<FileUploadProps> = ({
+  url = '/api/v1/rag/files',
+  category,
+  value,
+  onChange,
+  ...restProps
+}) => {
+  const uploadProps: UploadProps = {
     name: 'file',
     multiple: true,
+    fileList: value,
     onRemove: async (file: UploadFile) => {
       try {
-        console.log('file.response', file.response);
-
         const fileId = file.response?.data[0]?.file_id;
         if (!fileId) {
           message.error('文件ID不存在');
@@ -40,8 +52,10 @@ const FileUpload: React.FC = () => {
       const formData = new FormData();
       formData.append('files', file);
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API_BASE_URL}/api/v1/rag/files?category=system`);
-      // 添加额外的请求头
+      xhr.open(
+        'POST',
+        `${API_BASE_URL}${url}${category ? `?category=${category}` : ''}`,
+      );
       xhr.setRequestHeader(
         'authorization',
         `Bearer ${localStorage.getItem('token')}`,
@@ -54,8 +68,6 @@ const FileUpload: React.FC = () => {
               onError?.(new Error('上传失败'));
               return;
             }
-
-            // 将服务器返回的响应传给 onSuccess
             onSuccess?.(response);
           } catch (e) {
             onError?.(new Error('解析响应失败'));
@@ -71,6 +83,7 @@ const FileUpload: React.FC = () => {
     },
     onChange(info) {
       const { status } = info.file;
+      onChange?.(info.fileList);
 
       if (status === 'done') {
         message.success(`${info.file.name} 文件上传成功`);
@@ -78,11 +91,12 @@ const FileUpload: React.FC = () => {
         message.error(`${info.file.name} 文件上传失败`);
       }
     },
+    ...restProps,
   };
 
   return (
     <div className={styles.uploadContainer}>
-      <Dragger accept=".docx,.doc,.pdf" {...props}>
+      <Dragger accept=".docx,.doc,.pdf" {...uploadProps}>
         <p className="ant-upload-drag-icon">
           <InboxOutlined />
         </p>
