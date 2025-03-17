@@ -707,9 +707,6 @@ async def update_outline(
     # 更新大纲标题
     outline.title = request.title
     
-    # 注意：markdown_content 是一个只读属性，由系统根据段落结构自动生成
-    # 这里不需要手动更新 markdown_content
-    
     try:
         # 获取所有现有段落
         existing_paragraphs = db.query(SubParagraph).filter(
@@ -722,11 +719,40 @@ async def update_outline(
         # 收集新结构中的所有段落ID
         new_paragraph_ids = set()
         
+        # 验证段落层级和父子关系
+        def validate_paragraph_structure(paragraphs, parent_id=None, level=None):
+            for para_data in paragraphs:
+                paragraph_id = para_data.id
+                
+                # 如果是现有段落，验证层级和父子关系是否改变
+                if paragraph_id is not None and paragraph_id in existing_dict:
+                    existing_para = existing_dict[paragraph_id]
+                    
+                    # 验证段落层级是否改变
+                    if existing_para.level != para_data.level:
+                        raise ValueError(f"段落 {paragraph_id} 的层级不允许改变")
+                    
+                    # 验证父子关系是否改变（除了同级移动）
+                    if existing_para.parent_id != parent_id:
+                        # 如果原父节点和新父节点都存在，检查它们是否在同一层级
+                        if existing_para.parent_id is not None and parent_id is not None:
+                            old_parent = existing_dict.get(existing_para.parent_id)
+                            new_parent = existing_dict.get(parent_id)
+                            if old_parent and new_parent and old_parent.level != new_parent.level:
+                                raise ValueError(f"段落 {paragraph_id} 只能在同一层级内移动")
+                
+                # 递归验证子段落
+                if para_data.children:
+                    validate_paragraph_structure(para_data.children, paragraph_id, para_data.level + 1)
+        
+        # 首先验证整个段落结构
+        validate_paragraph_structure(request.sub_paragraphs)
+        
         # 递归更新段落
         def update_paragraphs_recursively(paragraphs, parent_id=None):
             result_ids = []
             
-            for para_data in paragraphs:
+            for index, para_data in enumerate(paragraphs):
                 paragraph_id = para_data.id
                 
                 # 如果有ID且存在于现有段落中，则更新
@@ -737,8 +763,8 @@ async def update_outline(
                     paragraph.title = para_data.title
                     paragraph.description = para_data.description
                     paragraph.reference_status = ReferenceStatus(para_data.reference_status)
-                    paragraph.level = para_data.level
                     paragraph.parent_id = parent_id
+                    paragraph.sort_index = index  # 使用索引作为排序依据
                     
                     # 只有1级段落才能设置count_style
                     if para_data.level == 1 and para_data.count_style:
@@ -771,7 +797,7 @@ async def update_outline(
                                     is_selected=ref_data.is_selected
                                 )
                                 db.add(reference)
-                                db.flush()  # 获取ID
+                                db.flush()
                                 
                                 # 如果是网页链接类型，创建WebLink
                                 if ref_data.type == ReferenceType.WEB_LINK and ref_data.web_link:
@@ -793,7 +819,8 @@ async def update_outline(
                         description=para_data.description,
                         reference_status=ReferenceStatus(para_data.reference_status),
                         level=para_data.level,
-                        parent_id=parent_id
+                        parent_id=parent_id,
+                        sort_index=index  # 使用索引作为排序依据
                     )
                     
                     # 只有1级段落才能设置count_style
@@ -824,7 +851,7 @@ async def update_outline(
                                 is_selected=ref_data.is_selected
                             )
                             db.add(reference)
-                            db.flush()  # 获取ID
+                            db.flush()
                             
                             # 如果是网页链接类型，创建WebLink
                             if ref_data.type == ReferenceType.WEB_LINK and ref_data.web_link:
@@ -841,7 +868,7 @@ async def update_outline(
                 
                 # 递归处理子段落
                 if para_data.children:
-                    child_ids = update_paragraphs_recursively(para_data.children, paragraph.id)
+                    child_ids = update_paragraphs_recursively(para_data.children, paragraph.id if paragraph_id is None else paragraph_id)
             
             return result_ids
         
@@ -858,6 +885,9 @@ async def update_outline(
         
         return APIResponse.success(message="大纲更新成功", data={"id": outline.id})
     
+    except ValueError as ve:
+        db.rollback()
+        return APIResponse.error(message=str(ve))
     except Exception as e:
         db.rollback()
         return APIResponse.error(message=f"更新大纲失败: {str(e)}")
@@ -1144,7 +1174,8 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
                 if department_ids:
                     department_kbs = db.query(RagKnowledgeBase).filter(
                         RagKnowledgeBase.kb_type == RagKnowledgeBaseType.DEPARTMENT,
-                        RagKnowledgeBase.owner_id.in_(department_ids), RagKnowledgeBase.is_deleted == False).all()
+                        RagKnowledgeBase.owner_id.in_(department_ids), 
+                        RagKnowledgeBase.is_deleted == False).all()
                     if department_kbs:
                         kb_ids.extend([kb.kb_id for kb in department_kbs])
             

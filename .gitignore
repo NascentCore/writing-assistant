@@ -65,3 +65,6 @@ uploads/
 htmlcov/
 .pytest_cache/
 config.yaml
+
+# 数据库备份
+backend/alembic.ini
