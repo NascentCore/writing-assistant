@@ -43,7 +43,6 @@ export const routes = [
     path: '/PersonalKnowledge',
     component: './PersonalKnowledge',
   },
-
   {
     name: '历史记录',
     path: '/WritingHistory',
@@ -57,12 +56,6 @@ export const routes = [
     menuRender: false,
     hideInMenu: true,
   },
-  // {
-  //   name: '编辑器',
-  //   path: '/EditorPageA',
-  //   component: './EditorPageA',
-  //   menuRender: false,
-  // },
   {
     path: '/*',
     component: '@/pages/404',
