@@ -128,6 +128,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=604800  # 设置预检请求的缓存时间为一周
 )
 
 # 注册路由
