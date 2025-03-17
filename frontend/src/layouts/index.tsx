@@ -43,7 +43,7 @@ const iconMap: Record<string, React.ReactNode> = {
 
 // 将路由配置转换为菜单项
 const convertRoutesToMenuItems = (routes: RouteItem[]): MenuItem[] => {
-  const isAdmin = localStorage.getItem('admin') === '1';
+  const isAdmin = localStorage.getItem('admin') === '2';
 
   const menuItems: MenuItem[] = routes
     .filter((route) => {

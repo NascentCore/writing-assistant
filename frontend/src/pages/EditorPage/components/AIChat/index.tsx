@@ -506,6 +506,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
               flex: 1,
               height: '100%',
               marginLeft: 20,
+              marginRight: 20,
             }}
             gap={8}
           >
@@ -529,7 +530,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                   style={{
                     fontSize: '16px',
                     fontWeight: 500,
-                    marginTop: -7,
                   }}
                 >
                   模型：
@@ -540,7 +540,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                   onChange={handleModelChange}
                   popupMatchSelectWidth={false}
                   prefix={<SwapOutlined />}
-                  style={{ marginBottom: 8 }}
                 >
                   {models.map((model) => (
                     <Select.Option
@@ -556,7 +555,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
               <Button
                 icon={<CloseCircleOutlined />}
                 type="text"
-                style={{ marginTop: -6 }}
+                style={{ marginRight: -20 }}
                 onClick={() => setShowAIChat(false)}
               />
             </Flex>
