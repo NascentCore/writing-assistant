@@ -922,6 +922,9 @@ class OutlineGenerator:
             paragraph_map = {p.id: p for p in paragraphs}
             root_paragraphs = [p for p in paragraphs if p.parent_id is None]
             
+            # 对根段落按照 sort_index 排序
+            root_paragraphs.sort(key=lambda p: p.sort_index)
+            
             # 构建段落树结构
             for p in paragraphs:
                 if p.parent_id:
@@ -959,8 +962,8 @@ class OutlineGenerator:
                     
                     # 递归处理子段落
                     if hasattr(p, 'children') and p.children:
-                        # 确保子段落按顺序排序
-                        sorted_children = sorted(p.children, key=lambda x: x.title)
+                        # 确保子段落按 sort_index 排序
+                        sorted_children = sorted(p.children, key=lambda x: x.sort_index)
                         result.extend(build_outline_text(sorted_children, level + 1))
                 return result
             
@@ -1054,7 +1057,7 @@ class OutlineGenerator:
             raise ValueError(f"未找到ID为{outline_id}的大纲")
         
         # 获取大纲内容
-        outline_content = outline.markdown_content
+        outline_content= self._build_outline_content(outline, outline.sub_paragraphs)
         
         # 获取所有段落
         all_paragraphs = db_session.query(SubParagraph).filter(
@@ -1079,8 +1082,8 @@ class OutlineGenerator:
         # 获取顶级段落
         root_paragraphs = [p for p in all_paragraphs if p.parent_id is None]
         
-        # 按ID排序
-        root_paragraphs.sort(key=lambda p: p.id)
+        # 按 sort_index 排序
+        root_paragraphs.sort(key=lambda p: p.sort_index)
         
         # 获取RAG上下文
         rag_context = ""

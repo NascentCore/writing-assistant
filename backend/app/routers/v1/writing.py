@@ -250,18 +250,21 @@ async def generate_outline(
                 siblings_dict[p.parent_id] = []
             siblings_dict[p.parent_id].append(p.id)
         
-        # 确保每个列表都是按ID排序的
+        # 确保每个列表都是按 sort_index 排序的
         for parent_id in siblings_dict:
-            siblings_dict[parent_id].sort()
+            siblings_dict[parent_id].sort(key=lambda para_id: paragraphs_dict[para_id].sort_index)
             
         # 递归构建段落树
         def build_paragraph_tree(parent_id=None):
             result = []
             children_ids = siblings_dict.get(parent_id, [])
             
+            # 对子段落按 sort_index 排序
+            children_ids.sort(key=lambda para_id: paragraphs_dict[para_id].sort_index)
+            
             for para_id in children_ids:
                 paragraph = paragraphs_dict[para_id]
-                # 使用build_paragraph_response构建数据
+                # 使用 build_paragraph_response 构建数据
                 data = build_paragraph_response(
                     paragraph, 
                     siblings_dict, 
@@ -933,18 +936,21 @@ async def get_outline(
             siblings_dict[p.parent_id] = []
         siblings_dict[p.parent_id].append(p.id)
     
-    # 确保每个列表都是按ID排序的
+    # 确保每个列表都是按 sort_index 排序的
     for parent_id in siblings_dict:
-        siblings_dict[parent_id].sort()
+        siblings_dict[parent_id].sort(key=lambda para_id: paragraphs_dict[para_id].sort_index)
     
     # 递归构建段落树
     def build_paragraph_tree(parent_id=None):
         result = []
         children_ids = siblings_dict.get(parent_id, [])
         
+        # 对子段落按 sort_index 排序
+        children_ids.sort(key=lambda para_id: paragraphs_dict[para_id].sort_index)
+        
         for para_id in children_ids:
             paragraph = paragraphs_dict[para_id]
-            # 使用build_paragraph_response构建数据
+            # 使用 build_paragraph_response 构建数据
             data = build_paragraph_response(
                 paragraph, 
                 siblings_dict, 
