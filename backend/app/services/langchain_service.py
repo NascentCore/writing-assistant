@@ -923,7 +923,7 @@ class OutlineGenerator:
             root_paragraphs = [p for p in paragraphs if p.parent_id is None]
             
             # 对根段落按照 sort_index 排序
-            root_paragraphs.sort(key=lambda p: p.sort_index)
+            root_paragraphs.sort(key=lambda p: p.sort_index if p.sort_index is not None else p.id)
             
             # 构建段落树结构
             for p in paragraphs:
@@ -963,7 +963,7 @@ class OutlineGenerator:
                     # 递归处理子段落
                     if hasattr(p, 'children') and p.children:
                         # 确保子段落按 sort_index 排序
-                        sorted_children = sorted(p.children, key=lambda x: x.sort_index)
+                        sorted_children = sorted(p.children, key=lambda x: x.sort_index if x.sort_index is not None else x.id)
                         result.extend(build_outline_text(sorted_children, level + 1))
                 return result
             
@@ -1083,7 +1083,7 @@ class OutlineGenerator:
         root_paragraphs = [p for p in all_paragraphs if p.parent_id is None]
         
         # 按 sort_index 排序
-        root_paragraphs.sort(key=lambda p: p.sort_index)
+        root_paragraphs.sort(key=lambda p: p.sort_index if p.sort_index is not None else p.id)
         
         # 获取RAG上下文
         rag_context = ""

@@ -264,7 +264,11 @@ async def generate_outline(
             children_ids = siblings_dict.get(parent_id, [])
             
             # 对子段落按 sort_index 排序
-            children_ids.sort(key=lambda para_id: paragraphs_dict[para_id].sort_index)
+            children_ids.sort(
+                key=lambda para_id: (
+                    paragraphs_dict[para_id].sort_index if paragraphs_dict[para_id].sort_index is not None else paragraphs_dict[para_id].id
+                )
+            )
             
             for para_id in children_ids:
                 paragraph = paragraphs_dict[para_id]
@@ -954,7 +958,11 @@ async def get_outline(
         children_ids = siblings_dict.get(parent_id, [])
         
         # 对子段落按 sort_index 排序
-        children_ids.sort(key=lambda para_id: paragraphs_dict[para_id].sort_index)
+        children_ids.sort(
+            key=lambda para_id: (
+                paragraphs_dict[para_id].sort_index if paragraphs_dict[para_id].sort_index is not None else paragraphs_dict[para_id].id
+            )
+        )
         
         for para_id in children_ids:
             paragraph = paragraphs_dict[para_id]
