@@ -87,3 +87,5 @@ urllib3==2.3.0
 uvicorn==0.34.0
 yarl==1.18.3
 pdfkit==1.0.0
+fake_useragent
+html2text

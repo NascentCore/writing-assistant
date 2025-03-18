@@ -14,6 +14,7 @@ import uuid
 from app.utils.outline import build_paragraph_key, build_paragraph_data
 from app.models.outline import SubParagraph, Outline
 from app.rag.rag_api import rag_api
+from app.utils.web_search import baidu_search
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,7 @@ def clean_numbering_from_title(title: str) -> str:
 class OutlineGenerator:
     """使用LangChain调用大模型生成结构化大纲"""
     
-    def __init__(self, readable_model_name: Optional[str] = None, use_rag: bool = True):
+    def __init__(self, readable_model_name: Optional[str] = None, use_rag: bool = True, use_web: bool = True):
         """
         初始化大纲生成器
         
@@ -248,6 +249,9 @@ class OutlineGenerator:
         
         # 是否使用RAG API
         self.use_rag = use_rag
+
+        # 是否使用 WEB 搜索
+        self.use_web = use_web
         
         # 初始化RAG API（如果启用）
         if self.use_rag:
@@ -378,6 +382,8 @@ class OutlineGenerator:
             user_id: 用户ID
             kb_ids: 知识库ID列表
             context_msg: 上下文信息，用于日志记录
+            networking: 开启web搜索
+            rerank: 开启精排
             
         Returns:
             str: RAG上下文文本
@@ -437,14 +443,14 @@ class OutlineGenerator:
         
         # 获取RAG搜索结果（如果启用）
         rag_context = ""
-        if self.use_rag:
-            rag_prompt = f"关于主题：{prompt}，请提供参考内容"
-            rag_context = self._get_rag_context(
-                question=rag_prompt,
-                user_id=user_id,
-                kb_ids=kb_ids,
-                context_msg="生成大纲"
-            )
+        # if self.use_rag:
+        #     rag_prompt = f"关于主题：{prompt}，请提供参考内容"
+        #     rag_context = self._get_rag_context(
+        #         question=rag_prompt,
+        #         user_id=user_id,
+        #         kb_ids=kb_ids,
+        #         context_msg="生成大纲"
+        #     )
         
         try:
             # 构建提示模板
@@ -466,6 +472,7 @@ class OutlineGenerator:
             2. 多个段落，每个段落可以有不同的级别:
                - 1级段落: 主要段落，包含标题、描述和篇幅风格(short/medium/long)
                - 2级及以上段落: 子段落，包含标题和描述，但没有篇幅风格
+            3. 对于方案类文档基本大的框架都是：方案背景（政策背景、行业/技术背景、如果有还可以更多经济背景，但一般起码要有政策背景）、现状与需求分析、建设目标（小篇幅的一般就只有一个建设目标，如果篇幅大的话可能会有总体目标、分阶段小目标等等）、建设方案（包含方案概述、方案技术架构或系统架构及描述、技术原理、方案或系统功能、方案或系统组成、方案清单、）、方案效益、方案总结等等（包含但不限于上述几点内容，根据项目不同会有不同），有时候还需要加上方案依据、方案设计原则等等，你可以在深入理解用户需求的情况下根据方案类型来确定大纲
             
             【大纲结构规范】
             1. 严格禁止在标题或层级标题中使用任何形式的编号，包括但不限于：
@@ -1089,20 +1096,91 @@ class OutlineGenerator:
         rag_context = ""
         if kb_ids:
             logger.info(f"获取RAG上下文 [kb_ids={kb_ids}]")
-            rag_context = self._get_rag_context(
-                question=f"生成关于{outline.title}的文章",
-                user_id=user_id,
-                kb_ids=kb_ids,
-                context_msg=user_prompt
-            )
+            
+            # 新增：通过LLM生成相关问题
+            question_generation_prompt = f"""
+            深入理解<EOF>和</EOF>之间的原始需求，整理出5个问题，以便从RAG知识库中查询相关参考内容，仅输出问题：
+            <EOF>
+            {user_prompt}
+            </EOF>
+            """
+            
+            logger.info("开始生成用于RAG查询的问题")
+            try:
+                # 调用LLM生成相关问题
+                question_response = self.llm.invoke(question_generation_prompt)
+                generated_questions = question_response.content.strip().split('\n')
+                
+                # 过滤掉可能包含的序号或空行
+                filtered_questions = []
+                for q in generated_questions:
+                    # 移除序号如"1. ", "1）", "问题1："等
+                    cleaned_q = re.sub(r'^[\d\.\)、：\s]+', '', q.strip())
+                    cleaned_q = re.sub(r'^问题[\d\s]*[:：]?', '', cleaned_q)
+                    if cleaned_q:
+                        filtered_questions.append(cleaned_q)
+                
+                logger.info(f"生成了 {len(filtered_questions)} 个问题用于RAG查询: {filtered_questions}")
+                
+                # 依次从RAG中查询每个问题
+                combined_rag_context = ""
+                for i, question in enumerate(filtered_questions):
+                    logger.info(f"开始查询问题 {i+1}/{len(filtered_questions)}: {question}")
+                    
+                    # 查询RAG获取上下文
+                    question_context = self._get_rag_context(
+                        question=question,
+                        user_id=user_id,
+                        kb_ids=kb_ids,
+                        context_msg=f"查询问题 {i+1}: {question}"
+                    )
+                    
+                    # 如果查询结果不为空，添加到组合上下文中
+                    if question_context.strip():
+                        combined_rag_context += f"\n--- 问题 {i+1}: {question} ---\n{question_context}\n\n"
+                
+                # 使用组合的RAG上下文
+                if combined_rag_context.strip():
+                    rag_context = combined_rag_context
+                    logger.info(f"已组合多个问题的RAG上下文，总长度: {len(rag_context)} 字符")
+                else:
+                    # 如果所有问题都没有返回结果，使用默认方式查询
+                    logger.warning("所有生成的问题查询结果为空，使用默认方式查询RAG")
+                    rag_context = self._get_rag_context(
+                        question=f"生成关于{outline.title}的文章",
+                        user_id=user_id,
+                        kb_ids=kb_ids,
+                        context_msg=user_prompt
+                    )
+
+                # 新增：通过百度搜索获取更多信息
+                if self.use_web:
+                    for question in filtered_questions:
+                        logger.info(f"开始通过百度搜索获取问题相关信息: {question}")
+                        search_results = baidu_search(question)
+                        if search_results:
+                            search_summary = self._summarize_search_results(question, search_results)
+                            rag_context += f"\n--- 百度搜索结果: {question} ---\n{search_summary}\n\n"
+                            logger.info(f"已将搜索结果添加到RAG上下文中")
+            except Exception as e:
+                logger.error(f"生成问题或查询RAG时出错: {str(e)}")
+                # 出错时使用默认方式查询
+                rag_context = self._get_rag_context(
+                    question=f"生成关于{outline.title}的文章",
+                    user_id=user_id,
+                    kb_ids=kb_ids,
+                    context_msg=user_prompt
+                )
+            
             logger.info(f"RAG上下文长度: {len(rag_context)} 字符")
         
         # 生成文章标题
-        article_title = self._generate_article_title(
-            user_prompt=user_prompt,
-            outline_title=outline.title,
-            outline_content=outline_content
-        )
+        # article_title = self._generate_article_title(
+        #     user_prompt=user_prompt,
+        #     outline_title=outline.title,
+        #     outline_content=outline_content
+        # )
+        article_title = outline.title
         logger.info(f"生成文章标题: {article_title}")
         
         # 存储生成的内容
@@ -1190,6 +1268,40 @@ class OutlineGenerator:
             "markdown": final_content,
             "html": html_content
         }
+    
+    def _summarize_search_results(self, question: str, search_results: str) -> str:
+        """
+        总结百度搜索结果
+        
+        Args:
+            search_results: 百度搜索返回的结果
+            
+        Returns:
+            str: 总结后的搜索结果
+        """
+        logger.info("开始总结搜索结果")
+        
+        # 创建总结提示
+        summary_prompt = f"""
+        请理解问题，根据参考资料进行总结：
+        问题：{question}
+
+        参考资料：
+        {search_results}
+
+        请直接输出总结，不要包含其他内容。
+        """
+        
+        try:
+            # 调用LLM生成总结
+            summary_result = self.llm.invoke(summary_prompt)
+            summary_content = summary_result.content.strip()
+            
+            logger.info("搜索结果总结完成")
+            return summary_content
+        except Exception as e:
+            logger.error(f"总结搜索结果时出错: {str(e)}")
+            return "搜索结果总结失败。"
 
     def _generate_paragraph_with_context(
         self,
@@ -1465,7 +1577,20 @@ class OutlineGenerator:
         
         # 构建提示模板
         template = f"""
-你是一位专业的内容创作者，现在需要你生成一篇文章的一个段落内容。
+# 角色
+你是一位专业的公文撰写精灵，擅长撰写各类公文，能够根据提供的详细信息，生成符合要求的公文段落内容。
+
+## 技能
+### 技能 1: 生成公文段落
+1. 根据接收到的【文章标题】【当前段落标题】【段落描述】【段落级别】【字数范围】【章节位置】【父段落内容】【前一段落摘要】【子主题列表】【用户需求】等信息，生成该段落的详细内容。
+2. 生成的内容要紧扣段落标题和描述，与文章整体主题保持一致，与父段落内容保持连贯，不重复已生成章节的内容，涵盖子主题（如果有），长度控制在指定字数范围左右，内容专业、准确、有深度。
+3. 直接输出段落内容，不要包含标题、解释或标记，也不要使用“本章”“本节”等指代词，直接陈述内容。
+
+## 限制:
+- 只生成与公文撰写相关的内容，拒绝回答与公文无关的话题。
+- 所输出的内容必须符合技能 1 中规定的要求，不能偏离框架要求。
+- 生成的是正式的公文，不要使用“我们”这种口语表达的句式。
+- 内容后面不要进行总结，避免出现“总之”“总而言之”这样的总结性概括。
 
 【文章标题】
 {article_title}
@@ -1505,20 +1630,6 @@ class OutlineGenerator:
 
 【用户需求】
 {user_prompt}
-
-请根据以上信息，生成该段落的详细内容，要求：
-1. 内容要紧扣段落标题和描述
-2. 内容要与文章整体主题保持一致
-3. 内容要与父段落内容保持连贯
-4. 内容不要重复已生成章节的内容
-5. 如果有子主题，内容要涵盖这些子主题
-6. 内容长度控制在{word_count_range}字左右
-7. 内容要专业、准确、有深度
-8. 不要在内容中包含标题，直接开始正文内容
-9. 不要使用"本章"、"本节"等指代词，直接陈述内容
-10. 不要在内容中重复段落标题
-
-请直接输出段落内容，不要包含任何解释或标记。
 """
         
         try:
@@ -1528,6 +1639,18 @@ class OutlineGenerator:
             
             # 获取生成的内容
             content = result.content
+
+            # 替换特定短语
+            replacements = {
+                "我们将": "",
+                "我们": "",
+                "总之，": "",
+                "总而言之，": "",
+                "综上所述，": ""
+            }
+            
+            for old, new in replacements.items():
+                content = content.replace(old, new)
             
             # 记录生成完成
             logger.info(f"段落内容生成完成 [段落ID={paragraph.id}, 内容长度={len(content)}字符]")
