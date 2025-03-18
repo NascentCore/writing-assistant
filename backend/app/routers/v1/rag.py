@@ -285,6 +285,72 @@ async def delete_files(
         logger.error(f"删除文件事务失败: {str(e)}")
         return APIResponse.error(message="删除文件失败")
 
+class SwitchFileRequest(BaseModel):
+    file_id: str = Field(..., description="文件ID")
+    private: bool = Field(..., description="是否私有")
+
+@router.post("/file/switch", summary="知识库文件切换私有属性")
+async def switch_file(
+    request: SwitchFileRequest = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 查询文件
+        file = db.query(RagFile).filter(
+            RagFile.file_id == request.file_id,
+            RagFile.is_deleted == False
+        ).first()
+        if not file:
+            logger.warning(f"切换文件私有属性失败: user_id={current_user.user_id}, file_id={request.file_id}, msg=文件不存在或已被删除")
+            return APIResponse.error(message="文件不存在或已被删除")
+
+        # 检查用户是否有权限修改文件
+        if file.user_id != current_user.user_id:
+            logger.warning(f"切换文件私有属性失败: user_id={current_user.user_id}, file_id={request.file_id}, msg=没有权限修改文件")
+            return APIResponse.error(message="没有权限修改文件")
+
+        if file.status != RagFileStatus.FAILED and file.status != RagFileStatus.DONE:
+            logger.warning(f"切换文件私有属性失败: user_id={current_user.user_id}, file_id={request.file_id}, msg=解析中的文件，无法切换私有属性")
+            return APIResponse.error(message="解析中的文件，无法切换私有属性")
+
+        if file.kb_type != RagKnowledgeBaseType.USER and file.kb_type != RagKnowledgeBaseType.USER_SHARED:
+            logger.warning(f"切换文件私有属性失败: user_id={current_user.user_id}, file_id={request.file_id}, msg=非用户知识库文件，无法切换私有属性")
+            return APIResponse.error(message="非用户知识库文件，无法切换私有属性")
+
+        if file.kb_type == RagKnowledgeBaseType.USER and request.private:
+            logger.warning(f"切换文件私有属性失败: user_id={current_user.user_id}, file_id={request.file_id}, msg=当前已经是私有文件")
+            return APIResponse.success(message="当前已经是私有文件")
+
+        if file.kb_type == RagKnowledgeBaseType.USER_SHARED and not request.private:
+            logger.warning(f"切换文件私有属性失败: user_id={current_user.user_id}, file_id={request.file_id}, msg=当前已经是共享文件")
+            return APIResponse.success(message="当前已经是共享文件")
+
+        delete_resp = await delete_files(DeleteFilesRequest(file_ids=[file.file_id]), current_user, db)
+        if delete_resp.code != 200:
+            logger.warning(f"切换文件私有属性失败: user_id={current_user.user_id}, file_id={request.file_id}, msg=删除文件失败: {delete_resp.message}")
+            return APIResponse.error(message=f"删除文件失败: {delete_resp.message}")
+
+        await ensure_user_knowledge_base(current_user, db)
+
+        new_kb_id = get_user_kb(current_user, db) if request.private else get_user_shared_kb(db)
+        new_kb_type = RagKnowledgeBaseType.USER if request.private else RagKnowledgeBaseType.USER_SHARED
+        new_status = RagFileStatus.LOCAL_SAVED
+
+        db.query(RagFile).filter(RagFile.file_id == request.file_id).update({
+            "kb_id": new_kb_id,
+            "kb_type": new_kb_type,
+            "status": new_status,
+            "is_deleted": False
+        })
+        
+        db.commit()
+        return APIResponse.success(message="文件私有属性切换执行中")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"切换文件私有属性失败: {str(e)}")
+        return APIResponse.error(message=f"切换文件私有属性失败: {str(e)}")
+
 class CreateChatSessionRequest(BaseModel):
     doc_id: Optional[str] = Field(None, description="文档ID")
 
