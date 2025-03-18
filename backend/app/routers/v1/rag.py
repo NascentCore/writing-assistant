@@ -35,7 +35,7 @@ class FilesResponse(PaginationResponse):
 
 class ChatRequest(BaseModel):
     question: str = Field(description="问题内容")
-    model_name: str = Field(description="模型名称")
+    model_name: Optional[str] = Field(default="deepseek-v3", description="模型名称")
     session_id: str = Field(description="会话ID")
     web_search: Optional[bool] = Field(default=False, description="是否使用web搜索")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
