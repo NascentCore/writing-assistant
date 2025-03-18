@@ -252,7 +252,11 @@ async def generate_outline(
         
         # 确保每个列表都是按 sort_index 排序的
         for parent_id in siblings_dict:
-            siblings_dict[parent_id].sort(key=lambda para_id: paragraphs_dict[para_id].sort_index)
+            siblings_dict[parent_id].sort(
+                key=lambda para_id: (
+                    paragraphs_dict[para_id].sort_index if paragraphs_dict[para_id].sort_index is not None else paragraphs_dict[para_id].id
+                )
+            )
             
         # 递归构建段落树
         def build_paragraph_tree(parent_id=None):
@@ -938,7 +942,11 @@ async def get_outline(
     
     # 确保每个列表都是按 sort_index 排序的
     for parent_id in siblings_dict:
-        siblings_dict[parent_id].sort(key=lambda para_id: paragraphs_dict[para_id].sort_index)
+        siblings_dict[parent_id].sort(
+            key=lambda para_id: (
+                paragraphs_dict[para_id].sort_index if paragraphs_dict[para_id].sort_index is not None else paragraphs_dict[para_id].id
+            )
+        )
     
     # 递归构建段落树
     def build_paragraph_tree(parent_id=None):
