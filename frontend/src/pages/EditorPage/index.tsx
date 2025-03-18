@@ -290,7 +290,6 @@ function App() {
               : {}),
           }}
         >
-          <h1>售前方案写作助手</h1>
           <Button
             style={{ marginLeft: 10 }}
             onClick={() => {

@@ -215,13 +215,14 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
       // 只有当 URL 中的会话 ID 与要切换的会话 ID 不同时，才更新 URL
       if (currentSessionIdFromUrl !== sessionId) {
         // 只更新路由，不请求会话详情
-        history.push(`/AiChat?id=${sessionId}`);
-
+        // history.push(`/AiChat?id=${sessionId}`);
+        // 更新路由，添加会话ID参数
+        const query = new URLSearchParams(location.search);
+        query.set('id', sessionId); // Use sessionId here instead of sessionId!
+        history.push(`${location.pathname}?${query.toString()}`);
         // 从已加载集合中移除，以便可以重新加载
         loadedSessionsRef.current.delete(sessionId);
       }
-
-      // 不在这里请求会话详情，而是由 URL 监听函数来触发
     },
     [location.search],
   );
@@ -484,7 +485,7 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
   // 创建新会话按钮点击处理
   const handleCreateNewSession = useCallback(() => {
     // 更新路由，移除 id 参数
-    history.push('/AiChat');
+    history.push(location.pathname);
 
     // 调用父组件的创建新会话函数
     onCreateNewSession();

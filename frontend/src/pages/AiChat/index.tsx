@@ -279,7 +279,11 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       const savedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
       if (savedSessionId) {
         // 更新URL，添加会话ID参数
-        history.push(`${location.pathname}?id=${savedSessionId}`);
+        // history.push(`${location.pathname}?id=${savedSessionId}`);
+        // 更新路由，添加会话ID参数
+        const query = new URLSearchParams(location.search);
+        query.set('id', savedSessionId);
+        history.push(`${location.pathname}?${query.toString()}`);
       }
     }
   }, [location.search, activeSessionId, history]);
@@ -316,7 +320,11 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           }
 
           // 更新路由，添加会话ID参数
-          history.push(`${location.pathname}?id=${currentSessionId}`);
+          // history.push(`${location.pathname}?id=${currentSessionId}`);
+          // 更新路由，添加会话ID参数
+          const query = new URLSearchParams(location.search);
+          query.set('id', currentSessionId!);
+          history.push(`${location.pathname}?${query.toString()}`);
         }
       } catch (error) {
         console.error('创建会话失败:', error);
