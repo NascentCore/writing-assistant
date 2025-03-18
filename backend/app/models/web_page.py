@@ -7,7 +7,7 @@ class WebPage(Base):
 
     id = Column(Integer, primary_key=True, index=True, comment="主键ID")
     webpage_id = Column(String(100), unique=True, index=True, comment="网页ID")
-    url = Column(String(1024), unique=True, index=True, comment="URL")
+    url = Column(String(1024), comment="URL")
     user_id = Column(String(100), index=True, comment="用户ID")
     status = Column(Integer, default=0, comment="状态: 0未解析, 1解析中, 2解析成功, 3解析失败")
     title = Column(String(512), comment="标题")

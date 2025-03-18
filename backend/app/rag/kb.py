@@ -53,7 +53,7 @@ async def ensure_knowledge_bases(db: Session):
                 raise Exception(f"创建系统知识库失败: {create_kb_response['msg']}")
                 
             kb_id = create_kb_response["data"]["kb_id"]
-            industry_kb = RagKnowledgeBase(
+            system_kb = RagKnowledgeBase(
                 kb_id=kb_id,
                 kb_type=RagKnowledgeBaseType.SYSTEM,
                 owner_id="",
