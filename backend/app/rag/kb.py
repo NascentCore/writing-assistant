@@ -125,8 +125,10 @@ def has_permission_to_file(user: User, file_id: str, db: Session) -> bool:
     if kb.kb_type == RagKnowledgeBaseType.SYSTEM:
         return user.admin == UserRole.SYS_ADMIN
     elif kb.kb_type == RagKnowledgeBaseType.USER or kb.kb_type == RagKnowledgeBaseType.USER_SHARED:
-        return kb.user_id == user.user_id
+        return file.user_id == user.user_id
     elif kb.kb_type == RagKnowledgeBaseType.DEPARTMENT:
+        if user.admin != UserRole.DEPT_ADMIN:
+            return False
         if not user_depts:
             return False
         for user_dept in user_depts:
