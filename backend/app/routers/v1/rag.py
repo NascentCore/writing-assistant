@@ -526,45 +526,17 @@ async def chat(
     db: Session = Depends(get_db)
 ):
     try:
-        kb_ids = []
+        kb_ids = set()
         # 系统知识库
-        kb = db.query(RagKnowledgeBase).filter(
-            RagKnowledgeBase.kb_type == RagKnowledgeBaseType.SYSTEM, 
-            RagKnowledgeBase.is_deleted == False
-        ).first()
-        if kb:
-            kb_ids.append(kb.kb_id)
+        kb_ids.add(get_system_kb(db))
         # 用户共享知识库
-        kb = db.query(RagKnowledgeBase).filter(
-            RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER_SHARED, 
-            RagKnowledgeBase.is_deleted == False
-        ).first()
-        if kb:
-            kb_ids.append(kb.kb_id)
+        kb_ids.add(get_user_shared_kb(db))
         # 用户私有知识库
-        kb = db.query(RagKnowledgeBase).filter(
-            RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER,
-            RagKnowledgeBase.user_id == current_user.user_id,
-            RagKnowledgeBase.is_deleted == False
-        ).first()
-        if kb:
-            kb_ids.append(kb.kb_id)
+        kb_ids.add(get_user_kb(current_user, db))
         # 部门知识库
-        department_ids = []
-        user_departments = db.query(UserDepartment).filter(
-            UserDepartment.user_id == current_user.user_id,
-        ).all()
-        if user_departments:
-            department_ids = [department.department_id for department in user_departments]
-            if department_ids:
-                department_kbs = db.query(RagKnowledgeBase).filter(
-                    RagKnowledgeBase.kb_type == RagKnowledgeBaseType.DEPARTMENT,
-                    RagKnowledgeBase.owner_id.in_(department_ids),
-                    RagKnowledgeBase.is_deleted == False
-                ).all()
-                if department_kbs:
-                    kb_ids.extend([kb.kb_id for kb in department_kbs])
-                
+        departments = get_departments(current_user, db)
+        kb_ids.update(get_department_kbs([dept.department_id for dept in departments], db))
+        
         if not kb_ids:
             logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到任何相关知识库")
             return APIResponse.error(message="未找到相关知识库")
