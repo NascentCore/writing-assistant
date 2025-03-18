@@ -18,7 +18,8 @@ from app.models.user import User, UserRole
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from app.rag.parser import convert_doc_to_docx, get_parser, get_file_format
 from app.rag.rag_api_async import rag_api_async
-from app.rag.kb import ensure_user_knowledge_base, get_knowledge_base, has_permission_to_file, has_permission_to_kb
+from app.rag.kb import ensure_user_knowledge_base, get_department_kb, get_department_kbs, get_knowledge_base, get_system_kb, get_user_kb, get_user_shared_kb, has_permission_to_file, has_permission_to_kb
+from app.rag.department import get_departments
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.models.task import Task, TaskStatus
 from app.models.document import Document
@@ -73,10 +74,18 @@ async def upload_files(
         upload_dir = PathLib(settings.UPLOAD_DIR)
         upload_dir.mkdir(exist_ok=True) # 确保上传目录存在
 
-        if not has_permission_to_kb(current_user, category, department_id, db):
-            return APIResponse.error(message="没有权限或知识库不存在")
+        if category == "system" and not current_user.admin == UserRole.SYS_ADMIN:
+            return APIResponse.error(message="没有权限上传系统知识库")
+        if category == "department":
+            if not current_user.admin == UserRole.DEPT_ADMIN:
+                return APIResponse.error(message="没有权限上传部门知识库")
+            if not department_id:
+                return APIResponse.error(message="部门ID不能为空")
+            if not db.query(UserDepartment).filter(UserDepartment.department_id == department_id, 
+                                                   UserDepartment.user_id == current_user.user_id).first():
+                return APIResponse.error(message="没有权限上传部门知识库")
 
-        ensure_user_knowledge_base(current_user, db)
+        await ensure_user_knowledge_base(current_user, db)
 
         kb_id = get_knowledge_base(current_user, category, department_id, db)
         if not kb_id:
@@ -164,7 +173,7 @@ async def upload_files(
 
 @router.get("/files", summary="获取知识库文件列表")
 async def get_files(
-    category: str = Query(..., description="知识库类别", example="system", enum=["system", "user", "user_shared", "user_all", "department"]),
+    category: str = Query(..., description="知识库类别", example="system", enum=["system", "user", "user_shared", "user_all", "department", "department_all", "all_shared"]),
     department_id: Optional[str] = Query(None, description="部门ID", example="dept-123"),
     page: Optional[int] = Query(default=1, ge=1, description="页码", example=1),
     page_size: Optional[int] = Query(default=10, ge=1, description="每页数量", example=10),
@@ -173,34 +182,43 @@ async def get_files(
     db: Session = Depends(get_db)
 ):
     try:
-        if not has_permission_to_kb(current_user, category, department_id, db):
-            logger.error(f"获取知识库文件列表时没有权限: user_id={current_user.user_id}, category={category}")
-            return APIResponse.error(message="没有权限或知识库不存在")
-
-        ensure_user_knowledge_base(current_user, db)
+        await ensure_user_knowledge_base(current_user, db)
 
         kb_ids = set()
-        # 获取用户私有知识库
-        if category == "user_all" or category == "user":
-            user_kb_id = get_knowledge_base(current_user, "user", department_id, db)
-            if not user_kb_id:
-                logger.error(f"获取知识库文件列表时用户私有知识库不存在: user_id={current_user.user_id}, category={category}")
-                return APIResponse.error(message="用户私有知识库不存在")
-            kb_ids.add(user_kb_id)
-
-        if category == "user_all":
-            category = "user_shared" # 已经获取过用户私有知识库，所以后续只获取用户共享知识库
-
-        kb_id = get_knowledge_base(current_user, category, department_id, db)
-        if not kb_id:
-            logger.error(f"获取知识库文件列表时用户共享知识库不存在: user_id={current_user.user_id}, category={category}")
-            return APIResponse.error(message="用户共享知识库不存在")
-        kb_ids.add(kb_id)
+        dept_map = {}
+        kb_depts = {}
+        if category == "system":
+            kb_ids.add(get_system_kb(db))
+        elif category == "user":
+            kb_ids.add(get_user_kb(current_user, db))
+        elif category == "user_shared":
+            kb_ids.add(get_user_shared_kb(db))
+        elif category == "user_all":
+            kb_ids.add(get_user_kb(current_user, db))
+            kb_ids.add(get_user_shared_kb(db))
+        elif category == "department":
+            kb_ids.add(get_department_kb(department_id, db))
+        elif category == "department_all":
+            departments = get_departments(current_user, db)
+            dept_map = {dept.department_id: dept for dept in departments}
+            dept_kb_ids, kb_dept_map = get_department_kbs([dept.department_id for dept in departments], db)
+            kb_ids.update(dept_kb_ids)
+            kb_depts = {kb_id: dept_map[department_id] for kb_id, department_id in kb_dept_map.items()}
+        elif category == "all_shared":
+            kb_ids.add(get_system_kb(db))
+            kb_ids.add(get_user_shared_kb(db))
+            kb_ids.add(get_user_kb(current_user, db))
+            departments = get_departments(current_user, db)
+            dept_map = {dept.department_id: dept for dept in departments}
+            dept_kb_ids, kb_dept_map = get_department_kbs([dept.department_id for dept in departments], db)
+            kb_ids.update(dept_kb_ids)
+            kb_depts = {kb_id: dept_map[department_id] for kb_id, department_id in kb_dept_map.items()}
+        else:
+            raise ValueError(f"不支持的知识库类别: {category}")
 
         query_filter = db.query(RagFile).filter(RagFile.kb_id.in_(kb_ids), RagFile.is_deleted == False)
-        if category == "user" or category == "user_shared":
-            query_filter = query_filter.filter(RagFile.user_id == current_user.user_id)
         
+        # 文件名搜索
         if file_name:
             query_list = re.split(r'[,\s、]+', file_name)
             for term in query_list:
@@ -220,6 +238,8 @@ async def get_files(
                     "file_name": file.file_name,
                     "file_size": file.file_size,
                     "file_words": file.file_words,
+                    "department_id": kb_depts[file.kb_id].department_id if file.kb_id in kb_depts else "",
+                    "department_name": kb_depts[file.kb_id].name if file.kb_id in kb_depts else "",
                     "status": RagFileStatus.get_status_map()[file.status],
                     "error_message": file.error_message,
                     "created_at": file.created_at
@@ -247,14 +267,9 @@ async def delete_files(
     if not files:
         return APIResponse.error(message="未找到有效的文件")
 
-    # 检查所有文件是否属于同一个知识库
-    kb_ids = set(file.kb_id for file in files)
-    if len(kb_ids) > 1:
-        return APIResponse.error(message="不能同时删除不同知识库的文件")
-
-    # 权限检查
-    if not has_permission_to_file(current_user, files[0].file_id, db):
-        return APIResponse.error(message="没有权限删除文件")
+    for file in files:
+        if not has_permission_to_file(current_user, file.file_id, db):
+            return APIResponse.error(message="没有权限删除文件")
 
     try:
         resp = await rag_api_async.delete_files(kb_id=files[0].kb_id, file_ids=[file.kb_file_id for file in files])
