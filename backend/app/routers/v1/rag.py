@@ -40,7 +40,7 @@ class ChatRequest(BaseModel):
     web_search: Optional[bool] = Field(default=False, description="是否使用web搜索")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
-    streaming: Optional[bool] = Field(default=True, description="是否使用流式返回")
+    stream: Optional[bool] = Field(default=True, description="是否使用流式返回")
 
     class Config:
         json_schema_extra = {
@@ -51,7 +51,7 @@ class ChatRequest(BaseModel):
                 "web_search": False,
                 "file_ids": ["file-1234567890", "file-1234567891"],
                 "files": [],
-                "streaming": True
+                "stream": True
             }
         }
 
@@ -627,7 +627,7 @@ async def chat(
             "question": request.question,
             "custom_prompt": custom_prompt,
             "history": history,
-            "streaming": request.streaming,
+            "streaming": request.stream,
             "networking": request.web_search,
             "product_source": settings.RAG_CHAT_PRODUCT_SOURCE,
             "rerank": settings.RAG_CHAT_RERANK,
@@ -644,7 +644,7 @@ async def chat(
             "temperature": settings.RAG_CHAT_TEMPERATURE
         }, ensure_ascii=False))
 
-        streaming = request.streaming
+        streaming = request.stream
 
         response = await rag_api_async.chat(
             kb_ids=kb_ids,
@@ -712,7 +712,12 @@ async def chat(
             )
         else:
             if isinstance(response, dict) and response.get("code") == 200:
-                answer = response.get("history", [["", ""]])[0][1]
+                history = response.get("history")
+                if not history or len(history) == 0 or len(history[-1]) != 2:
+                    logger.error(f"RAG对话返回异常: user_id={current_user.user_id}, response={response}")
+                    return APIResponse.error(message="RAG对话返回异常")
+                
+                answer = history[-1][1]
                 assistant_message = ChatMessage(
                     message_id=f"msg-{shortuuid.uuid()}",
                     session_id=session_id,
