@@ -18,7 +18,7 @@ from app.models.user import User, UserRole
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from app.rag.parser import convert_doc_to_docx, get_parser, get_file_format
 from app.rag.rag_api_async import rag_api_async
-from app.rag.kb import create_user_knowledge_base, get_knowledge_base, has_permission_to_file, has_permission_to_kb
+from app.rag.kb import ensure_user_knowledge_base, get_knowledge_base, has_permission_to_file, has_permission_to_kb
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.models.task import Task, TaskStatus
 from app.models.document import Document
@@ -76,14 +76,11 @@ async def upload_files(
         if not has_permission_to_kb(current_user, category, department_id, db):
             return APIResponse.error(message="没有权限或知识库不存在")
 
+        ensure_user_knowledge_base(current_user, db)
+
         kb_id = get_knowledge_base(current_user, category, department_id, db)
         if not kb_id:
-            if category == "user":
-                kb_id = await create_user_knowledge_base(current_user, db)
-                if not kb_id:
-                    return APIResponse.error(message="创建用户私有知识库失败")
-            else:
-                return APIResponse.error(message="知识库不存在")
+            return APIResponse.error(message="知识库不存在")
 
         existing_files = []
         new_files = []
@@ -180,17 +177,17 @@ async def get_files(
             logger.error(f"获取知识库文件列表时没有权限: user_id={current_user.user_id}, category={category}")
             return APIResponse.error(message="没有权限或知识库不存在")
 
+        ensure_user_knowledge_base(current_user, db)
+
         kb_ids = set()
+        # 获取用户私有知识库
         if category == "user_all" or category == "user":
             user_kb_id = get_knowledge_base(current_user, "user", department_id, db)
             if not user_kb_id:
-                new_kb_id = await create_user_knowledge_base(current_user, db)
-                if not new_kb_id:
-                    logger.error(f"获取知识库文件列表时创建用户私有知识库失败: user_id={current_user.user_id}, category={category}")
-                    return APIResponse.error(message="创建用户私有知识库失败")
-                kb_ids.add(new_kb_id)
-            else:
-                kb_ids.add(user_kb_id)
+                logger.error(f"获取知识库文件列表时用户私有知识库不存在: user_id={current_user.user_id}, category={category}")
+                return APIResponse.error(message="用户私有知识库不存在")
+            kb_ids.add(user_kb_id)
+
         if category == "user_all":
             category = "user_shared" # 已经获取过用户私有知识库，所以后续只获取用户共享知识库
 

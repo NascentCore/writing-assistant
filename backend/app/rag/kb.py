@@ -1,4 +1,5 @@
 import logging
+from typing import List
 from app.models.user import User, UserRole
 from app.models.rag import RagFile, RagKnowledgeBase, RagKnowledgeBaseType
 from app.models.department import UserDepartment
@@ -204,3 +205,13 @@ async def create_user_knowledge_base(user: User, db: Session) -> str:
     db.add(kb)
     db.commit()
     return kb_id
+
+def ensure_user_knowledge_base(user: User, db: Session):
+    kb_id = get_knowledge_base(user, "user", None, db)
+    if kb_id:
+        return kb_id
+    kb_id = create_user_knowledge_base(user, db)
+    if kb_id:
+        return kb_id
+
+    raise Exception("创建用户知识库失败")
