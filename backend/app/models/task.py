@@ -28,6 +28,7 @@ class Task(Base):
     status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.PENDING)
     process = Column(Integer, nullable=True, default=0)
     process_detail_info = Column(Text, nullable=True)
+    log = Column(Text, nullable=True)
     session_id = Column(String(22), ForeignKey("chat_sessions.session_id"), nullable=True)
     
     # 存储任务参数，如prompt、file_ids等
