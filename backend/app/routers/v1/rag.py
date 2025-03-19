@@ -601,7 +601,8 @@ async def chat(
         kb_ids.add(get_user_kb(current_user, db))
         # 部门知识库
         departments = get_departments(current_user, db)
-        kb_ids.update(get_department_kbs([dept.department_id for dept in departments], db))
+        dept_kb_ids, dept_kb_owners = get_department_kbs([dept.department_id for dept in departments], db)
+        kb_ids.update(dept_kb_ids)
         
         if not kb_ids:
             logger.warning(f"rag_chat 用户 {current_user.user_id} 未找到任何相关知识库")
@@ -673,7 +674,7 @@ async def chat(
             "session_id": session_id,
             "message_id": question_message_id,
             "user_id": current_user.user_id,
-            "kb_ids": kb_ids,
+            "kb_ids": list(kb_ids),
             "question": request.question,
             "custom_prompt": custom_prompt,
             "history": history,
@@ -697,7 +698,7 @@ async def chat(
         streaming = request.stream
 
         response = await rag_api_async.chat(
-            kb_ids=kb_ids,
+            kb_ids=list(kb_ids),
             question=request.question,
             custom_prompt=custom_prompt,
             history=history,
