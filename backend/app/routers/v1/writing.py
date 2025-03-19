@@ -663,6 +663,8 @@ async def get_task_status(
         updated_at: 更新时间
         result: 任务结果
         error: 错误信息
+        process: 进度百分比 (0-100)
+        process_detail_info: 进度详情描述
     """
     task = db.query(Task).filter(
         Task.id == task_id,
@@ -678,7 +680,9 @@ async def get_task_status(
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
         "result": task.result,
-        "error": task.error
+        "error": task.error,
+        "process": task.process or 0,
+        "process_detail_info": task.process_detail_info or ""
     }
     
     return APIResponse.success(message="获取任务状态成功", data=response_data)
@@ -1023,6 +1027,7 @@ async def generate_content(
     Returns:
         task_id: 任务ID
         session_id: 会话ID
+        doc_id: 文档ID
     """
     # 验证请求参数
     if not request.outline_id and not request.prompt:
@@ -1066,6 +1071,15 @@ async def generate_content(
         # 如果是直接生成，保存prompt
         message_content = request.prompt
         outline_id = ""
+
+    doc_id = f"doc-{shortuuid.uuid()}"[:22]
+    document = Document(
+        doc_id=doc_id,
+        title="正在生成...",
+        content="",
+        user_id=current_user.user_id
+    )
+    db.add(document)
     
     # 创建用户消息
     message_id = f"msg-{shortuuid.uuid()}"[:22]
@@ -1088,7 +1102,8 @@ async def generate_content(
         role="assistant",
         content="正在生成全文，请稍候...",
         content_type=ContentType.TEXT,
-        task_status=TaskStatus.PENDING.value
+        task_status=TaskStatus.PENDING.value,
+        document_id=doc_id
     )
     db.add(assistant_message)
     
@@ -1103,7 +1118,8 @@ async def generate_content(
             "user_id": current_user.user_id,
             "outline_id": request.outline_id,
             "prompt": request.prompt,
-            "file_ids": request.file_ids or []
+            "file_ids": request.file_ids or [],
+            "doc_id": doc_id
         }
     )
     db.add(task)
@@ -1124,7 +1140,8 @@ async def generate_content(
             session_id=session_id,
             message_id=message_id,
             assistant_message_id=assistant_message_id,
-            readable_model_name=request.model_name
+            readable_model_name=request.model_name,
+            doc_id=doc_id
         ))
         
         loop.close()
@@ -1139,7 +1156,7 @@ async def generate_content(
     })
 
 
-async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
+async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None, doc_id: str = None):
     """
     异步处理内容生成任务
     
@@ -1152,13 +1169,14 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
         message_id: 用户消息ID
         assistant_message_id: 助手消息ID
         readable_model_name: 模型名称（可选）
+        doc_id: 文档ID
     """
     # 创建新的数据库会话
     db = next(get_db())
     start_time = time.time()
     
     try:
-        logger.info(f"开始处理内容生成任务 [task_id={task_id}]")
+        logger.info(f"开始处理内容生成任务 [task_id={task_id}] [doc_id={doc_id}]")
         
         # 更新任务和消息状态
         if not await _update_task_status(db, task_id, assistant_message_id, "正在生成内容，请稍候...", TaskType.GENERATE_CONTENT):
@@ -1168,7 +1186,7 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
         user_id, file_contents = await _prepare_generation_resources(db, task_id, file_ids)
         
         # 初始化大纲生成器
-        logger.info(f"初始化大纲生成器 [model={readable_model_name or 'default'}]")
+        logger.info(f"初始化写作生成器 [model={readable_model_name or 'default'}]")
         outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
         
         try:
@@ -1202,11 +1220,11 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
                         kb_ids.extend([kb.kb_id for kb in department_kbs])
             
             # 生成内容
-            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids, session_id)
+            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids, session_id, doc_id)
             
             # 保存文档并更新消息
             document_id = await _save_document_and_update_message(
-                db, full_content, user_id, task_id, session_id, message_id, assistant_message_id
+                db, full_content, user_id, task_id, session_id, message_id, assistant_message_id, doc_id
             )
             
             # 记录任务完成和耗时
@@ -1251,7 +1269,8 @@ async def _generate_content(
     db: Session,
     user_id: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
+    doc_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """根据模式生成内容"""
     if outline_id:
@@ -1269,11 +1288,11 @@ async def _generate_content(
         user_prompt = first_user_message.content if first_user_message else ""
         logger.info(f"获取到用户第一条消息: {user_prompt}")
         
-        full_content = outline_generator.generate_full_content(outline_id, db, user_id, kb_ids, user_prompt)
+        full_content = outline_generator.generate_full_content(outline_id, db, user_id, kb_ids, user_prompt, doc_id)
     else:
         # 直接生成模式
         logger.info("开始直接生成全文")
-        full_content = outline_generator.generate_content_directly(prompt, file_contents, user_id, kb_ids)
+        full_content = outline_generator.generate_content_directly(prompt, file_contents, user_id, kb_ids, doc_id)
     
     logger.info("全文生成完成")
     return full_content
@@ -1286,23 +1305,53 @@ async def _save_document_and_update_message(
     task_id: str,
     session_id: str,
     message_id: str,
-    assistant_message_id: str
+    assistant_message_id: str,
+    doc_id: Optional[str] = None
 ) -> str:
     """保存文档并更新消息状态"""
-    # 保存HTML内容到documents表
-    doc_id = f"doc-{shortuuid.uuid()}"[:22]
     title = full_content.get("title", "无标题文档")
     html_content = full_content.get("html", "")
     
-    # 创建文档记录
-    document = Document(
-        doc_id=doc_id,
-        title=title,
-        content=html_content,
-        user_id=user_id
-    )
-    db.add(document)
-    logger.info(f"保存文档记录 [doc_id={doc_id}]")
+    # 检查是否已经有文档ID
+    if doc_id:
+        # 检查文档是否存在
+        document = db.query(Document).filter(Document.doc_id == doc_id).first()
+        if document:
+            logger.info(f"使用已有文档 [doc_id={doc_id}]")
+            # 确保文档属于当前用户
+            if document.user_id != user_id:
+                logger.warning(f"文档用户ID不匹配 [doc_id={doc_id}, doc_user_id={document.user_id}, current_user_id={user_id}]")
+                # 创建新文档
+                doc_id = f"doc-{shortuuid.uuid()}"[:22]
+                document = Document(
+                    doc_id=doc_id,
+                    title=title,
+                    content=html_content,
+                    user_id=user_id
+                )
+                db.add(document)
+                logger.info(f"创建新文档记录 [doc_id={doc_id}]")
+        else:
+            # 如果传入的doc_id不存在，创建新文档
+            document = Document(
+                doc_id=doc_id,
+                title=title,
+                content=html_content,
+                user_id=user_id
+            )
+            db.add(document)
+            logger.info(f"使用指定ID创建新文档 [doc_id={doc_id}]")
+    else:
+        # 创建新文档
+        doc_id = f"doc-{shortuuid.uuid()}"[:22]
+        document = Document(
+            doc_id=doc_id,
+            title=title,
+            content=html_content,
+            user_id=user_id
+        )
+        db.add(document)
+        logger.info(f"创建新文档记录 [doc_id={doc_id}]")
     
     # 更新助手消息
     result_data = {"doc_id": doc_id}

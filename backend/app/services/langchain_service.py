@@ -14,6 +14,8 @@ import uuid
 from app.utils.outline import build_paragraph_key, build_paragraph_data
 from app.models.outline import SubParagraph, Outline
 from app.rag.rag_api import rag_api
+from app.models.document import Document
+from app.models.task import Task, TaskStatus
 from app.utils.web_search import baidu_search
 
 logger = logging.getLogger(__name__)
@@ -1042,7 +1044,7 @@ class OutlineGenerator:
             logger.error(f"生成文章标题时出错: {str(e)}")
             return outline_title
 
-    def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, user_prompt: str = "") -> Dict[str, Any]:
+    def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, user_prompt: str = "", doc_id: str = None) -> Dict[str, Any]:
         """
         生成完整的文章内容
         
@@ -1052,11 +1054,40 @@ class OutlineGenerator:
             user_id: 用户ID
             kb_ids: 知识库ID列表
             user_prompt: 用户提示
+            doc_id: 文档ID
             
         Returns:
             Dict: 生成的内容
         """
         logger.info(f"开始生成完整内容 [outline_id={outline_id}]")
+        
+        # 获取任务ID用于更新任务进度
+        task_id = None
+        if doc_id:
+            # 查找相关任务ID
+            task = db_session.query(Task).filter(
+                Task._params.like(f'%"doc_id": "{doc_id}"%'),
+                Task.status == TaskStatus.PROCESSING
+            ).first()
+            if task:
+                task_id = task.id
+                logger.info(f"找到关联的任务ID: {task_id}")
+                
+        # 创建进度更新函数
+        def update_task_progress(progress: int, detail: str):
+            """更新任务进度"""
+            if not task_id:
+                return
+                
+            try:
+                task = db_session.query(Task).filter(Task.id == task_id).first()
+                if task:
+                    task.process = progress
+                    task.process_detail_info = detail
+                    db_session.commit()
+                    logger.info(f"更新任务进度 [task_id={task_id}, progress={progress}%, detail={detail}]")
+            except Exception as e:
+                logger.error(f"更新任务进度失败: {str(e)}")
         
         # 获取大纲
         outline = db_session.query(Outline).filter(Outline.id == outline_id).first()
@@ -1096,6 +1127,8 @@ class OutlineGenerator:
         rag_context = ""
         if kb_ids:
             logger.info(f"获取RAG上下文 [kb_ids={kb_ids}]")
+            # 更新任务进度到20%，RAG检索完成
+            update_task_progress(20, "RAG检索完成")
             
             # 新增：通过LLM生成相关问题
             question_generation_prompt = f"""
@@ -1173,6 +1206,9 @@ class OutlineGenerator:
                 )
             
             logger.info(f"RAG上下文长度: {len(rag_context)} 字符")
+        else:
+            # 没有RAG检索，直接设置为20%
+            update_task_progress(20, "准备生成内容")
         
         # 生成文章标题
         # article_title = self._generate_article_title(
@@ -1183,11 +1219,27 @@ class OutlineGenerator:
         article_title = outline.title
         logger.info(f"生成文章标题: {article_title}")
         
+        # 更新任务进度到25%，标题生成完毕
+        update_task_progress(25, "标题生成完毕")
+        
         # 存储生成的内容
         markdown_content = []
         
         # 添加文章标题
         markdown_content.append(f"# {article_title}\n")
+        
+        # 更新文档标题和初始HTML（如果提供了文档ID）
+        if doc_id:
+            try:
+                document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
+                if document:
+                    document.title = article_title
+                    initial_html = markdown.markdown(f"# {article_title}\n\n*文档生成中...*")
+                    document.content = initial_html
+                    db_session.commit()
+                    logger.info(f"更新文档标题和初始HTML [doc_id={doc_id}]")
+            except Exception as e:
+                logger.error(f"更新文档标题时出错: {str(e)}")
         
         # 初始化全局上下文对象，用于在段落间传递信息
         global_context = {
@@ -1198,7 +1250,11 @@ class OutlineGenerator:
             "max_total_length": 100000,  # 内容总长度限制
             "max_chapter_length": 5000,  # 单个章节长度限制
             "duplicate_titles": set(),  # 记录重复的标题
-            "generated_titles": set()  # 记录已生成的标题
+            "generated_titles": set(),  # 记录已生成的标题
+            "doc_id": doc_id,  # 文档ID，用于更新HTML内容
+            "task_id": task_id,  # 任务ID，用于更新进度
+            "total_paragraphs": len(all_paragraphs),  # 段落总数
+            "generated_paragraph_count": 0  # 已生成段落数
         }
         
         logger.info(f"开始生成段落内容，共 {len(root_paragraphs)} 个顶级段落")
@@ -1224,7 +1280,16 @@ class OutlineGenerator:
                 is_root=True,
                 parent_content="",
                 chapter_index=i,
-                total_chapters=len(root_paragraphs)
+                total_chapters=len(root_paragraphs),
+                db_session=db_session
+            )
+            
+            # 计算并更新当前进度
+            progress = 25 + int((global_context["generated_paragraph_count"] / global_context["total_paragraphs"]) * 75)
+            progress = min(99, progress)  # 确保不超过99%，留给最后的完成步骤
+            update_task_progress(
+                progress,
+                f"已生成 {global_context['generated_paragraph_count']}/{global_context['total_paragraphs']} 个段落"
             )
         
         # 合并所有内容
@@ -1243,26 +1308,23 @@ class OutlineGenerator:
         # 记录已生成段落数量
         logger.info(f"生成了 {len(global_context['generated_contents'])} 个段落内容")
         
-        # 优化内容
-        # try:
-        #     logger.info("开始优化全文内容")
-        #     optimized_content = self._full_content_optimize(user_prompt, final_content)
-        #     logger.info(f"内容优化完成，优化后长度: {len(optimized_content)} 字符")
-            
-        #     # 将markdown转换为HTML
-        #     html_content = markdown.markdown(optimized_content)
-            
-        #     # 返回结果
-        #     return {
-        #         "title": article_title,
-        #         "markdown": optimized_content,
-        #         "html": html_content
-        #     }
-        # except Exception as e:
-        #     logger.error(f"优化内容时出错: {str(e)}")
-            
-            # 如果优化失败，返回原始内容
+        # 最终进度100%
+        update_task_progress(100, "内容生成完成")
+        
+        # 如果优化失败，返回原始内容
         html_content = markdown.markdown(final_content)
+        
+        # 更新最终完整的文档HTML内容
+        if doc_id:
+            try:
+                document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
+                if document:
+                    document.content = html_content
+                    db_session.commit()
+                    logger.info(f"更新文档最终完整HTML内容 [doc_id={doc_id}]")
+            except Exception as e:
+                logger.error(f"更新文档最终HTML内容时出错: {str(e)}")
+        
         return {
             "title": article_title,
             "markdown": final_content,
@@ -1315,7 +1377,8 @@ class OutlineGenerator:
         is_root=False,
         parent_content="",
         chapter_index=0,
-        total_chapters=1
+        total_chapters=1,
+        db_session=None
     ):
         """
         生成段落内容，并递归生成子段落内容
@@ -1332,6 +1395,7 @@ class OutlineGenerator:
             parent_content: 父段落内容
             chapter_index: 章节索引
             total_chapters: 总章节数
+            db_session: 数据库会话，用于更新文档
         """
         # 检查是否已经生成过该段落内容
         if paragraph.id in global_context["generated_contents"]:
@@ -1466,6 +1530,9 @@ class OutlineGenerator:
             "summary": content_summary
         }
         
+        # 增加已生成段落计数
+        global_context["generated_paragraph_count"] += 1
+        
         # 更新总内容长度
         global_context["total_content_length"] += len(content) + 100  # 100是标题和额外格式的估计长度
         
@@ -1473,22 +1540,39 @@ class OutlineGenerator:
         header = "#" * (level + 1)  # 增加一个#，使一级标题变为##
         markdown_content.append(f"{header} {title}\n\n{content}\n")
         
-        # 递归生成子段落内容
+        # 更新文档的HTML内容（如果提供了文档ID）
+        doc_id = global_context.get("doc_id")
+        if doc_id and db_session:
+            try:
+                # 合并到目前为止生成的内容
+                current_content = "\n".join(markdown_content)
+                current_html = markdown.markdown(current_content)
+                
+                # 更新文档HTML内容
+                document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
+                if document:
+                    document.content = current_html
+                    db_session.commit()
+                    logger.info(f"更新文档HTML内容 [doc_id={doc_id}, 段落='{title}']")
+            except Exception as e:
+                logger.error(f"更新文档HTML内容时出错: {str(e)}")
+        
+        # 递归处理子段落
         if hasattr(paragraph, 'children') and paragraph.children:
-            children = paragraph.children
-            for i, child in enumerate(children):
+            children = sorted(paragraph.children, key=lambda p: p.sort_index if p.sort_index is not None else p.id)
+            for child in children:
+                # 递归生成子段落
                 self._generate_paragraph_with_context(
-                    paragraph=child,
-                    global_context=global_context,
-                    markdown_content=markdown_content,
-                    article_title=article_title,
-                    rag_context=rag_context,
-                    outline_content=outline_content,
-                    user_prompt=user_prompt,
+                    child,
+                    global_context,
+                    markdown_content,
+                    article_title,
+                    rag_context,
+                    outline_content,
+                    user_prompt,
                     is_root=False,
-                    parent_content=content_summary,
-                    chapter_index=i,
-                    total_chapters=len(children)
+                    parent_content=content,
+                    db_session=db_session
                 )
 
     def _generate_paragraph_content_with_context(
@@ -2054,4 +2138,179 @@ class OutlineGenerator:
             logger.error(f"内容优化失败: {str(e)}")
             # 如果优化失败，返回原始内容
             return final_content
+
+    def generate_content_directly(self, prompt: str, file_contents: List[str], user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, doc_id: str = None) -> Dict[str, Any]:
+        """
+        直接生成文章内容，不需要先生成大纲
+        
+        Args:
+            prompt: 用户提示
+            file_contents: 参考文件内容
+            user_id: 用户ID
+            kb_ids: 知识库ID列表
+            doc_id: 文档ID
+            
+        Returns:
+            Dict: 生成的内容
+        """
+        logger.info(f"开始直接生成内容 [prompt={prompt}]")
+        
+        # 获取任务ID用于更新任务进度
+        task_id = None
+        if doc_id:
+            # 查找相关任务ID
+            from sqlalchemy.orm import Session
+            from sqlalchemy.sql import func
+            from app.database import get_db
+            
+            try:
+                db_session = next(get_db())
+                task = db_session.query(Task).filter(
+                    Task._params.like(f'%"doc_id": "{doc_id}"%'),
+                    Task.status == TaskStatus.PROCESSING
+                ).first()
+                if task:
+                    task_id = task.id
+                    logger.info(f"找到关联的任务ID: {task_id}")
+            except Exception as e:
+                logger.error(f"查找任务ID出错: {str(e)}")
+        
+        # 创建进度更新函数
+        def update_task_progress(progress: int, detail: str):
+            """更新任务进度"""
+            if not task_id:
+                return
+                
+            try:
+                db_session = next(get_db())
+                task = db_session.query(Task).filter(Task.id == task_id).first()
+                if task:
+                    task.process = progress
+                    task.process_detail_info = detail
+                    db_session.commit()
+                    logger.info(f"更新任务进度 [task_id={task_id}, progress={progress}%, detail={detail}]")
+            except Exception as e:
+                logger.error(f"更新任务进度失败: {str(e)}")
+        
+        # 初始进度
+        update_task_progress(10, "准备生成文章")
+        
+        # 处理参考文件内容
+        file_context = ""
+        if file_contents and len(file_contents) > 0:
+            file_context = "\n\n".join(file_contents)
+            logger.info(f"参考文件内容长度: {len(file_context)} 字符")
+        
+        # 获取RAG上下文
+        rag_context = ""
+        if kb_ids:
+            logger.info(f"获取RAG上下文 [kb_ids={kb_ids}]")
+            # 更新任务进度到20%，RAG检索完成
+            update_task_progress(20, "RAG检索完成")
+            rag_context = self._get_rag_context(
+                question=prompt,
+                user_id=user_id,
+                kb_ids=kb_ids,
+                context_msg=prompt
+            )
+            logger.info(f"RAG上下文长度: {len(rag_context)} 字符")
+        else:
+            # 没有RAG检索，直接设置为20%
+            update_task_progress(20, "准备生成内容")
+        
+        # 更新文档标题和初始HTML（如果提供了文档ID）
+        if doc_id:
+            from sqlalchemy.orm import Session
+            from sqlalchemy.sql import func
+            from app.database import get_db
+            
+            try:
+                db_session = next(get_db())
+                document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
+                if document:
+                    initial_title = "文章生成中..."
+                    document.title = initial_title
+                    initial_html = markdown.markdown(f"# {initial_title}\n\n*内容生成中，请稍候...*")
+                    document.content = initial_html
+                    document.updated_at = func.now()
+                    db_session.commit()
+                    logger.info(f"更新文档初始HTML [doc_id={doc_id}]")
+            except Exception as e:
+                logger.error(f"更新文档初始HTML时出错: {str(e)}")
+                if 'db_session' in locals():
+                    db_session.close()
+        
+        try:
+            # 构建提示模板
+            template = DIRECT_CONTENT_GENERATION_TEMPLATE.format(
+                prompt=prompt,
+                file_context=file_context,
+                rag_context=rag_context
+            )
+            
+            logger.info("开始生成内容")
+            # 更新任务进度到30%，开始生成内容
+            update_task_progress(30, "开始生成文章内容")
+            
+            # 开始生成
+            result = self.llm.invoke(template)
+            content = result.content
+            
+            # 更新任务进度到80%，内容生成完毕
+            update_task_progress(80, "文章内容生成完毕")
+            
+            # 提取标题
+            title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            title = title_match.group(1) if title_match else "生成的文章"
+            
+            # 将markdown转换为HTML
+            html_content = markdown.markdown(content)
+            
+            # 更新任务进度到90%，正在优化格式
+            update_task_progress(90, "正在优化格式")
+            
+            # 更新文档最终HTML内容（如果提供了文档ID）
+            if doc_id:
+                try:
+                    db_session = next(get_db())
+                    document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
+                    if document:
+                        document.title = title
+                        document.content = html_content
+                        document.updated_at = func.now()
+                        db_session.commit()
+                        logger.info(f"更新文档最终HTML内容 [doc_id={doc_id}]")
+                except Exception as e:
+                    logger.error(f"更新文档最终HTML内容时出错: {str(e)}")
+                finally:
+                    if 'db_session' in locals():
+                        db_session.close()
+            
+            # 最终进度100%
+            update_task_progress(100, "内容生成完成")
+            
+            # 返回结果
+            return {
+                "title": title,
+                "markdown": content,
+                "html": html_content
+            }
+            
+        except Exception as e:
+            logger.error(f"直接生成内容出错: {str(e)}")
+            
+            # 更新任务状态为失败
+            if task_id:
+                try:
+                    db_session = next(get_db())
+                    task = db_session.query(Task).filter(Task.id == task_id).first()
+                    if task:
+                        task.status = TaskStatus.FAILED
+                        task.error = str(e)
+                        db_session.commit()
+                except Exception as err:
+                    logger.error(f"更新任务失败状态出错: {str(err)}")
+                    
+            # 返回错误结果
+            raise ValueError(f"生成内容失败: {str(e)}")
 
