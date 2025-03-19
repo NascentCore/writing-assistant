@@ -13,6 +13,7 @@ from app.auth import (
     create_access_token,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
+from app.rag.kb import ensure_user_knowledge_base
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -40,7 +41,6 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         if db_user:
             return APIResponse.error(message="邮箱已被注册")
         
-        
         # 创建新用户
         hashed_password = get_password_hash(user.password)
         db_user = User(
@@ -52,6 +52,9 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
+
+        # 创建用户知识库
+        await ensure_user_knowledge_base(db_user, db)
         
         # 创建访问令牌
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)

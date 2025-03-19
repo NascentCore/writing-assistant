@@ -592,6 +592,7 @@ async def chat(
     db: Session = Depends(get_db)
 ):
     try:
+        await ensure_user_knowledge_base(current_user, db)
         kb_ids = set()
         # 系统知识库
         kb_ids.add(get_system_kb(db))
