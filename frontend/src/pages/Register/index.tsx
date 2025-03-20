@@ -28,6 +28,8 @@ const RegisterPage: React.FC = () => {
         localStorage.setItem('token', response.access_token);
         localStorage.setItem('username', values.username);
         history.push('/');
+        localStorage.removeItem('current_chat_session_id');
+        localStorage.removeItem('current_document_id');
       }
     } catch (error) {
       // fetchWithAuthNew 已经处理了错误提示，这里不需要额外处理

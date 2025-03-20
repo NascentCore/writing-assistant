@@ -16,13 +16,13 @@ export const routes = [
     component: './Products',
     hideInMenu: true,
   },
-  // {
-  //   name: '注册',
-  //   path: '/Register',
-  //   component: './Register',
-  //   hideInMenu: true,
-  //   menuRender: false,
-  // },
+  {
+    name: '注册',
+    path: '/Register',
+    component: './Register',
+    hideInMenu: true,
+    menuRender: false,
+  },
   {
     name: 'AI对话',
     path: '/AiChat',
