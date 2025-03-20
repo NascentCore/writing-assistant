@@ -910,9 +910,9 @@ async def upload_attachment(
             db.commit()
         
         return APIResponse.success(
-            message=f"文件上传成功, 正在解析中。",
+            message=f"附件上传成功, 正在解析中。",
             data={
-                "files": new_files,
+                "new_files": new_files,
                 "existing_files": [{
                     "file_id": file.file_id, 
                     "file_name": file.file_name,
@@ -924,5 +924,5 @@ async def upload_attachment(
             }
         )
     except Exception as e:
-        logger.error(f"上传文件时发生异常: {str(e)}")
-        return APIResponse.error(message=f"上传失败: {str(e)}")
+        logger.error(f"上传附件时发生异常: {str(e)}")
+        return APIResponse.error(message=f"附件上传失败: {str(e)}")
