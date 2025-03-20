@@ -665,6 +665,7 @@ async def get_task_status(
         error: 错误信息
         process: 进度百分比 (0-100)
         process_detail_info: 进度详情描述
+        log: 日志
     """
     task = db.query(Task).filter(
         Task.id == task_id,
@@ -682,7 +683,8 @@ async def get_task_status(
         "result": task.result,
         "error": task.error,
         "process": task.process or 0,
-        "process_detail_info": task.process_detail_info or ""
+        "process_detail_info": task.process_detail_info or "",
+        "log": task.log or ""
     }
     
     return APIResponse.success(message="获取任务状态成功", data=response_data)
