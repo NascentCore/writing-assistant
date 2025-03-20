@@ -19,8 +19,6 @@ import html
 
 from fastapi import HTTPException
 import numpy as np
-import nltk
-from nltk.tokenize import sent_tokenize
 from langchain.vectorstores.chroma import Chroma
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.schema.output_parser import OutputParserException
