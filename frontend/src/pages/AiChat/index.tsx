@@ -133,14 +133,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     history.push(location.pathname);
   }, []);
 
-  // 添加一个函数来检查是否在底部附近
-  const isNearBottom = useCallback(() => {
-    if (!scrollContainerRef.current) return false;
-    const { scrollTop, scrollHeight, clientHeight } =
-      scrollContainerRef.current;
-    return scrollHeight - scrollTop - clientHeight < 100;
-  }, []);
-
   const scrollToBottom = useCallback(() => {
     if (!scrollContainerRef.current) return;
 
