@@ -529,6 +529,29 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
     };
   }, [location.search, pollTaskStatus, taskPollingInterval, pollingTaskId]);
 
+  // 监听路由变化，终止轮询任务
+  useEffect(() => {
+    // 清除轮询定时器的函数
+    const clearPolling = () => {
+      if (taskPollingInterval) {
+        clearInterval(taskPollingInterval);
+        setTaskPollingInterval(null);
+        setPollingTaskId(null);
+      }
+    };
+
+    // 监听路由变化
+    const unlisten = history.listen(() => {
+      clearPolling();
+    });
+
+    // 组件卸载时清除监听器和轮询
+    return () => {
+      unlisten();
+      clearPolling();
+    };
+  }, [taskPollingInterval, history]);
+
   // 当会话列表加载完成后，如果URL没有id参数且会话列表不为空，自动选择第一个会话
   useEffect(() => {
     const query = new URLSearchParams(location.search);
