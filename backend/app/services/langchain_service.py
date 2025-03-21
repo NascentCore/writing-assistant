@@ -465,7 +465,7 @@ class OutlineGenerator:
         
         return rag_context
 
-    def generate_outline(self, prompt: str, file_contents: List[str] = None, user_id: str = None, kb_ids: List[str] = None) -> Dict[str, Any]:
+    def generate_outline(self, prompt: str, file_contents: List[str] = None, user_id: str = None, kb_ids: List[str] = None, task_id: Optional[str] = None, db_session = None) -> Dict[str, Any]:
         """
         生成结构化大纲
         
@@ -474,11 +474,16 @@ class OutlineGenerator:
             file_contents: 用户上传的文件内容列表
             user_id: 用户ID，用于RAG搜索（如果启用）
             kb_ids: 知识库ID列表，用于RAG搜索（如果启用）
+            task_id: 任务ID，用于更新任务进度
+            db_session: 数据库会话，用于更新任务进度
             
         Returns:
             Dict: 包含大纲结构的字典
         """
         logger.info(f"开始生成大纲 [prompt_length={len(prompt)}, use_rag={self.use_rag}]")
+        
+        # 更新任务进度 - 开始
+        update_task_progress(task_id, db_session, 10, "开始生成大纲", f"提示词长度: {len(prompt)}字")
         
         # 提取用户期望的目录层级
         required_level = self._extract_required_level_from_prompt(prompt)
@@ -498,6 +503,9 @@ class OutlineGenerator:
             file_context = "没有提供参考文件内容。"
             logger.info("无参考文件内容")
         
+        # 更新任务进度 - 处理参考资料
+        update_task_progress(task_id, db_session, 20, "处理参考资料", f"参考文件数量: {len(file_contents) if file_contents else 0}")
+        
         # 获取RAG搜索结果（如果启用）
         rag_context = ""
         # if self.use_rag:
@@ -508,6 +516,9 @@ class OutlineGenerator:
         #         kb_ids=kb_ids,
         #         context_msg="生成大纲"
         #     )
+        
+        # 更新任务进度 - 准备大纲生成
+        update_task_progress(task_id, db_session, 30, "准备大纲生成", "构建提示模板")
         
         try:
             # 构建提示模板
@@ -615,11 +626,17 @@ class OutlineGenerator:
             chain = prompt_template | self.llm | self.parser
             logger.info("创建处理链完成")
             
+            # 更新任务进度 - 发送请求到大模型
+            update_task_progress(task_id, db_session, 50, "正在调用大模型生成大纲", "请耐心等待")
+            
             # 执行链
             logger.info("开始执行大模型调用")
             try:
                 result = chain.invoke({"prompt": prompt, "file_context": file_context, "rag_context": rag_context})
                 logger.info("大模型调用完成")
+                
+                # 更新任务进度 - 大模型响应完成
+                update_task_progress(task_id, db_session, 70, "大模型响应完成", "正在验证大纲结构")
                 
                 # 验证大纲结构，检查是否有重复标题
                 self._validate_and_fix_outline(result)
@@ -628,10 +645,17 @@ class OutlineGenerator:
                 max_level_found = self._get_max_outline_level(result)
                 if required_level > max_level_found:
                     logger.warning(f"用户要求{required_level}级目录，但生成的大纲只有{max_level_found}级目录，可能需要手动调整")
+                    update_task_progress(task_id, db_session, 90, "大纲层级优化", f"用户要求{required_level}级目录，但生成的大纲只有{max_level_found}级目录")
+                
+                # 更新任务进度 - 完成
+                update_task_progress(task_id, db_session, 100, "大纲生成完成", f"大纲包含{len(result['sub_paragraphs'])}个一级标题")
                 
                 return result
             except Exception as parser_error:
                 logger.error(f"解析大模型输出时出错: {str(parser_error)}")
+                
+                # 更新任务进度 - 解析错误
+                update_task_progress(task_id, db_session, 75, "解析大模型输出时出错", f"错误信息: {str(parser_error)}")
                 
                 # 尝试直接获取大模型的原始输出
                 raw_chain = prompt_template | self.llm
@@ -640,6 +664,9 @@ class OutlineGenerator:
                 if hasattr(raw_output, 'content'):
                     raw_content = raw_output.content
                     logger.info("获取到大模型原始输出，尝试手动解析")
+                    
+                    # 更新任务进度 - 尝试手动解析
+                    update_task_progress(task_id, db_session, 80, "尝试手动解析大模型输出", "正在清理和修复JSON")
                     
                     # 尝试清理和修复JSON
                     try:
@@ -652,15 +679,24 @@ class OutlineGenerator:
                         # 验证大纲结构，检查是否有重复标题
                         self._validate_and_fix_outline(parsed_json)
                         
+                        # 更新任务进度 - 完成
+                        update_task_progress(task_id, db_session, 100, "大纲生成完成", "通过手动解析JSON成功生成大纲")
+                        
                         return parsed_json
                     except Exception as json_error:
                         logger.error(f"手动解析JSON失败: {str(json_error)}")
+                        # 更新任务进度 - 解析失败
+                        update_task_progress(task_id, db_session, 85, "手动解析JSON失败", f"错误信息: {str(json_error)}")
                 
                 # 如果所有尝试都失败，返回基本结构
+                update_task_progress(task_id, db_session, 90, "所有解析尝试均失败", "返回基本大纲结构")
                 raise ValueError(f"无法解析大模型输出: {str(parser_error)}")
             
         except Exception as e:
             logger.error(f"生成大纲时出错: {str(e)}")
+            # 更新任务进度 - 失败
+            update_task_progress(task_id, db_session, 100, "大纲生成失败", f"错误信息: {str(e)}")
+            
             # 返回一个基本结构，避免完全失败
             return {
                 "title": "生成失败，请重试",
@@ -674,7 +710,7 @@ class OutlineGenerator:
                     }
                 ]
             }
-            
+
     def _validate_and_fix_outline(self, outline_data: Dict[str, Any]) -> None:
         """
         验证大纲结构，检查是否有重复标题，并尝试修复问题
