@@ -50,3 +50,8 @@ CREATE TABLE user_departments (
 
 ALTER TABLE rag_knowledge_bases ADD COLUMN owner_id VARCHAR(100) NOT NULL DEFAULT '' COMMENT '所有者ID' AFTER kb_type;
 UPDATE rag_knowledge_bases SET owner_id = user_id;
+
+
+# 2025-03-19 删除用户表的email索引
+ALTER TABLE users
+DROP INDEX ix_users_email;
