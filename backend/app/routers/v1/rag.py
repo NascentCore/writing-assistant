@@ -573,6 +573,7 @@ async def get_chat_session_detail(
                         "content_type": msg.content_type if hasattr(msg, 'content_type') else "text",
                         "outline_id": msg.outline_id if hasattr(msg, 'outline_id') else "",
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
+                        "model_name": json.loads(msg.meta).get("model_name", "") if msg.meta else "",
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages
@@ -778,7 +779,8 @@ async def chat(
                     session_id=session_id,
                     question_id=question_message_id,
                     role="assistant",
-                    content=answer
+                    content=answer,
+                    meta=json.dumps({"model_name": request.model_name})
                 )
                 db.add(assistant_message)
                 db.commit()
