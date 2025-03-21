@@ -160,12 +160,15 @@ async def upload_files(
             db.add(db_file)
             db.commit() 
 
+        if existing_files:
+            logger.info(f"文件上传失败, 用户 {current_user.user_id} 已存在文件: {existing_files}")
+            return APIResponse.error(
+                message=f"文件 [{', '.join([file['file_name'] for file in existing_files])}] 已存在",
+            )
+            
         return APIResponse.success(
             message=f"文件上传成功, 正在解析中。",
-            data={
-                "new_files": new_files,
-                "existing_files": existing_files
-            }
+            data=new_files
         )
     except Exception as e:
         logger.error(f"上传文件时发生异常: {str(e)}")
@@ -570,6 +573,7 @@ async def get_chat_session_detail(
                         "content_type": msg.content_type if hasattr(msg, 'content_type') else "text",
                         "outline_id": msg.outline_id if hasattr(msg, 'outline_id') else "",
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
+                        "model_name": json.loads(msg.meta).get("model_name", "") if msg.meta else "",
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages
@@ -775,7 +779,8 @@ async def chat(
                     session_id=session_id,
                     question_id=question_message_id,
                     role="assistant",
-                    content=answer
+                    content=answer,
+                    meta=json.dumps({"model_name": request.model_name})
                 )
                 db.add(assistant_message)
                 db.commit()
@@ -908,21 +913,17 @@ async def upload_attachment(
                 "content": content
             })
             db.commit()
+
+        if existing_files:
+            logger.info(f"附件上传失败, 用户 {current_user.user_id} 已存在文件: {existing_files}")
+            return APIResponse.error(
+                message=f"文件 [{', '.join([file.file_name for file in existing_files])}] 已存在",
+            )
         
         return APIResponse.success(
-            message=f"文件上传成功, 正在解析中。",
-            data={
-                "files": new_files,
-                "existing_files": [{
-                    "file_id": file.file_id, 
-                    "file_name": file.file_name,
-                    "size": file.file_size,
-                    "content_type": file.file_ext,
-                    "path": file.file_path,
-                    "hash": file.hash
-                } for file in existing_files]
-            }
+            message=f"附件上传成功, 正在解析中。",
+            data=new_files
         )
     except Exception as e:
-        logger.error(f"上传文件时发生异常: {str(e)}")
-        return APIResponse.error(message=f"上传失败: {str(e)}")
+        logger.error(f"上传附件时发生异常: {str(e)}")
+        return APIResponse.error(message=f"附件上传失败: {str(e)}")

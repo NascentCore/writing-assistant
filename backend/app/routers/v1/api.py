@@ -66,7 +66,6 @@ class Message(BaseModel):
 
 class CompletionRequest(BaseModel):
     model_name: Optional[str] = Field(None, description="模型名称")
-    session_id: Optional[str] = Field(None, description="会话ID，如果不传则自动创建")
     messages: List[Message] = Field(..., description="对话消息列表")
     action: Optional[Literal["extension", "abridge", "continuation", "rewrite", "overall", "chat"]] = Field("chat", description="操作类型")
     stream: bool = Field(False, description="是否使用流式响应")
@@ -88,14 +87,14 @@ class CompletionRequest(BaseModel):
                         "content": "请总结一下这份文档的主要内容"
                     }
                 ],
+                "action": "extension",
                 "model_name": "doubao",
-                "session_id": "abc123",
                 "file_ids": ["abc123"],
                 "doc_id": "abc123",
                 "selected_contents": ["这是第一段划选的文本", "这是第二段划选的文本"],
                 "stream": True,
                 "temperature": 0.7,
-                "max_tokens": 2000
+                "max_tokens": 200
             }
         }
 
@@ -121,38 +120,6 @@ async def completions(
         # 使用字符串模板替代文件模板
         template = Template(template_config.value)
         
-        # 处理会话ID
-        session_id = request.session_id
-        if not session_id:
-            session_id = f"chat-{shortuuid.uuid()}"
-            # 创建新会话
-            chat_session = ChatSession(
-                session_id=session_id,
-                user_id=current_user.user_id,
-                session_type=ChatSessionType.WRITING
-            )
-            if request.doc_id:
-                chat_session.doc_id = request.doc_id
-
-            db.add(chat_session)
-            db.commit()
-        else:
-            # 验证会话是否存在且属于当前用户
-            chat_session = db.query(ChatSession).filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.user_id,
-                ChatSession.session_type == ChatSessionType.WRITING,
-                ChatSession.is_deleted == False
-            ).first()
-            if not chat_session:
-                return APIResponse.error(message="会话不存在或无权访问")
-
-        # 获取历史消息
-        history_messages = db.query(ChatMessage).filter(
-            ChatMessage.session_id == session_id,
-            ChatMessage.is_deleted == False
-        ).order_by(ChatMessage.id).all()
-
         # 构建完整的消息列表
         full_messages = []
         
@@ -162,13 +129,6 @@ async def completions(
             full_messages.append({
                 "role": "system",
                 "content": llm_config["system_prompt"]
-            })
-
-        # 添加历史消息
-        for msg in history_messages:
-            full_messages.append({
-                "role": msg.role,
-                "content": msg.content
             })
 
         # 处理当前请求的消息
@@ -250,28 +210,6 @@ async def completions(
 
         # max_token
         max_tokens = request.max_tokens
-        if action == "chat":
-            max_tokens = 200
-
-        # 保存用户消息到数据库
-        question_message_id = f"msg-{shortuuid.uuid()}"
-        user_message = ChatMessage(
-            message_id=question_message_id,
-            session_id=session_id,
-            role="user",
-            content=original_message,
-            full_content=prompt,
-            meta=json.dumps({
-                "temperature": request.temperature,
-                "top_p": request.top_p,
-                "max_tokens": max_tokens,
-                "file_ids": file_ids,
-                "doc_id": request.doc_id,
-                "selected_contents": request.selected_contents
-            })
-        )
-        db.add(user_message)
-        db.commit()
 
         # 配置OpenAI客户端并调用API
         client = openai.AsyncOpenAI(
@@ -303,40 +241,14 @@ async def completions(
                         assistant_content += chunk.choices[0].delta.content
                     yield f"data: {json.dumps(chunk.model_dump())}\n\n"
                 
-                # 流式响应结束后保存助手回复
-                assistant_message = ChatMessage(
-                    message_id=f"msg-{shortuuid.uuid()}",
-                    session_id=session_id,
-                    question_id=question_message_id,
-                    role="assistant",
-                    content=assistant_content
-                )
-                db.add(assistant_message)
-                db.commit()
-
             return StreamingResponse(
                 generate_stream(),
                 media_type="text/event-stream",
-                headers={"X-Session-ID": session_id} # 添加会话ID
             )
         else:
-            # 非流式响应，直接保存助手回复
-            assistant_message = ChatMessage(
-                message_id=f"msg-{shortuuid.uuid()}",
-                session_id=session_id,
-                question_id=question_message_id,
-                role="assistant",
-                content=completion.choices[0].message.content,
-                full_content=completion.choices[0].message.content,
-                # TODO 添加meta数据
-            )
-            db.add(assistant_message)
-            db.commit()
-
             return APIResponse.success(
                 data={
                     **completion.model_dump(),
-                    "session_id": session_id
                 }
             )
 

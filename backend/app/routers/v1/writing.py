@@ -11,6 +11,7 @@ import asyncio
 import concurrent.futures
 import json
 import time
+from fastapi.responses import StreamingResponse
 
 from app.schemas.response import APIResponse, PaginationData
 from app.database import get_db
@@ -1803,3 +1804,288 @@ async def delete_chat_session(
     except Exception as e:
         db.rollback()  # 避免数据库处于不一致状态
         return APIResponse.error(message=f"删除失败: {str(e)}")
+
+
+class StreamDocContentRequest(BaseModel):
+    doc_id: str = Field(..., description="文档ID")
+    task_id: str = Field(..., description="任务ID")
+
+@router.get("/doc/{doc_id}",summary="流式获取doc的内容")
+async def stream_doc_content(
+    doc_id: str,
+    request: StreamDocContentRequest = Depends(),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    流式获取文档内容
+    
+    Args:
+        doc_id: 文档ID
+        request: 请求体，包含任务ID
+        
+    Returns:
+        文档内容的流式响应，格式与OpenAI Chat Stream兼容
+    """
+    try:
+        # 检查文档是否存在
+        document = db.query(Document).filter(
+            Document.doc_id == doc_id
+        ).first()
+        
+        if not document:
+            return APIResponse.error(message=f"未找到ID为{doc_id}的文档")
+        
+        # 检查用户权限
+        if document.user_id != current_user.user_id:
+            return APIResponse.error(message="您没有权限查看该文档")
+        
+        # 获取任务状态
+        task = db.query(Task).filter(
+            Task.id == request.task_id
+        ).first()
+        
+        if not task:
+            return APIResponse.error(message=f"未找到ID为{request.task_id}的任务")
+        
+        # 检查任务类型是否是生成内容
+        if task.type != TaskType.GENERATE_CONTENT:
+            return APIResponse.error(message="无效的任务类型")
+        
+        # 检查任务关联的文档ID是否匹配
+        task_params = task.params
+        if task_params.get("doc_id") != doc_id:
+            return APIResponse.error(message="任务与文档不匹配")
+        
+        # 记录初始状态
+        initial_title = document.title
+        initial_content = document.content or ""
+        task_id = task.id
+        current_task_status = task.status
+        
+        # 流式响应函数
+        async def generate():
+            # 创建metadata字典，包含状态信息
+            metadata = {
+                "doc_id": doc_id,
+                "task_id": task_id,
+                "title": initial_title,
+                "status": current_task_status.value
+            }
+            
+            # 发送文档元数据作为系统消息
+            chunk = {
+                "id": f"docstream-{shortuuid.uuid()}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": "doc-stream",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "role": "system",
+                            "content": None,
+                            "metadata": metadata
+                        }
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            
+            # 如果任务已完成，直接返回完整内容
+            if current_task_status == TaskStatus.COMPLETED:
+                chunk = {
+                    "id": f"docstream-{shortuuid.uuid()}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": "doc-stream",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "content": initial_content,
+                                "status": "completed"
+                            }
+                        }
+                    ]
+                }
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            
+            # 如果任务失败，返回错误信息
+            if current_task_status == TaskStatus.FAILED:
+                chunk = {
+                    "id": f"docstream-{shortuuid.uuid()}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": "doc-stream",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "content": "",
+                                "status": "failed",
+                                "error": task.error or "生成任务失败"
+                            }
+                        }
+                    ]
+                }
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            
+            # 发送当前的文档内容
+            if initial_content:
+                chunk = {
+                    "id": f"docstream-{shortuuid.uuid()}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": "doc-stream",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "content": initial_content,
+                                "status": current_task_status.value
+                            }
+                        }
+                    ]
+                }
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            
+            # 如果任务正在处理中，等待更新并流式返回
+            if current_task_status in [TaskStatus.PENDING, TaskStatus.PROCESSING]:
+                # 设置最大等待时间（60秒）和检查间隔（2秒）
+                max_wait_time = 60  # 秒
+                check_interval = 2  # 秒
+                wait_time = 0
+                
+                # 上次内容的长度，用于检测变化
+                last_content_length = len(initial_content)
+                
+                while wait_time < max_wait_time:
+                    # 等待一段时间
+                    await asyncio.sleep(check_interval)
+                    wait_time += check_interval
+                    
+                    # 创建新的数据库会话，避免使用已关闭的会话
+                    with Session(db.bind) as new_db:
+                        # 重新查询文档和任务
+                        current_document = new_db.query(Document).filter(
+                            Document.doc_id == doc_id
+                        ).first()
+                        
+                        current_task = new_db.query(Task).filter(
+                            Task.id == task_id
+                        ).first()
+                        
+                        if not current_document or not current_task:
+                            # 如果找不到文档或任务，退出循环
+                            chunk = {
+                                "id": f"docstream-{shortuuid.uuid()}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": "doc-stream",
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {
+                                            "role": "assistant",
+                                            "content": "",
+                                            "status": "failed",
+                                            "error": "文档或任务不存在"
+                                        }
+                                    }
+                                ]
+                            }
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                            break
+                        
+                        # 如果内容有更新，发送更新的内容
+                        current_content = current_document.content or ""
+                        if len(current_content) > last_content_length:
+                            # 只发送新增的内容
+                            new_content = current_content[last_content_length:]
+                            chunk = {
+                                "id": f"docstream-{shortuuid.uuid()}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": "doc-stream",
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {
+                                            "role": "assistant",
+                                            "content": new_content,
+                                            "status": current_task.status.value
+                                        }
+                                    }
+                                ]
+                            }
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                            last_content_length = len(current_content)
+                        
+                        # 如果任务状态有变化
+                        if current_task.status == TaskStatus.COMPLETED:
+                            chunk = {
+                                "id": f"docstream-{shortuuid.uuid()}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": "doc-stream",
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {
+                                            "role": "assistant",
+                                            "content": "",
+                                            "status": "completed"
+                                        }
+                                    }
+                                ]
+                            }
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                            break
+                        elif current_task.status == TaskStatus.FAILED:
+                            chunk = {
+                                "id": f"docstream-{shortuuid.uuid()}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": "doc-stream",
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {
+                                            "role": "assistant",
+                                            "content": "",
+                                            "status": "failed",
+                                            "error": current_task.error or "生成任务失败"
+                                        }
+                                    }
+                                ]
+                            }
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                            break
+                
+            # 结束流
+            yield "data: [DONE]\n\n"
+        
+        # 返回流式响应
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Transfer-Encoding": "chunked",
+                "X-Document-ID": doc_id,
+                "X-Task-ID": request.task_id
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"流式获取文档内容失败: {str(e)}")
+        return APIResponse.error(message=f"获取文档内容失败: {str(e)}")

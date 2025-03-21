@@ -1,3 +1,4 @@
+from typing import Optional
 from app.schemas.response import APIResponse
 import shortuuid
 from fastapi import APIRouter, Depends
@@ -20,7 +21,7 @@ router = APIRouter()
 
 class UserCreate(BaseModel):
     username: str
-    email: str
+    email: Optional[str] = None
     password: str
 
 class Token(BaseModel):
@@ -36,10 +37,10 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         if db_user:
             return APIResponse.error(message="用户名已被注册")
         
-        # 检查邮箱是否已存在
-        db_user = db.query(User).filter(User.email == user.email).first()
-        if db_user:
-            return APIResponse.error(message="邮箱已被注册")
+        # # 检查邮箱是否已存在
+        # db_user = db.query(User).filter(User.email == user.email).first()
+        # if db_user:
+        #     return APIResponse.error(message="邮箱已被注册")
         
         # 创建新用户
         hashed_password = get_password_hash(user.password)
@@ -75,6 +76,7 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         return APIResponse.error(message=f"注册失败: {str(e)}")
 
 @router.post("/token")
+@router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """用户登录"""
     try:
