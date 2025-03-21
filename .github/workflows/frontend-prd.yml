@@ -25,7 +25,7 @@ jobs:
         id: extract_and_build
         run: |
           cd frontend
-          echo 'export const API_BASE_URL = "http://backend-prd.llm.sxwl.ai:30005";' > src/config.ts
+          echo 'export const API_BASE_URL = "https://backend-prd.sxwl.ai:30001";' > src/config.ts
           COMMIT_ID=$(git rev-parse --short HEAD)
           IMAGE_NAME=$DOCKER_REGISTRY/$NAMESPACE/aieditor-app-frontend-prd:$COMMIT_ID
           docker build -t $IMAGE_NAME .
