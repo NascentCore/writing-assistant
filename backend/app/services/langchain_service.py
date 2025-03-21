@@ -480,6 +480,15 @@ class OutlineGenerator:
         """
         logger.info(f"开始生成大纲 [prompt_length={len(prompt)}, use_rag={self.use_rag}]")
         
+        # 提取用户期望的目录层级
+        required_level = self._extract_required_level_from_prompt(prompt)
+        logger.info(f"用户需要的目录层级: {required_level}级")
+        
+        # 添加层级要求到提示
+        if required_level > 2:
+            level_suffix = f"请确保生成{required_level}级目录结构，而不仅仅是1-2级。"
+            prompt = f"{prompt}\n\n{level_suffix}"
+        
         # 处理文件内容
         file_context = ""
         if file_contents and len(file_contents) > 0:
@@ -520,6 +529,8 @@ class OutlineGenerator:
             2. 多个段落，每个段落可以有不同的级别:
                - 1级段落: 主要段落，包含标题、描述和篇幅风格(short/medium/long)
                - 2级及以上段落: 子段落，包含标题和描述，但没有篇幅风格
+               - 必须严格遵循用户对层级数量的要求，如果用户要求三级或四级目录，就必须生成对应层级的目录结构
+               - 最多支持4级目录结构
             3. 对于方案类文档基本大的框架都是：方案背景（政策背景、行业/技术背景、如果有还可以更多经济背景，但一般起码要有政策背景）、现状与需求分析、建设目标（小篇幅的一般就只有一个建设目标，如果篇幅大的话可能会有总体目标、分阶段小目标等等）、建设方案（包含方案概述、方案技术架构或系统架构及描述、技术原理、方案或系统功能、方案或系统组成、方案清单、）、方案效益、方案总结等等（包含但不限于上述几点内容，根据项目不同会有不同），有时候还需要加上方案依据、方案设计原则等等，你可以在深入理解用户需求的情况下根据方案类型来确定大纲
             
             【大纲结构规范】
@@ -535,6 +546,7 @@ class OutlineGenerator:
             4. 使用具体的标题，避免过于宽泛或重复的标题
             5. 保持清晰的层级关系，相关主题应该放在一起
             6. 每个主题应该有明确的范围，避免内容重叠
+            7. 如果用户明确要求了三级或四级目录结构，必须创建相应层级的目录，不得仅生成一级和二级目录
             
             【避免常见问题】
             1. 避免在不同层级重复相同的标题
@@ -546,6 +558,9 @@ class OutlineGenerator:
             3. 避免内容重叠
                - 错误示例: "数据分析" 和 "数据处理" 作为并列标题但内容高度重叠
                - 正确示例: "数据采集与预处理" 和 "数据分析与可视化" 作为内容明确区分的标题
+            4. 避免生成不符合用户要求的层级结构
+               - 错误示例: 用户要求四级目录，但只生成了两级目录
+               - 正确示例: 根据用户要求，创建包含一级、二级、三级和四级目录的完整结构
             
            【返回格式】
            以JSON格式返回，格式如下:
@@ -562,7 +577,21 @@ class OutlineGenerator:
                                 "title": "2级段落标题",
                                 "description": "2级段落描述",
                                 "level": 2,
-                                "children": []
+                                "children": [
+                                    {{
+                                        "title": "3级段落标题",
+                                        "description": "3级段落描述",
+                                        "level": 3,
+                                        "children": [
+                                            {{
+                                                "title": "4级段落标题",
+                                                "description": "4级段落描述",
+                                                "level": 4,
+                                                "children": []
+                                            }}
+                                        ]
+                                    }}
+                                ]
                             }}
                         ]
                     }}
@@ -575,6 +604,7 @@ class OutlineGenerator:
             2. 所有段落都必须有 level 属性
             3. 所有段落都必须有 children 数组，即使为空
             4. 在最终生成的文档中，描述内容将用括号括起来，以区分标题和描述，避免层级结构的歧义
+            5. 当用户需要三级或四级目录时，必须在生成的JSON中包含这些级别的段落，不得仅生成两级目录
             """
             
             # 创建提示
@@ -593,6 +623,11 @@ class OutlineGenerator:
                 
                 # 验证大纲结构，检查是否有重复标题
                 self._validate_and_fix_outline(result)
+                
+                # 验证目录层级是否满足用户要求
+                max_level_found = self._get_max_outline_level(result)
+                if required_level > max_level_found:
+                    logger.warning(f"用户要求{required_level}级目录，但生成的大纲只有{max_level_found}级目录，可能需要手动调整")
                 
                 return result
             except Exception as parser_error:
@@ -780,6 +815,59 @@ class OutlineGenerator:
         
         # 修复空标题
         fix_empty_titles(outline_data.get("sub_paragraphs", []))
+        
+        # 验证目录层级深度
+        max_level_found = 1
+        
+        def verify_depth(paragraphs, current_level=1):
+            nonlocal max_level_found
+            max_level_found = max(max_level_found, current_level)
+            
+            for para in paragraphs:
+                children = para.get("children", [])
+                if children:
+                    verify_depth(children, current_level + 1)
+        
+        verify_depth(outline_data.get("sub_paragraphs", []))
+        logger.info(f"大纲中发现的最大层级: {max_level_found}级")
+        
+        # 无法在这里访问prompt参数，只记录最大层级即可
+        
+    def _extract_required_level_from_prompt(self, prompt: str) -> int:
+        """
+        从用户提示中提取所需的目录层级数量
+        
+        Args:
+            prompt: 用户提示
+            
+        Returns:
+            int: 要求的层级数，默认为2
+        """
+        if not prompt:
+            return 2
+            
+        # 常见的层级表达
+        level_patterns = [
+            r'([三四五]级|[3-5]\s*级)(标题|目录|大纲)',
+            r'(标题|目录|大纲)([三四五]级|[3-5]\s*级)',
+            r'([3-5])[\s-]*level',
+            r'level[\s-]*([3-5])'
+        ]
+        
+        for pattern in level_patterns:
+            matches = re.findall(pattern, prompt, re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    # 可能是元组或字符串
+                    level_text = match[0] if isinstance(match, tuple) else match
+                    if '三' in level_text or '3' in level_text:
+                        return 3
+                    elif '四' in level_text or '4' in level_text:
+                        return 4
+                    elif '五' in level_text or '5' in level_text:
+                        return 5
+        
+        return 2  # 默认为2级目录
 
     def save_outline_to_db(self, outline_data: Dict[str, Any], db_session, outline_id: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -2427,4 +2515,29 @@ class OutlineGenerator:
                     
             # 返回错误结果
             raise ValueError(f"生成内容失败: {str(e)}")
+
+    def _get_max_outline_level(self, outline_data: Dict[str, Any]) -> int:
+        """
+        获取大纲中的最大层级深度
+        
+        Args:
+            outline_data: 大纲数据
+            
+        Returns:
+            int: 最大层级深度
+        """
+        max_level = 1
+        
+        def traverse_depth(paragraphs, current_level=1):
+            nonlocal max_level
+            max_level = max(max_level, current_level)
+            
+            for para in paragraphs:
+                children = para.get("children", [])
+                if children:
+                    traverse_depth(children, current_level + 1)
+        
+        sub_paragraphs = outline_data.get("sub_paragraphs", [])
+        traverse_depth(sub_paragraphs)
+        return max_level
 
