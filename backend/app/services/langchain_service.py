@@ -507,18 +507,21 @@ class OutlineGenerator:
         update_task_progress(task_id, db_session, 20, "处理参考资料", f"参考文件数量: {len(file_contents) if file_contents else 0}")
         
         # 获取RAG搜索结果（如果启用）
+        update_task_progress(task_id, db_session, 25, "正在检索RAG知识库")
         rag_context = ""
-        # if self.use_rag:
-        #     rag_prompt = f"关于主题：{prompt}，请提供参考内容"
-        #     rag_context = self._get_rag_context(
-        #         question=rag_prompt,
-        #         user_id=user_id,
-        #         kb_ids=kb_ids,
-        #         context_msg="生成大纲"
-        #     )
+        if self.use_rag:
+            rag_prompt = f"关于主题：{prompt}，请提供参考内容"
+            rag_context = self._get_rag_context(
+                question=rag_prompt,
+                user_id=user_id,
+                kb_ids=kb_ids,
+                context_msg="生成大纲"
+            )
+
+        update_task_progress(task_id, db_session, 30, "检索RAG知识库完成", f"参考内容长度: {len(rag_context)}")
         
         # 更新任务进度 - 准备大纲生成
-        update_task_progress(task_id, db_session, 30, "准备大纲生成", "构建提示模板")
+        update_task_progress(task_id, db_session, 35, "准备大纲生成", "构建提示模板")
         
         try:
             # 构建提示模板
@@ -1665,45 +1668,8 @@ class OutlineGenerator:
         
         # 生成段落内容
         logger.info(f"生成段落内容 [标题='{title}', 级别={level}, ID={paragraph.id}]")
-        content = self._generate_paragraph_content_with_context(
-            article_title=article_title,
-            paragraph=paragraph,
-            sub_titles=sub_titles,
-            count_style=count_style,
-            rag_context=rag_context,
-            outline_content=outline_content,
-            user_prompt=user_prompt,
-            context_info=context_info,
-            max_length=max_length
-        )
-        
-        # 检查生成的内容与已有内容的相似度
-        content_too_similar = False
-        similar_content = None
-        similar_title = None
-        
-        for pid, content_info in global_context["generated_contents"].items():
-            if pid != paragraph.id:  # 不与自己比较
-                existing_content = content_info.get("content", "")
-                existing_title = content_info.get("title", "")
-                
-                # 计算内容相似度
-                similarity = self._paragraph_similarity(content, existing_content)
-                
-                if similarity > 0.7:  # 相似度阈值
-                    content_too_similar = True
-                    similar_content = existing_content
-                    similar_title = existing_title
-                    logger.warning(f"生成的内容与已有内容 '{existing_title}' 相似度过高 ({similarity:.2f})，尝试重新生成")
-                    break
-        
-        # 如果内容相似度过高，尝试重新生成
-        if content_too_similar and similar_title:
-            # 更新上下文，明确指出需要避免与哪个章节重复
-            context_info["duplicate_warning"] = f"请确保生成的内容与已生成的章节不重复，特别是避免与 '{similar_title}' 章节内容重复。生成的内容必须是独特的，不能包含与其他章节相同的段落或观点。"
-            
-            # 重新生成内容
-            logger.info(f"重新生成段落内容 [标题='{title}', 级别={level}, ID={paragraph.id}]")
+
+        if description:
             content = self._generate_paragraph_content_with_context(
                 article_title=article_title,
                 paragraph=paragraph,
@@ -1715,7 +1681,49 @@ class OutlineGenerator:
                 context_info=context_info,
                 max_length=max_length
             )
-        
+            
+            # 检查生成的内容与已有内容的相似度
+            content_too_similar = False
+            similar_content = None
+            similar_title = None
+            
+            for pid, content_info in global_context["generated_contents"].items():
+                if pid != paragraph.id:  # 不与自己比较
+                    existing_content = content_info.get("content", "")
+                    existing_title = content_info.get("title", "")
+                    
+                    # 计算内容相似度
+                    similarity = self._paragraph_similarity(content, existing_content)
+                    
+                    if similarity > 0.7:  # 相似度阈值
+                        content_too_similar = True
+                        similar_content = existing_content
+                        similar_title = existing_title
+                        logger.warning(f"生成的内容与已有内容 '{existing_title}' 相似度过高 ({similarity:.2f})，尝试重新生成")
+                        break
+            
+            # 如果内容相似度过高，尝试重新生成
+            if content_too_similar and similar_title:
+                # 更新上下文，明确指出需要避免与哪个章节重复
+                context_info["duplicate_warning"] = f"请确保生成的内容与已生成的章节不重复，特别是避免与 '{similar_title}' 章节内容重复。生成的内容必须是独特的，不能包含与其他章节相同的段落或观点。"
+                
+                # 重新生成内容
+                logger.info(f"重新生成段落内容 [标题='{title}', 级别={level}, ID={paragraph.id}]")
+                content = self._generate_paragraph_content_with_context(
+                    article_title=article_title,
+                    paragraph=paragraph,
+                    sub_titles=sub_titles,
+                    count_style=count_style,
+                    rag_context=rag_context,
+                    outline_content=outline_content,
+                    user_prompt=user_prompt,
+                    context_info=context_info,
+                    max_length=max_length
+                )
+
+        else:
+            content = ""
+            
         # 提取内容摘要
         content_summary = self._extract_content_summary(content)
         
@@ -2390,29 +2398,111 @@ class OutlineGenerator:
         # 获取RAG上下文
         rag_context = ""
         if kb_ids:
-            rag_start_time = time.time()
-            rag_start_log = f"准备RAG检索，知识库IDs: {kb_ids}，查询问题: '{prompt[:100]}{'...' if len(prompt) > 100 else ''}'"
             logger.info(f"获取RAG上下文 [kb_ids={kb_ids}]")
-            update_task_progress(task_id, db_session, 15, "开始RAG检索", rag_start_log)
+            # 更新任务进度到12%，开始RAG检索
             
+            # 新增：通过LLM生成相关问题
+            question_generation_prompt = f"""
+            深入理解<EOF>和</EOF>之间的原始需求，整理出5个问题，以便从RAG知识库中查询相关参考内容，仅输出问题：
+            <EOF>
+            {prompt}
+            </EOF>
+            """
+            update_task_progress(task_id, db_session, 12, "开始RAG检索", f"使用知识库: {kb_ids}")
+            
+            logger.info("开始生成用于RAG查询的问题")
             try:
+                # 调用LLM生成相关问题
+                question_response = self.llm.invoke(question_generation_prompt)
+                generated_questions = question_response.content.strip().split('\n')
+                
+                # 过滤掉可能包含的序号或空行
+                filtered_questions = []
+                for q in generated_questions:
+                    # 移除序号如"1. ", "1）", "问题1："等
+                    cleaned_q = re.sub(r'^[\d\.\)、：\s]+', '', q.strip())
+                    cleaned_q = re.sub(r'^问题[\d\s]*[:：]?', '', cleaned_q)
+                    if cleaned_q:
+                        filtered_questions.append(cleaned_q)
+                
+                log_msg = f"生成了 {len(filtered_questions)} 个问题用于RAG查询: {filtered_questions}"
+                logger.info(log_msg)
+                update_task_progress(task_id, db_session, 15, "生成RAG查询问题", log_msg)
+                
+                # 依次从RAG中查询每个问题
+                combined_rag_context = ""
+                for i, question in enumerate(filtered_questions):
+                    progress = 15 + int((i / len(filtered_questions)) * 10)
+                    logger.info(f"开始查询问题 {i+1}/{len(filtered_questions)}: {question}")
+                    update_task_progress(task_id, db_session, progress, f"RAG查询问题 {i+1}/{len(filtered_questions)}", f"问题: {question}")
+                    
+                    # 查询RAG获取上下文
+                    question_context = self._get_rag_context(
+                        question=question,
+                        user_id=user_id,
+                        kb_ids=kb_ids,
+                        context_msg=f"查询问题 {i+1}: {question}"
+                    )
+                    
+                    # 如果查询结果不为空，添加到组合上下文中
+                    if question_context.strip():
+                        combined_rag_context += f"\n--- 问题 {i+1}: {question} ---\n{question_context}\n\n"
+                        update_task_progress(task_id, db_session, progress, f"获取问题 {i+1} RAG结果", f"获取到上下文长度: {len(question_context)} 字符")
+                    else:
+                        update_task_progress(task_id, db_session, progress, f"获取问题 {i+1} RAG结果", "未获取到相关上下文")
+                
+                # 使用组合的RAG上下文
+                if combined_rag_context.strip():
+                    rag_context = combined_rag_context
+                    rag_log = f"已组合多个问题的RAG上下文，总长度: {len(rag_context)} 字符"
+                    logger.info(rag_log)
+                    update_task_progress(task_id, db_session, 25, "RAG检索完成", rag_log)
+                else:
+                    # 如果所有问题都没有返回结果，使用默认方式查询
+                    logger.warning("所有生成的问题查询结果为空，使用默认方式查询RAG")
+                    update_task_progress(task_id, db_session, 25, "使用默认方式查询RAG", "生成的问题查询结果为空")
+                    rag_context = self._get_rag_context(
+                        question=prompt,
+                        user_id=user_id,
+                        kb_ids=kb_ids,
+                        context_msg=prompt
+                    )
+                    update_task_progress(task_id, db_session, 27, "默认RAG查询完成", f"获取上下文长度: {len(rag_context)} 字符")
+
+                # 新增：通过百度搜索获取更多信息
+                if self.use_web:
+                    update_task_progress(task_id, db_session, 28, "开始Web搜索", "通过百度搜索补充信息")
+                    web_search_results = []
+                    for i, question in enumerate(filtered_questions[:2]):  # 只对前两个问题进行搜索
+                        logger.info(f"开始通过百度搜索获取问题相关信息: {question}")
+                        update_task_progress(task_id, db_session, 29, f"搜索问题 {i+1}", f"问题: {question}")
+                        
+                        search_results = baidu_search(question)
+                        if search_results:
+                            search_summary = self._summarize_search_results(question, search_results)
+                            rag_context += f"\n--- 百度搜索结果: {question} ---\n{search_summary}\n\n"
+                            web_search_results.append(f"问题 {i+1}: {len(search_summary)} 字符")
+                            logger.info(f"已将搜索结果添加到RAG上下文中")
+                    
+                    if web_search_results:
+                        update_task_progress(task_id, db_session, 30, "Web搜索完成", f"获取搜索结果: {', '.join(web_search_results)}")
+            except Exception as e:
+                error_msg = f"生成问题或查询RAG时出错: {str(e)}"
+                logger.error(error_msg)
+                update_task_progress(task_id, db_session, 30, "RAG查询过程出错", error_msg)
+                # 出错时使用默认方式查询
                 rag_context = self._get_rag_context(
                     question=prompt,
                     user_id=user_id,
                     kb_ids=kb_ids,
                     context_msg=prompt
                 )
-                rag_time = time.time() - rag_start_time
-                rag_complete_log = f"RAG检索完成，用时: {rag_time:.2f}秒, 获取上下文长度: {len(rag_context)} 字符"
-                logger.info(rag_complete_log)
-                update_task_progress(task_id, db_session, 25, "RAG检索完成", rag_complete_log)
-            except Exception as e:
-                rag_error = f"RAG检索出错: {str(e)}"
-                logger.error(rag_error)
-                update_task_progress(task_id, db_session, 25, "RAG检索失败", rag_error)
+                update_task_progress(task_id, db_session, 32, "使用替代方式完成RAG查询", f"获取上下文长度: {len(rag_context)} 字符")
+            
+            logger.info(f"RAG上下文长度: {len(rag_context)} 字符")
         else:
             # 没有RAG检索
-            update_task_progress(task_id, db_session, 25, "准备生成内容", "不使用RAG检索")
+            update_task_progress(task_id, db_session, 30, "准备生成内容", "不使用RAG检索")
         
         # 更新文档标题和初始HTML（如果提供了文档ID）
         if doc_id:
