@@ -491,7 +491,7 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
                         kb_ids.extend([kb.kb_id for kb in department_kbs])
             
             # 生成大纲
-            outline_data = await _generate_outline(outline_generator, prompt, file_contents, user_id, kb_ids)
+            outline_data = await _generate_outline(outline_generator, prompt, file_contents, user_id, kb_ids, task_id, db)
             
             # 保存大纲并更新消息
             outline_id = await _save_outline_and_update_message(
@@ -519,11 +519,13 @@ async def _generate_outline(
     prompt: str,
     file_contents: List[str],
     user_id: Optional[str] = None,
-    kb_ids: Optional[List[str]] = None
+    kb_ids: Optional[List[str]] = None,
+    task_id: Optional[str] = None,
+    db_session = None
 ) -> Dict[str, Any]:
     """生成大纲"""
     logger.info("开始生成结构化大纲")
-    outline_data = outline_generator.generate_outline(prompt, file_contents, user_id, kb_ids)
+    outline_data = outline_generator.generate_outline(prompt, file_contents, user_id, kb_ids, task_id, db_session)
     logger.info("结构化大纲生成完成")
     return outline_data
 
