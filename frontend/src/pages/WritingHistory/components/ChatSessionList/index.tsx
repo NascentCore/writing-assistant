@@ -36,6 +36,9 @@ interface SessionDetailResponse {
     task_result: string | null;
     document_id: string;
     outline_id: string;
+    process?: number;
+    process_detail_info?: string;
+    log?: string;
     files?: {
       file_id: string;
       name: string;
@@ -59,6 +62,9 @@ interface TaskDetailResponse {
   updated_at: string;
   result: any;
   error: string | null;
+  process?: number; // 任务进度百分比
+  process_detail_info?: string; // 任务进度详细信息
+  log?: string; // 任务日志
 }
 
 export interface ChatMessage {
@@ -80,10 +86,24 @@ export interface ChatMessage {
     status: number;
     created_at: string;
   }[];
+  process?: number; // 任务进度百分比
+  process_detail_info?: string; // 任务进度详细信息
+  log?: string; // 任务日志
 }
 
 interface ChatSessionListProps {
-  onSessionChange: (sessionId: string, messages: ChatMessage[]) => void;
+  onSessionChange: (
+    sessionId: string,
+    messages: ChatMessage[],
+    update?: {
+      isProgressUpdate: boolean;
+      taskId: string;
+      progress?: number;
+      status: string;
+      log?: string;
+      process_detail_info?: string;
+    },
+  ) => void;
   onCreateNewSession: () => void;
   activeSessionId: string | null;
   defaultMessage: ChatMessage;
@@ -284,6 +304,11 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
               document_id: msg.document_id,
               content_type: msg.content_type,
               outline_id: msg.outline_id,
+              // 如果是助手角色，且含有任务进度信息，则加入进度信息
+              process: msg.role === 'assistant' ? msg.process : undefined,
+              process_detail_info:
+                msg.role === 'assistant' ? msg.process_detail_info : undefined,
+              log: msg.role === 'assistant' ? msg.log : undefined,
             }));
 
           // 如果没有消息，显示默认消息
@@ -316,6 +341,38 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
         if (response) {
           console.log('任务状态:', response.status);
 
+          // 如果存在进度信息，更新会话UI
+          if (
+            response.status === 'processing' ||
+            response.status === 'pending'
+          ) {
+            // 处理中的任务，直接更新现有消息的进度信息，不重新获取会话详情
+            // 查找当前会话中最后一条助手消息
+            const updatedMessage: ChatMessage = {
+              key: `task-${taskId}`,
+              placement: 'start',
+              content: response.process_detail_info || '正在处理中...',
+              avatarType: 'assistant',
+              loading: true,
+              status: response.status,
+              process: response.process,
+              process_detail_info: response.process_detail_info,
+              log: response.log,
+            };
+
+            // 通知父组件更新消息
+            // 这里不再请求会话详情，而是直接传递更新的消息和任务ID
+            // 父组件需要负责在现有消息列表中查找和更新相应的消息
+            onSessionChange(sessionId, [updatedMessage], {
+              isProgressUpdate: true,
+              taskId: taskId,
+              progress: response.process || 0,
+              status: response.status,
+              log: response.log || '',
+              process_detail_info: response.process_detail_info || '',
+            });
+          }
+
           // 如果任务状态不是处理中，停止轮询并重新加载会话详情
           if (
             response.status !== 'processing' &&
@@ -335,7 +392,8 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
               history.push(`/WritingHistory?id=${sessionId}`);
             }
 
-            // 重新加载会话详情
+            // 只有当任务状态变为completed或failed时，才重新加载会话详情
+            // 这样可以获取最终的结果
             loadSessionDetail(sessionId);
 
             // 如果任务失败，显示错误消息
@@ -363,6 +421,7 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
       setTaskPollingInterval,
       history,
       setPollingTaskId,
+      onSessionChange,
     ],
   );
 

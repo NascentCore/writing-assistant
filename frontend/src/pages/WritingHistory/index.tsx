@@ -26,6 +26,46 @@ import styles from './index.module.less';
 
 const md = markdownit({ html: true, breaks: true });
 
+// 添加日志容器组件，优化滚动功能
+const LogContainer = React.memo(({ log }: { log: string }) => {
+  const logRef = useRef<HTMLDivElement>(null);
+
+  // 当日志内容变化时滚动到底部
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [log]);
+
+  return (
+    <div
+      ref={logRef}
+      style={{
+        marginTop: 10,
+        padding: 8,
+        background: '#f5f5f5',
+        borderRadius: 4,
+        maxHeight: 200,
+        overflow: 'auto',
+        fontSize: 12,
+        whiteSpace: 'pre-line',
+        fontFamily: 'monospace',
+        color: '#333',
+      }}
+    >
+      <div
+        style={{
+          fontWeight: 'bold',
+          marginBottom: 5,
+        }}
+      >
+        执行日志：
+      </div>
+      {log}
+    </div>
+  );
+});
+
 const MODEL_STORAGE_KEY = 'ai_chat_model';
 
 // 定义模型接口类型
@@ -251,22 +291,82 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
 
   // 处理会话切换，确保切换会话后也滚动到底部
   const handleSessionChange = useCallback(
-    (sessionId: string, sessionMessages: ChatMessage[]) => {
-      setActiveSessionId(sessionId);
-      setMessages(sessionMessages);
+    (
+      sessionId: string,
+      sessionMessages: ChatMessage[],
+      update?: {
+        isProgressUpdate: boolean;
+        taskId: string;
+        progress?: number;
+        status: string;
+        log?: string;
+        process_detail_info?: string;
+      },
+    ) => {
+      // 如果收到的是进度更新信息
+      if (update && update.isProgressUpdate) {
+        // 更新现有消息列表中的任务状态，而不是替换整个消息列表
+        setMessages((prevMessages) => {
+          // 查找需要更新的任务消息
+          const newMessages = [...prevMessages];
+          let foundMessage = false;
 
-      // 使用 requestAnimationFrame 确保在DOM更新后再滚动
-      // 延迟稍微长一点，确保内容已完全渲染
-      setTimeout(() => {
-        requestAnimationFrame(() => {
+          // 查找并更新处于processing或pending状态的助手消息
+          for (let i = newMessages.length - 1; i >= 0; i--) {
+            const msg = newMessages[i];
+            if (
+              msg.avatarType === 'assistant' &&
+              (msg.status === 'processing' || msg.status === 'pending')
+            ) {
+              // 更新消息的进度信息
+              newMessages[i] = {
+                ...msg,
+                process: update.progress,
+                process_detail_info:
+                  update.process_detail_info || msg.process_detail_info,
+                log: update.log || msg.log,
+                status: update.status as any,
+              };
+              foundMessage = true;
+              break;
+            }
+          }
+
+          // 如果没有找到相应的消息，则添加一个新消息
+          if (!foundMessage && sessionMessages.length > 0) {
+            newMessages.push(sessionMessages[0]);
+          }
+
+          return newMessages;
+        });
+
+        // 任务状态更新后滚动到底部
+        setTimeout(() => {
           if (scrollContainerRef.current) {
             scrollContainerRef.current.scrollTo({
               top: scrollContainerRef.current.scrollHeight,
-              behavior: 'auto', // 使用 'auto' 实现瞬间滚动
+              behavior: 'smooth',
             });
           }
-        });
-      }, 100);
+        }, 100);
+      } else {
+        // 正常的会话切换，完全替换消息列表
+        setActiveSessionId(sessionId);
+        setMessages(sessionMessages);
+
+        // 使用 requestAnimationFrame 确保在DOM更新后再滚动
+        // 延迟稍微长一点，确保内容已完全渲染
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTo({
+                top: scrollContainerRef.current.scrollHeight,
+                behavior: 'auto', // 使用 'auto' 实现瞬间滚动
+              });
+            }
+          });
+        }, 100);
+      }
     },
     [scrollToBottom],
   );
@@ -639,10 +739,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                           {/* 渲染消息内容 */}
                           <Typography
                             style={{
-                              display:
-                                currentMessage?.avatarType === 'user'
-                                  ? 'block'
-                                  : 'none',
+                              display: 'block',
                             }}
                           >
                             <div
@@ -659,8 +756,53 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                               {currentMessage.status === 'pending' ||
                               currentMessage.status === 'processing' ? (
                                 <Typography.Text type="secondary">
-                                  <span style={{ color: '#1677ff' }}>
+                                  <span
+                                    style={{
+                                      color: '#1677ff',
+                                      display: 'block',
+                                    }}
+                                  >
                                     处理中...
+                                    {currentMessage.process !== undefined && (
+                                      <div style={{ margin: '10px 0' }}>
+                                        <div style={{ marginTop: 5 }}>
+                                          <div
+                                            style={{
+                                              width: '100%',
+                                              background: '#f0f0f0',
+                                              borderRadius: 4,
+                                              height: 8,
+                                              overflow: 'hidden',
+                                            }}
+                                          >
+                                            <div
+                                              style={{
+                                                width: `${currentMessage.process}%`,
+                                                background: '#1677ff',
+                                                height: '100%',
+                                                transition: 'width 0.3s',
+                                              }}
+                                            />
+                                          </div>
+                                          <div
+                                            style={{
+                                              marginTop: 5,
+                                              fontSize: 12,
+                                              color: '#333',
+                                              fontWeight: 'bold',
+                                            }}
+                                          >
+                                            {currentMessage.process}% -{' '}
+                                            {currentMessage.process_detail_info}
+                                          </div>
+                                        </div>
+                                        {currentMessage.log && (
+                                          <LogContainer
+                                            log={currentMessage.log}
+                                          />
+                                        )}
+                                      </div>
+                                    )}
                                   </span>
                                 </Typography.Text>
                               ) : currentMessage.status === 'completed' ? (
@@ -698,10 +840,27 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                       currentMessage={currentMessage}
                                     />
                                   )}
+                                  {currentMessage.log && (
+                                    <LogContainer log={currentMessage.log} />
+                                  )}
                                 </Typography.Text>
                               ) : currentMessage.status === 'failed' ? (
                                 <Typography.Text type="danger">
                                   处理失败: {currentMessage.error || '未知错误'}
+                                  {currentMessage.process !== undefined && (
+                                    <div style={{ marginTop: 5 }}>
+                                      <div>进度: {currentMessage.process}%</div>
+                                      {currentMessage.process_detail_info && (
+                                        <div>
+                                          详情:{' '}
+                                          {currentMessage.process_detail_info}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {currentMessage.log && (
+                                    <LogContainer log={currentMessage.log} />
+                                  )}
                                 </Typography.Text>
                               ) : null}
                             </div>
