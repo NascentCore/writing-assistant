@@ -22,56 +22,61 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    # 添加 sort_index 列
-    op.add_column('sub_paragraphs', sa.Column('sort_index', sa.Integer(), nullable=True, comment="排序索引"))
-    
-    # 获取数据库连接
+    # 获取数据库连接和元数据信息
     connection = op.get_bind()
+    inspector = sa.inspect(connection)
+    columns = [column['name'] for column in inspector.get_columns('sub_paragraphs')]
+    
+    # 只有当 sort_index 列不存在时才添加
+    if 'sort_index' not in columns:
+        op.add_column('sub_paragraphs', sa.Column('sort_index', sa.Integer(), nullable=True, comment="排序索引"))
+    
+    # 获取会话
     session = Session(bind=connection)
     
-    try:
-        # 更新现有数据
-        # 1. 获取所有大纲
-        outlines = connection.execute(
-            text("SELECT id FROM outlines")
-        ).fetchall()
+    # try:
+    #     # 更新现有数据
+    #     # 1. 获取所有大纲
+    #     outlines = connection.execute(
+    #         text("SELECT id FROM outlines")
+    #     ).fetchall()
         
-        for outline in outlines:
-            outline_id = outline[0]
+    #     for outline in outlines:
+    #         outline_id = outline[0]
             
-            # 2. 对每个大纲，按层级处理其段落
-            # 首先处理顶级段落（level = 1）
-            top_level_paragraphs = connection.execute(
-                text("""
-                    SELECT id FROM sub_paragraphs 
-                    WHERE outline_id = :outline_id 
-                    AND parent_id IS NULL 
-                    ORDER BY id
-                """),
-                {"outline_id": outline_id}
-            ).fetchall()
+    #         # 2. 对每个大纲，按层级处理其段落
+    #         # 首先处理顶级段落（level = 1）
+    #         top_level_paragraphs = connection.execute(
+    #             text("""
+    #                 SELECT id FROM sub_paragraphs 
+    #                 WHERE outline_id = :outline_id 
+    #                 AND parent_id IS NULL 
+    #                 ORDER BY id
+    #             """),
+    #             {"outline_id": outline_id}
+    #         ).fetchall()
             
-            # 更新顶级段落的排序
-            for index, para in enumerate(top_level_paragraphs):
-                connection.execute(
-                    text("""
-                        UPDATE sub_paragraphs 
-                        SET sort_index = :sort_index 
-                        WHERE id = :id
-                    """),
-                    {"sort_index": index, "id": para[0]}
-                )
+    #         # 更新顶级段落的排序
+    #         for index, para in enumerate(top_level_paragraphs):
+    #             connection.execute(
+    #                 text("""
+    #                     UPDATE sub_paragraphs 
+    #                     SET sort_index = :sort_index 
+    #                     WHERE id = :id
+    #                 """),
+    #                 {"sort_index": index, "id": para[0]}
+    #             )
                 
-                # 处理该段落的子段落
-                process_children(connection, para[0])
+    #             # 处理该段落的子段落
+    #             process_children(connection, para[0])
         
-        session.commit()
+    #     session.commit()
         
-    except Exception as e:
-        session.rollback()
-        raise e
-    finally:
-        session.close()
+    # except Exception as e:
+    #     session.rollback()
+    #     raise e
+    # finally:
+    #     session.close()
 
 
 def process_children(connection, parent_id):
