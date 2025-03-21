@@ -621,6 +621,7 @@ class OutlineGenerator:
             5. 当用户需要三级或四级目录时，必须在生成的JSON中包含这些级别的段落，不得仅生成两级目录
             """
             
+            
             # 创建提示
             prompt_template = ChatPromptTemplate.from_template(template)
             logger.info("创建提示模板完成")
@@ -1137,13 +1138,16 @@ class OutlineGenerator:
                     prefix = "#" * (level + 2)  # 一级段落使用##，二级段落使用###，依此类推
                     result.append(f"{prefix} {clean_title}")
                     
-                    # 添加描述（如果有）
-                    if p.description:
+                    # 检查是否有子标题
+                    has_children = hasattr(p, 'children') and p.children
+                    
+                    # 添加描述（如果有且没有子标题）
+                    if p.description and not has_children:
                         # 将描述用括号括起来，避免层级结构歧义
                         result.append(f"({p.description})")
                     
                     # 递归处理子段落
-                    if hasattr(p, 'children') and p.children:
+                    if has_children:
                         # 确保子段落按 sort_index 排序
                         sorted_children = sorted(p.children, key=lambda x: x.sort_index if x.sort_index is not None else x.id)
                         result.extend(build_outline_text(sorted_children, level + 1))
@@ -2462,10 +2466,10 @@ class OutlineGenerator:
                     logger.warning("所有生成的问题查询结果为空，使用默认方式查询RAG")
                     update_task_progress(task_id, db_session, 25, "使用默认方式查询RAG", "生成的问题查询结果为空")
                     rag_context = self._get_rag_context(
-                        question=prompt,
+                        question=f"生成关于{outline.title}的文章",
                         user_id=user_id,
                         kb_ids=kb_ids,
-                        context_msg=prompt
+                        context_msg=user_prompt
                     )
                     update_task_progress(task_id, db_session, 27, "默认RAG查询完成", f"获取上下文长度: {len(rag_context)} 字符")
 
@@ -2492,10 +2496,10 @@ class OutlineGenerator:
                 update_task_progress(task_id, db_session, 30, "RAG查询过程出错", error_msg)
                 # 出错时使用默认方式查询
                 rag_context = self._get_rag_context(
-                    question=prompt,
+                    question=f"生成关于{outline.title}的文章",
                     user_id=user_id,
                     kb_ids=kb_ids,
-                    context_msg=prompt
+                    context_msg=user_prompt
                 )
                 update_task_progress(task_id, db_session, 32, "使用替代方式完成RAG查询", f"获取上下文长度: {len(rag_context)} 字符")
             
