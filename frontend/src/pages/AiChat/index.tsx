@@ -49,13 +49,16 @@ interface FileItem {
   created_at: string;
 }
 
+// 添加一个消息计数器
+let messageCounter = 0;
+
 // 用于转换消息格式的辅助函数
 const createMessage = (
   content: string,
   isUser: boolean,
   files?: FileItem[],
 ): ChatMessage => ({
-  key: Date.now().toString(),
+  key: `${Date.now()}-${messageCounter++}`,
   placement: isUser ? 'end' : 'start',
   content,
   avatarType: isUser ? 'user' : 'assistant',
@@ -138,21 +141,19 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     return scrollHeight - scrollTop - clientHeight < 100;
   }, []);
 
-  // 滚动到底部
-  const scrollToBottom = useCallback(
-    (isUserMessage: boolean) => {
-      if (!scrollContainerRef.current) return;
+  const scrollToBottom = useCallback(() => {
+    if (!scrollContainerRef.current) return;
 
-      // 如果是用户消息，或者已经在底部附近，则滚动到底部
-      if (isUserMessage || isNearBottom()) {
+    // 使用 setTimeout 确保在下一个宏任务中执行滚动，给予足够时间让内容渲染
+    setTimeout(() => {
+      if (scrollContainerRef.current) {
         scrollContainerRef.current.scrollTo({
           top: scrollContainerRef.current.scrollHeight,
           behavior: 'smooth',
         });
       }
-    },
-    [isNearBottom],
-  );
+    }, 100);
+  }, []);
 
   // 页面首次加载时滚动到底部
   useEffect(() => {
@@ -189,14 +190,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
 
   // 监听消息变化
   useEffect(() => {
-    // 判断最后一条消息是否是用户发送的
-    const isUserMessage =
-      messages.length > 0 &&
-      messages[messages.length - 1].avatarType === 'user';
-
     // 使用 requestAnimationFrame 确保在DOM更新后再滚动
     requestAnimationFrame(() => {
-      scrollToBottom(isUserMessage);
+      scrollToBottom();
     });
   }, [messages, scrollToBottom]);
 
@@ -297,6 +293,23 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     // 准备请求数据
     let currentSessionId = activeSessionId;
 
+    // 创建一个带有loading状态的助手消息
+    const assistantMessage = createMessage('', false);
+    setMessages((prev: ChatMessage[]) => [
+      ...prev,
+      { ...assistantMessage, loading: true },
+    ]);
+
+    // 在插入loading消息后立即滚动到底部
+    requestAnimationFrame(() => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
+    });
+
     // 如果是第一轮对话（没有活动会话ID），先创建会话
     if (!currentSessionId) {
       try {
@@ -384,16 +397,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
         throw new Error('Stream response not available');
       }
 
-      // 创建一个新的消息对象用于累积内容，不传递文件信息
-      const assistantMessage = createMessage('', false); // 不再传递用户消息中的文件信息
-      setMessages((prev: ChatMessage[]) => [
-        ...prev,
-        {
-          ...assistantMessage,
-          loading: true, // 添加 loading 状态
-        },
-      ]);
-
       // 使用 XStream 处理流式响应
       for await (const chunk of XStream({
         readableStream: response.body,
@@ -413,6 +416,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
             setMessages((prev: ChatMessage[]) => {
               const newMessages = [...prev];
               const lastMessage = newMessages[newMessages.length - 1];
+              // 确保 lastMessage 存在
+              if (!lastMessage) return newMessages;
+
               newMessages[newMessages.length - 1] = {
                 ...lastMessage,
                 content: lastMessage.content + content,
@@ -420,6 +426,16 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
               };
               return newMessages;
             });
+
+            // 使用 setTimeout 延迟滚动，确保内容已渲染
+            setTimeout(() => {
+              if (scrollContainerRef.current) {
+                scrollContainerRef.current.scrollTo({
+                  top: scrollContainerRef.current.scrollHeight,
+                  behavior: 'smooth',
+                });
+              }
+            }, 100);
           }
         } catch (error) {}
       }
