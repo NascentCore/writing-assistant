@@ -1,6 +1,6 @@
 import { fetchWithAuthNew } from '@/utils/fetch';
 import { DeleteOutlined } from '@ant-design/icons';
-import { history, useLocation } from '@umijs/max';
+import { history } from '@umijs/max';
 import { Button, Empty, Spin, Typography, message } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
 import styles from './index.module.less';
@@ -39,6 +39,7 @@ interface SessionDetailResponse {
     process?: number;
     process_detail_info?: string;
     log?: string;
+    task_id?: string;
     files?: {
       file_id: string;
       name: string;
@@ -198,7 +199,6 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
   refreshSessions,
 }) => {
   // 获取当前路由信息
-  const location = useLocation();
 
   // 会话历史相关状态
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -310,6 +310,20 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
                 msg.role === 'assistant' ? msg.process_detail_info : undefined,
               log: msg.role === 'assistant' ? msg.log : undefined,
             }));
+
+          // 检查最后一条消息是否有 task_id
+          const lastMessage = messageList[messageList.length - 1];
+          if (
+            lastMessage &&
+            lastMessage.task_id &&
+            lastMessage.task_status !== 'completed' &&
+            !new URLSearchParams(location.search).get('task_id')
+          ) {
+            // 更新 URL，添加 task_id 参数
+            history.push(
+              `/WritingHistory?id=${sessionId}&task_id=${lastMessage.task_id}`,
+            );
+          }
 
           // 如果没有消息，显示默认消息
           if (chatMessages.length === 0) {
