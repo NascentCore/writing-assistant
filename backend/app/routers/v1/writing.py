@@ -561,6 +561,7 @@ async def _save_outline_and_update_message(
         assistant_message.outline_id = outline_id
         assistant_message.task_status = TaskStatus.COMPLETED.value
         assistant_message.task_result = json_result
+        assistant_message.content = ""
         logger.info(f"更新助手消息为完成状态 [message_id={assistant_message_id}]")
     else:
         # 如果之前的消息不存在，创建新消息
@@ -569,6 +570,7 @@ async def _save_outline_and_update_message(
             session_id=session_id,
             role="assistant",
             content_type=ContentType.OUTLINE,
+            content="",
             outline_id=outline_id,
             task_status=TaskStatus.COMPLETED.value,
             task_id=task_id,

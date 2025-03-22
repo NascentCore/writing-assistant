@@ -648,6 +648,7 @@ class OutlineGenerator:
                 # 验证目录层级是否满足用户要求
                 max_level_found = self._get_max_outline_level(result)
                 if required_level > max_level_found:
+                    
                     logger.warning(f"用户要求{required_level}级目录，但生成的大纲只有{max_level_found}级目录，可能需要手动调整")
                     update_task_progress(task_id, db_session, 90, "大纲层级优化", f"用户要求{required_level}级目录，但生成的大纲只有{max_level_found}级目录")
                 
@@ -1038,12 +1039,16 @@ class OutlineGenerator:
         # 确保每个段落都有描述
         def ensure_descriptions(paragraphs):
             for para in paragraphs:
-                # 如果没有描述，添加一个基于标题的简单描述
-                if not para.get("description"):
+                children = para.get("children", [])
+                
+                # 如果段落有子标题，将描述设为空字符串
+                if children and len(children) > 0:
+                    para["description"] = ""
+                # 如果没有子标题且没有描述，添加一个基于标题的简单描述
+                elif not para.get("description"):
                     para["description"] = f"关于{para.get('title', '此主题')}的详细内容"
                 
                 # 递归处理子段落
-                children = para.get("children", [])
                 if children:
                     ensure_descriptions(children)
         
@@ -1138,16 +1143,13 @@ class OutlineGenerator:
                     prefix = "#" * (level + 2)  # 一级段落使用##，二级段落使用###，依此类推
                     result.append(f"{prefix} {clean_title}")
                     
-                    # 检查是否有子标题
-                    has_children = hasattr(p, 'children') and p.children
-                    
                     # 添加描述（如果有且没有子标题）
-                    if p.description and not has_children:
+                    if p.description: 
                         # 将描述用括号括起来，避免层级结构歧义
                         result.append(f"({p.description})")
                     
                     # 递归处理子段落
-                    if has_children:
+                    if hasattr(p, 'children') and p.children:
                         # 确保子段落按 sort_index 排序
                         sorted_children = sorted(p.children, key=lambda x: x.sort_index if x.sort_index is not None else x.id)
                         result.extend(build_outline_text(sorted_children, level + 1))
