@@ -365,7 +365,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
               });
             }
           });
-        }, 100);
+        }, 300);
       }
     },
     [scrollToBottom],
