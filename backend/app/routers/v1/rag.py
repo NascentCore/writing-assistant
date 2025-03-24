@@ -200,6 +200,8 @@ async def get_files(
         dept_map = {}
         kb_depts = {}
         if category == "system":
+            if current_user.admin != UserRole.SYS_ADMIN:
+                return APIResponse.error(message="没有权限访问系统知识库")
             kb_ids.add(get_system_kb(db))
         elif category == "user":
             kb_ids.add(get_user_kb(current_user, db))
@@ -209,6 +211,8 @@ async def get_files(
             kb_ids.add(get_user_kb(current_user, db))
             kb_ids.add(get_user_shared_kb(db))
         elif category == "department":
+            if current_user.admin != UserRole.DEPT_ADMIN and current_user.admin != UserRole.SYS_ADMIN:
+                return APIResponse.error(message="没有权限访问部门知识库")
             kb_ids.add(get_department_kb(department_id, db))
         elif category == "department_all":
             departments = get_departments(current_user, db)
