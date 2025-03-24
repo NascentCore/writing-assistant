@@ -755,7 +755,8 @@ async def chat(
                         session_id=session_id,
                         question_id=question_message_id,
                         role="assistant",
-                        content=assistant_content
+                        content=assistant_content,
+                        meta=json.dumps({"model_name": request.model_name})
                     )
                     db.add(assistant_message)
                     db.commit()
