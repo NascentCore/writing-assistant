@@ -587,6 +587,7 @@ async def get_chat_session_detail(
                         "outline_id": msg.outline_id if hasattr(msg, 'outline_id') else "",
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
                         "model_name": json.loads(msg.meta).get("model_name", "") if msg.meta else "",
+                        "docs": json.loads(msg.meta).get("docs", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages
@@ -741,11 +742,25 @@ async def chat(
             async def generate():
                 try:
                     assistant_content = ''
+                    docs = []
                     async for chunk in response:
                         if chunk:
                             response_text = chunk.get("response", "")
                             if chunk.get("msg") == "success stream chat":
                                 response_text = ""
+                                retrieval_documents = chunk.get("retrieval_documents", [])
+                                for retrieval_document in retrieval_documents:
+                                    kb_file_id = retrieval_document.get("file_id")
+                                    kb_file = db.query(RagFile).filter(RagFile.kb_file_id == kb_file_id, RagFile.is_deleted == False).first()
+                                    if kb_file:
+                                        docs.append({
+                                            "file_id": kb_file.file_id,
+                                            "file_name": kb_file.file_name,
+                                            "file_path": kb_file.file_path,
+                                            "file_ext": kb_file.file_ext,
+                                            "file_size": kb_file.file_size,
+                                            "content": retrieval_document.get("content", "")
+                                        })
                             new_chunk = {
                                 **chunk,
                                 "choices": [
@@ -761,7 +776,10 @@ async def chat(
                         question_id=question_message_id,
                         role="assistant",
                         content=assistant_content,
-                        meta=json.dumps({"model_name": request.model_name})
+                        meta=json.dumps({
+                            "model_name": request.model_name,
+                            "docs": docs
+                        })
                     )
                     db.add(assistant_message)
                     db.commit()
@@ -788,13 +806,32 @@ async def chat(
                     return APIResponse.error(message="RAG对话返回异常")
                 
                 answer = history[-1][1]
+
+                retrieval_documents = response.get("retrieval_documents", [])
+                docs = []
+                for retrieval_document in retrieval_documents:
+                    kb_file_id = retrieval_document.get("file_id")
+                    kb_file = db.query(RagFile).filter(RagFile.kb_file_id == kb_file_id, RagFile.is_deleted == False).first()
+                    if kb_file:
+                        docs.append({
+                            "file_id": kb_file.file_id,
+                            "file_name": kb_file.file_name,
+                            "file_path": kb_file.file_path,
+                            "file_ext": kb_file.file_ext,
+                            "file_size": kb_file.file_size,
+                            "content": retrieval_document.get("content", "")
+                        })
+
                 assistant_message = ChatMessage(
                     message_id=f"msg-{shortuuid.uuid()}",
                     session_id=session_id,
                     question_id=question_message_id,
                     role="assistant",
                     content=answer,
-                    meta=json.dumps({"model_name": request.model_name})
+                    meta=json.dumps({
+                        "model_name": request.model_name,
+                        "docs": docs
+                    })
                 )
                 db.add(assistant_message)
                 db.commit()
