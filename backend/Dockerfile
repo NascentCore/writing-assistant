@@ -1,4 +1,4 @@
-FROM sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app-backend:c6ca5fb
+FROM sxwl-registry.cn-beijing.cr.aliyuncs.com/sxwl-ai/aieditor-app-backend:662c7c2
 
 WORKDIR /app
 
