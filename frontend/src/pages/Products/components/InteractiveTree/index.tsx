@@ -231,6 +231,20 @@ const InteractiveTree = forwardRef<
                     title: '1.1.1 节',
                     description: '',
                     level: 3,
+                    children: [
+                      {
+                        key: '1-1-1-1',
+                        title: '1.1.1.1 节',
+                        description: '',
+                        level: 4,
+                      },
+                      {
+                        key: '1-1-1-2',
+                        title: '1.1.1.2 节',
+                        description: '',
+                        level: 4,
+                      },
+                    ],
                   },
                   {
                     key: '1-1-2',

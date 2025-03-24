@@ -134,6 +134,7 @@ const Sender = forwardRef<any, SenderProps>(
                   const response = JSON.parse(xhr.responseText);
                   if (response.code !== 200) {
                     onError?.(new Error('上传失败'));
+                    message.error(`${response.message}`);
                     return;
                   }
                   onSuccess?.(response);
@@ -169,7 +170,7 @@ const Sender = forwardRef<any, SenderProps>(
                 return file.status === 'done' && file.response?.code === 200;
               })
               .map((file) => {
-                const fileData = file.response.data[0];
+                const fileData = file.response.data?.[0];
                 return {
                   file_id: fileData.file_id,
                   name: fileData.name || file.name,
