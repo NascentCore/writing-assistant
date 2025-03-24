@@ -106,7 +106,7 @@ async def upload_files(
                 # 计算文件的哈希值
                 file_hash = hashlib.sha256(contents).hexdigest()
                 # 查询文件是否存在
-                existing_file = db.query(RagFile).filter(RagFile.hash == file_hash, 
+                shared_existing_file = db.query(RagFile).filter(RagFile.hash == file_hash, 
                                                          RagFile.kb_type.in_([RagKnowledgeBaseType.SYSTEM, 
                                                                               RagKnowledgeBaseType.USER_SHARED,
                                                                               RagKnowledgeBaseType.DEPARTMENT]), 
@@ -115,7 +115,8 @@ async def upload_files(
                                                                 RagFile.kb_type == RagKnowledgeBaseType.USER, 
                                                                 RagFile.user_id == current_user.user_id, 
                                                                 RagFile.is_deleted == False).first()
-                if existing_file or myself_existing_file:
+                existing_file = shared_existing_file or myself_existing_file
+                if existing_file:
                     logger.warning(f"文件 {file.filename} 已存在, 跳过上传")
                     existing_files.append({
                         "file_id": existing_file.file_id,
@@ -755,7 +756,8 @@ async def chat(
                         session_id=session_id,
                         question_id=question_message_id,
                         role="assistant",
-                        content=assistant_content
+                        content=assistant_content,
+                        meta=json.dumps({"model_name": request.model_name})
                     )
                     db.add(assistant_message)
                     db.commit()
