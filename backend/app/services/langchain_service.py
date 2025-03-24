@@ -484,15 +484,13 @@ class OutlineGenerator:
         
         # 更新任务进度 - 开始
         update_task_progress(task_id, db_session, 10, "开始生成大纲", f"提示词长度: {len(prompt)}字")
-        
-        # 提取用户期望的目录层级
-        required_level = self._extract_required_level_from_prompt(prompt)
-        logger.info(f"用户需要的目录层级: {required_level}级")
-        
-        # 添加层级要求到提示
-        if required_level > 2:
-            level_suffix = f"请确保生成{required_level}级目录结构，而不仅仅是1-2级。"
-            prompt = f"{prompt}\n\n{level_suffix}"
+
+        # 使用LLM提取用户需求
+        user_requirements = self._extract_requirements_with_llm(prompt)
+        required_level = user_requirements.get("required_level", 3)  # 默认为3级
+        word_count = user_requirements.get("word_count")
+        page_count = user_requirements.get("page_count")
+        predefined_chapters = user_requirements.get("predefined_chapters", [])
         
         # 处理文件内容
         file_context = ""
@@ -509,194 +507,55 @@ class OutlineGenerator:
         # 获取RAG搜索结果（如果启用）
         update_task_progress(task_id, db_session, 25, "正在检索RAG知识库")
         rag_context = ""
-        if self.use_rag:
-            rag_prompt = f"关于主题：{prompt}，请提供参考内容"
-            rag_context = self._get_rag_context(
-                question=rag_prompt,
-                user_id=user_id,
-                kb_ids=kb_ids,
-                context_msg="生成大纲"
-            )
+        # if self.use_rag:
+        #     rag_prompt = f"关于主题：{prompt}，请提供参考内容"
+        #     rag_context = self._get_rag_context(
+        #         question=rag_prompt,
+        #         user_id=user_id,
+        #         kb_ids=kb_ids,
+        #         context_msg="生成大纲"
+        #     )
 
-        update_task_progress(task_id, db_session, 30, "检索RAG知识库完成", f"参考内容长度: {len(rag_context)}")
+        update_task_progress(task_id, db_session, 30, "检索RAG知识库完成", f"")
         
         # 更新任务进度 - 准备大纲生成
         update_task_progress(task_id, db_session, 35, "准备大纲生成", "构建提示模板")
         
         try:
-            # 构建提示模板
-            template = """
-            你是一个专业的写作助手，请根据用户的写作需求生成一个结构化的文章大纲。
+            # 获取一级大纲结构
+            first_level_outline = self._generate_first_level_outline(
+                prompt, 
+                file_context, 
+                rag_context, 
+                required_level, 
+                word_count, 
+                page_count,
+                predefined_chapters
+            )
+            if task_id and db_session:
+                update_task_progress(task_id, db_session, 40, "已生成一级大纲，正在处理子章节...")
             
-            【用户需求】
-            {prompt}
+            # 处理子章节
+            complete_outline = self._expand_outline_with_subchapters(
+                first_level_outline, 
+                prompt,
+                file_context,
+                rag_context,
+                required_level,
+                word_count,
+                page_count,
+                task_id,
+                db_session
+            )
             
-            【参考文件】
-            {file_context}
+            # 验证和优化大纲结构
+            self._validate_and_fix_outline(complete_outline)
+            self._optimize_outline_structure(complete_outline)
             
-            【参考资料】
-            {rag_context}
+            # 更新任务进度 - 完成
+            update_task_progress(task_id, db_session, 100, "大纲生成完成", f"大纲包含{len(complete_outline['sub_paragraphs'])}个一级标题")
             
-            【大纲要求】
-            请生成一个包含以下内容的结构化大纲:
-            1. 文章标题
-            2. 多个段落，每个段落可以有不同的级别:
-               - 1级段落: 主要段落，包含标题、描述和篇幅风格(short/medium/long)
-               - 2级及以上段落: 子段落，包含标题和描述，但没有篇幅风格
-               - 必须严格遵循用户对层级数量的要求，如果用户要求三级或四级目录，就必须生成对应层级的目录结构
-               - 最多支持4级目录结构
-            3. 对于方案类文档基本大的框架都是：方案背景（政策背景、行业/技术背景、如果有还可以更多经济背景，但一般起码要有政策背景）、现状与需求分析、建设目标（小篇幅的一般就只有一个建设目标，如果篇幅大的话可能会有总体目标、分阶段小目标等等）、建设方案（包含方案概述、方案技术架构或系统架构及描述、技术原理、方案或系统功能、方案或系统组成、方案清单、）、方案效益、方案总结等等（包含但不限于上述几点内容，根据项目不同会有不同），有时候还需要加上方案依据、方案设计原则等等，你可以在深入理解用户需求的情况下根据方案类型来确定大纲
-            
-            【大纲结构规范】
-            1. 严格禁止在标题或层级标题中使用任何形式的编号，包括但不限于：
-               - 不要使用"第一章"、"第二章"等章节编号
-               - 不要使用"（一）"、"（二）"等中文编号
-               - 不要使用"1."、"2."等数字编号
-               - 不要使用"一、"、"二、"等中文序号
-               - 不要使用"1、"、"2、"等数字序号
-               - 不要使用"①"、"②"等特殊符号编号
-            2. 标题，描述中不能包含参考资料的应用的文件名称
-            3. 确保每个主题只在适当的层级出现一次，避免标题重复
-            4. 使用具体的标题，避免过于宽泛或重复的标题
-            5. 保持清晰的层级关系，相关主题应该放在一起
-            6. 每个主题应该有明确的范围，避免内容重叠
-            7. 如果用户明确要求了三级或四级目录结构，必须创建相应层级的目录，不得仅生成一级和二级目录
-            
-            【避免常见问题】
-            1. 避免在不同层级重复相同的标题
-               - 错误示例: "监测系统" 作为一级标题，然后 "监测系统" 又作为其下的二级标题
-               - 正确示例: "监测系统概述" 作为一级标题，"监测系统组件" 作为二级标题
-            2. 避免过于宽泛的标题
-               - 错误示例: "监测" 作为标题
-               - 正确示例: "地质灾害监测系统" 作为具体标题
-            3. 避免内容重叠
-               - 错误示例: "数据分析" 和 "数据处理" 作为并列标题但内容高度重叠
-               - 正确示例: "数据采集与预处理" 和 "数据分析与可视化" 作为内容明确区分的标题
-            4. 避免生成不符合用户要求的层级结构
-               - 错误示例: 用户要求四级目录，但只生成了两级目录
-               - 正确示例: 根据用户要求，创建包含一级、二级、三级和四级目录的完整结构
-            
-           【返回格式】
-           以JSON格式返回，格式如下:
-            {{
-                "title": "文章标题",
-                "sub_paragraphs": [
-                    {{
-                        "title": "1级段落标题",
-                        "description": "1级段落描述",
-                        "count_style": "short/medium/long",
-                        "level": 1,
-                        "children": [
-                            {{
-                                "title": "2级段落标题",
-                                "description": "2级段落描述",
-                                "level": 2,
-                                "children": [
-                                    {{
-                                        "title": "3级段落标题",
-                                        "description": "3级段落描述",
-                                        "level": 3,
-                                        "children": [
-                                            {{
-                                                "title": "4级段落标题",
-                                                "description": "4级段落描述",
-                                                "level": 4,
-                                                "children": []
-                                            }}
-                                        ]
-                                    }}
-                                ]
-                            }}
-                        ]
-                    }}
-                ]
-            }}
-            
-            【注意事项】
-            确保返回的是有效的JSON格式，不要包含任何注释或额外的文本。
-            1. 只有1级段落才有 count_style 属性
-            2. 所有段落都必须有 level 属性
-            3. 所有段落都必须有 children 数组，即使为空
-            4. 在最终生成的文档中，描述内容将用括号括起来，以区分标题和描述，避免层级结构的歧义
-            5. 当用户需要三级或四级目录时，必须在生成的JSON中包含这些级别的段落，不得仅生成两级目录
-            """
-            
-            
-            # 创建提示
-            prompt_template = ChatPromptTemplate.from_template(template)
-            logger.info("创建提示模板完成")
-            
-            # 创建链
-            chain = prompt_template | self.llm | self.parser
-            logger.info("创建处理链完成")
-            
-            # 更新任务进度 - 发送请求到大模型
-            update_task_progress(task_id, db_session, 50, "正在调用大模型生成大纲", "请耐心等待")
-            
-            # 执行链
-            logger.info("开始执行大模型调用")
-            try:
-                result = chain.invoke({"prompt": prompt, "file_context": file_context, "rag_context": rag_context})
-                logger.info("大模型调用完成")
-                
-                # 更新任务进度 - 大模型响应完成
-                update_task_progress(task_id, db_session, 70, "大模型响应完成", "正在验证大纲结构")
-                
-                # 验证大纲结构，检查是否有重复标题
-                self._validate_and_fix_outline(result)
-                
-                # 验证目录层级是否满足用户要求
-                max_level_found = self._get_max_outline_level(result)
-                if required_level > max_level_found:
-                    
-                    logger.warning(f"用户要求{required_level}级目录，但生成的大纲只有{max_level_found}级目录，可能需要手动调整")
-                    update_task_progress(task_id, db_session, 90, "大纲层级优化", f"用户要求{required_level}级目录，但生成的大纲只有{max_level_found}级目录")
-                
-                # 更新任务进度 - 完成
-                update_task_progress(task_id, db_session, 100, "大纲生成完成", f"大纲包含{len(result['sub_paragraphs'])}个一级标题")
-                
-                return result
-            except Exception as parser_error:
-                logger.error(f"解析大模型输出时出错: {str(parser_error)}")
-                
-                # 更新任务进度 - 解析错误
-                update_task_progress(task_id, db_session, 75, "解析大模型输出时出错", f"错误信息: {str(parser_error)}")
-                
-                # 尝试直接获取大模型的原始输出
-                raw_chain = prompt_template | self.llm
-                raw_output = raw_chain.invoke({"prompt": prompt, "file_context": file_context, "rag_context": rag_context})
-                
-                if hasattr(raw_output, 'content'):
-                    raw_content = raw_output.content
-                    logger.info("获取到大模型原始输出，尝试手动解析")
-                    
-                    # 更新任务进度 - 尝试手动解析
-                    update_task_progress(task_id, db_session, 80, "尝试手动解析大模型输出", "正在清理和修复JSON")
-                    
-                    # 尝试清理和修复JSON
-                    try:
-                        # 移除可能的注释
-                        cleaned_content = re.sub(r'//.*?(\n|$)', '', raw_content)
-                        # 尝试解析JSON
-                        parsed_json = json.loads(cleaned_content)
-                        logger.info("手动解析JSON成功")
-                        
-                        # 验证大纲结构，检查是否有重复标题
-                        self._validate_and_fix_outline(parsed_json)
-                        
-                        # 更新任务进度 - 完成
-                        update_task_progress(task_id, db_session, 100, "大纲生成完成", "通过手动解析JSON成功生成大纲")
-                        
-                        return parsed_json
-                    except Exception as json_error:
-                        logger.error(f"手动解析JSON失败: {str(json_error)}")
-                        # 更新任务进度 - 解析失败
-                        update_task_progress(task_id, db_session, 85, "手动解析JSON失败", f"错误信息: {str(json_error)}")
-                
-                # 如果所有尝试都失败，返回基本结构
-                update_task_progress(task_id, db_session, 90, "所有解析尝试均失败", "返回基本大纲结构")
-                raise ValueError(f"无法解析大模型输出: {str(parser_error)}")
-            
+            return complete_outline
         except Exception as e:
             logger.error(f"生成大纲时出错: {str(e)}")
             # 更新任务进度 - 失败
@@ -715,6 +574,671 @@ class OutlineGenerator:
                     }
                 ]
             }
+        
+    def _extract_requirements_with_llm(self, prompt: str) -> Dict[str, Any]:
+        """使用LLM提取用户需求，包括大纲层级数、字数、页数和预定义章节"""
+        template = """
+        你是一个专业的写作助手，请仔细分析用户的写作需求，提取关键要求信息。
+        
+        【用户需求】
+        {prompt}
+        
+        请分析提取以下信息：
+        1. 大纲层级数要求：用户是否指定了大纲需要多少级（如三级大纲、四级目录等）
+        2. 字数要求：用户是否指定了文章总字数
+        3. 页数要求：用户是否指定了文章总页数
+        4. 预定义章节：用户是否已明确定义了一级大纲或主要章节
+        
+        注意：
+        - 如果用户没有明确指定大纲层级数，默认为3级
+        - 仔细辨别用户提供的一级大纲/章节列表，通常会以列表形式出现
+        - 有些用户会使用"一级标题包括"、"主要章节有"等表述方式定义章节结构
+        
+        【返回格式】
+        以JSON格式返回分析结果，格式如下：
+        {{
+          "required_level": 数字(1-4),
+          "word_count": 数字或null,
+          "page_count": 数字或null,
+          "predefined_chapters": ["章节1", "章节2", ...] 或 []
+        }}
+        
+        仅返回JSON格式内容，不要有其他文字说明。
+        """
+        
+        input_variables = {
+            "prompt": prompt
+        }
+        
+        try:
+            # 调用LLM
+            response = self.llm.invoke(
+                template.format(**input_variables),
+                temperature=0.2,  # 使用较低温度以获得更确定性的结果
+            )
+            
+            # 解析JSON响应
+            try:
+                requirements = json.loads(response.content)
+                # 验证返回值的合法性
+                requirements["required_level"] = int(requirements.get("required_level", 3))
+                if requirements["required_level"] < 1 or requirements["required_level"] > 4:
+                    requirements["required_level"] = 3  # 如果不在合理范围内，使用默认值
+                
+                if "word_count" in requirements and requirements["word_count"] is not None:
+                    requirements["word_count"] = int(requirements["word_count"])
+                
+                if "page_count" in requirements and requirements["page_count"] is not None:
+                    requirements["page_count"] = int(requirements["page_count"])
+                
+                if "predefined_chapters" not in requirements:
+                    requirements["predefined_chapters"] = []
+                    
+                return requirements
+            except (json.JSONDecodeError, ValueError, TypeError):
+                # 如果解析失败，返回默认值
+                logger.error(f"Failed to parse requirements from LLM response: {response}")
+                return {
+                    "required_level": 3,
+                    "word_count": None,
+                    "page_count": None,
+                    "predefined_chapters": []
+                }
+        except Exception as e:
+            logger.error(f"Error calling LLM for requirement extraction: {str(e)}")
+            # 出错时返回默认值
+            return {
+                "required_level": 3,
+                "word_count": None,
+                "page_count": None,
+                "predefined_chapters": []
+            }
+        
+    def _generate_first_level_outline(self, prompt: str, file_context: str, rag_context: str, required_level: int, word_count: Optional[int], page_count: Optional[int], predefined_chapters: List[str] = None) -> Dict[str, Any]:
+        """生成一级大纲结构"""
+        # 检查是否有预定义章节
+        if predefined_chapters and len(predefined_chapters) > 0:
+            # 用户已定义一级大纲，构建初始结构
+            outline_data = {
+                "title": "待定标题",  # 后续更新
+                "sub_paragraphs": []
+            }
+            
+            for chapter_title in predefined_chapters:
+                outline_data["sub_paragraphs"].append({
+                    "title": chapter_title,
+                    "description": "",  # 待LLM补充
+                    "count_style": "medium",  # 默认值，待LLM调整
+                    "level": 1,
+                    "children": []
+                })
+                
+            # 调用LLM补充一级大纲的描述和篇幅风格
+            return self._enhance_first_level_outline(outline_data, prompt, file_context, rag_context)
+        else:
+            # 用户未定义一级大纲，完全由LLM生成
+            template = """
+            你是一个专业的写作助手，请根据用户的写作需求生成一个一级大纲结构。
+            
+            【用户需求】
+            {prompt}
+            
+            【参考文件】
+            {file_context}
+            
+            【参考资料】
+            {rag_context}
+            
+            【大纲要求】
+            请只生成一级大纲(即文章的主要章节)，不要生成子章节:
+            1. 文章标题
+            2. 多个一级段落，每个段落包含:
+               - 标题(不要使用任何编号)
+               - 简短描述
+               - 篇幅风格(short/medium/long)
+            
+            【格式要求】
+            1. 大纲总层级将需要达到{required_level}级
+            2. {word_count_req}
+            3. {page_count_req}
+            4. 严格禁止在标题中使用任何形式的编号
+            
+            【返回格式】
+            以JSON格式返回，格式如下:
+            {{
+                "title": "文章标题",
+                "sub_paragraphs": [
+                    {{
+                        "title": "一级段落标题1",
+                        "description": "段落描述1",
+                        "count_style": "medium",
+                        "level": 1,
+                        "children": []
+                    }},
+                    ...
+                ]
+            }}
+            """
+            
+            word_count_req = f"文章总字数约为{word_count}字" if word_count else ""
+            page_count_req = f"文章总页数约为{page_count}页" if page_count else ""
+            
+            # 构建提示
+            input_variables = {
+                "prompt": prompt,
+                "file_context": file_context,
+                "rag_context": rag_context,
+                "required_level": required_level,
+                "word_count_req": word_count_req,
+                "page_count_req": page_count_req
+            }
+
+            try:
+                # 调用LLM
+                response = self.llm.invoke(
+                    template.format(**input_variables),
+                    temperature=0.5,
+                )
+
+                content = response.content
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+
+                return json.loads(content)
+            except Exception as e:
+                logger.error(f"Error calling LLM for outline enhancement: {str(e)}")
+                return {}
+
+
+    def _enhance_first_level_outline(self, outline_data: Dict[str, Any], prompt: str, file_context: str, rag_context: str) -> Dict[str, Any]:
+        """为预定义的一级大纲补充描述和篇幅风格"""
+        template = """
+        你是一个专业的写作助手，用户已经定义了文章的一级大纲结构，请为每个章节补充恰当的描述和篇幅风格。
+        
+        【用户需求】
+        {prompt}
+        
+        【参考文件】
+        {file_context}
+        
+        【参考资料】
+        {rag_context}
+        
+        【已定义的大纲结构】
+        {outline_structure}
+        
+        请为每个章节添加:
+        1. 简短的描述，说明该章节将要讨论的内容
+        2. 篇幅风格(short/medium/long)，根据章节内容的复杂程度和重要性确定
+        3. 并为整篇文章生成一个合适的标题
+        
+        【返回格式】
+        以JSON格式返回完整的一级大纲，格式如下:
+        {{
+            "title": "文章标题",
+            "sub_paragraphs": [
+                {{
+                    "title": "一级段落标题1",
+                    "description": "段落描述1",
+                    "count_style": "medium",
+                    "level": 1,
+                    "children": []
+                }},
+                ...
+            ]
+        }}
+        """
+        
+        # 构建大纲结构描述
+        outline_structure = "文章章节列表:\n"
+        for i, chapter in enumerate(outline_data["sub_paragraphs"]):
+            outline_structure += f"{i+1}. {chapter['title']}\n"
+        
+        input_variables = {
+            "prompt": prompt,
+            "file_context": file_context,
+            "rag_context": rag_context,
+            "outline_structure": outline_structure
+        }
+        
+        try:
+            # 调用LLM
+            response = self.llm.invoke(
+                template.format(**input_variables),
+                temperature=0.5,
+            )
+            
+            # 解析JSON响应
+            try:
+                content = response.content
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+                enhanced_outline = json.loads(content)
+                # 保留原标题，只更新描述和篇幅风格
+                if "sub_paragraphs" in enhanced_outline and len(enhanced_outline["sub_paragraphs"]) > 0:
+                    for i, chapter in enumerate(enhanced_outline["sub_paragraphs"]):
+                        if i < len(outline_data["sub_paragraphs"]):
+                            # 保留原有标题，更新描述和篇幅风格
+                            original_title = outline_data["sub_paragraphs"][i]["title"]
+                            outline_data["sub_paragraphs"][i]["description"] = chapter.get("description", "")
+                            outline_data["sub_paragraphs"][i]["count_style"] = chapter.get("count_style", "medium")
+                
+                # 更新文章标题
+                if "title" in enhanced_outline and enhanced_outline["title"]:
+                    outline_data["title"] = enhanced_outline["title"]
+                    
+                return outline_data
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse enhanced outline from LLM response: {response}")
+                return outline_data
+        except Exception as e:
+            logger.error(f"Error calling LLM for outline enhancement: {str(e)}")
+            return outline_data
+        
+    def _expand_outline_with_subchapters(self, outline_data: Dict[str, Any], prompt: str, file_context: str, rag_context: str, required_level: int, word_count: Optional[int], page_count: Optional[int], task_id: Optional[str], db_session) -> Dict[str, Any]:
+        """为大纲中的每个一级章节生成所有子章节"""
+        first_level_chapters = outline_data["sub_paragraphs"]
+        chapter_count = len(first_level_chapters)
+        
+        # 使用并行处理框架
+        try:
+            import concurrent.futures
+            use_parallel = True
+        except ImportError:
+            use_parallel = False
+            logger.warning("concurrent.futures module not available, falling back to sequential processing")
+        
+        # 防止并发数据库会话访问的锁
+        from threading import Lock
+        db_session_lock = Lock()
+
+        # 创建子章节生成任务函数
+        def generate_chapter_task(index, chapter):
+            if task_id and db_session:
+                with db_session_lock:
+                    try:
+                        progress = 40 + int(50 * (index / chapter_count))
+                        update_task_progress(task_id, db_session, progress, f"正在生成第{index+1}/{chapter_count}个章节的子章节...")
+                    except Exception as e:
+                        logger.error(f"更新任务进度失败: {str(e)}")
+            
+            # 计算本章节字数/页数参考值（按比例分配总量）
+            chapter_word_count = int(word_count / chapter_count) if word_count else None
+            chapter_page_count = max(1, int(page_count / chapter_count)) if page_count else None
+            
+            # 递归生成子章节
+            subchapters = self._generate_subchapters_recursively(
+                prompt, 
+                chapter["title"],
+                chapter["description"],
+                file_context,
+                rag_context,
+                required_level,
+                current_level=1,  # 当前是一级章节
+                chapter_word_count=chapter_word_count,
+                chapter_page_count=chapter_page_count,
+                task_id=task_id,  # 传递task_id用于日志记录
+                chapter_index=index,
+                total_chapters=chapter_count
+            )
+            
+            return index, subchapters
+        
+        # 处理所有一级章节
+        if use_parallel and chapter_count > 1:
+            # 并行处理
+            results = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, chapter_count)) as executor:
+                # 提交所有任务
+                future_to_index = {
+                    executor.submit(generate_chapter_task, i, chapter): i 
+                    for i, chapter in enumerate(first_level_chapters)
+                }
+                
+                # 收集结果
+                for future in concurrent.futures.as_completed(future_to_index):
+                    try:
+                        index, subchapters = future.result()
+                        results[index] = subchapters
+                    except Exception as e:
+                        logger.error(f"Error in chapter generation task: {str(e)}")
+                        # 发生错误时使用备用子章节
+                        index = future_to_index[future]
+                        results[index] = self._create_default_subchapters(first_level_chapters[index]["title"])
+            
+            # 将结果按原始顺序组织回大纲
+            for i in range(chapter_count):
+                if i in results:
+                    first_level_chapters[i]["children"] = results[i]
+                else:
+                    # 如果某个任务没有返回结果，使用备用章节
+                    first_level_chapters[i]["children"] = self._create_default_subchapters(first_level_chapters[i]["title"])
+
+            # 生成完成后，在主线程中更新总进度
+            if task_id and db_session:
+                try:
+                    update_task_progress(task_id, db_session, 90, "子章节生成完成，正在优化大纲结构...")
+                except Exception as e:
+                    logger.error(f"更新任务进度失败: {str(e)}")
+        else:
+            # 顺序处理
+            for i, chapter in enumerate(first_level_chapters):
+                # 直接更新进度，不需要锁
+                if task_id and db_session:
+                    try:
+                        progress = 40 + int(50 * (i / chapter_count))
+                        update_task_progress(task_id, db_session, progress, f"正在生成第{i+1}/{chapter_count}个章节的子章节...")
+                    except Exception as e:
+                        logger.error(f"更新任务进度失败: {str(e)}")
+
+            # 递归生成子章节
+                subchapters = self._generate_subchapters_recursively(
+                    prompt, 
+                    chapter["title"],
+                    chapter["description"],
+                    file_context,
+                    rag_context,
+                    required_level,
+                    current_level=1,
+                    chapter_word_count=int(word_count / chapter_count) if word_count else None,
+                    chapter_page_count=max(1, int(page_count / chapter_count)) if page_count else None,
+                    task_id=task_id,
+                    chapter_index=i,
+                    total_chapters=chapter_count
+                )
+                
+                chapter["children"] = subchapters
+        
+        return outline_data
+    
+    def _generate_subchapters_recursively(
+        self, 
+        prompt: str,
+        chapter_title: str,
+        chapter_description: str,
+        file_context: str, 
+        rag_context: str, 
+        required_level: int, 
+        current_level: int = 1,
+        chapter_word_count: Optional[int] = None, 
+        chapter_page_count: Optional[int] = None,
+        task_id: Optional[str] = None,
+        chapter_index: int = 0,
+        total_chapters: int = 1
+    ) -> List[Dict[str, Any]]:
+        """递归生成章节的子章节"""
+        # 记录日志但不更新数据库
+        if task_id:
+            logger.info(f"生成章节 [{chapter_index+1}/{total_chapters}] '{chapter_title}' 的第{current_level+1}级子章节")
+
+        # 如果已经达到要求的最大层级深度，则无需继续生成子章节
+        if current_level >= required_level:
+            return []
+        
+        # 计算下一级层级
+        next_level = current_level + 1
+        
+        # 构建提示模板
+        template = """
+        你是一个专业的写作助手，请为特定章节生成直接子章节。
+        
+        【章节信息】
+        标题: {chapter_title}
+        描述: {chapter_description}
+        当前层级: {current_level}级
+        需创建: {next_level}级子章节
+        总体要求层级深度: {required_level}级
+        
+        【用户需求】
+        {prompt}
+        
+        【参考信息】
+        {context}
+        
+        【任务要求】
+        1. 仅创建下一级({next_level}级)的子章节，不要生成更深层级
+        2. 生成2-3个子章节，请结合字数、页数要求灵活分配
+        3. 每个子章节必须有明确具体的标题和简短描述
+        4. 标题必须有实质性内容，与父章节紧密相关
+        5. 标题不得包含编号，不要使用"详细内容"等无意义词语
+        
+        【返回格式】
+        仅返回以下JSON格式:
+        [
+          {{
+            "title": "具体明确的子章节标题1",
+            "description": "具体的子章节描述1"
+          }},
+          {{
+            "title": "具体明确的子章节标题2",
+            "description": "具体的子章节描述2"
+          }},
+          // 更多子章节...
+        ]
+        
+        不要有任何额外说明，只返回JSON数组。
+        """
+        
+        # 合并文件和RAG上下文
+        combined_context = ""
+        if file_context:
+            combined_context += "文件参考：" + file_context[:500] + "\n\n"
+        if rag_context:
+            combined_context += "知识库参考：" + rag_context[:500]
+        
+        input_variables = {
+            "chapter_title": chapter_title,
+            "chapter_description": chapter_description,
+            "current_level": current_level,
+            "next_level": next_level,
+            "required_level": required_level,
+            "prompt": prompt,
+            "context": combined_context
+        }
+        
+        try:
+            # 调用LLM
+            response = self.llm.invoke(
+                template.format(**input_variables),
+                temperature=0.7,
+                max_tokens=2500
+            )
+            
+            # 尝试提取和解析JSON
+            try:
+                # 尝试找到并提取JSON部分
+                content = response.content
+                json_match = re.search(r'(\[.*\])', content.replace('\n', ' '), re.DOTALL)
+                if json_match:
+                    content = json_match.group(1)
+                
+                subchapters_raw = json.loads(content)
+                
+                # 验证和处理子章节
+                if not isinstance(subchapters_raw, list) or len(subchapters_raw) == 0:
+                    # 如果不是列表或为空，使用备用生成
+                    return []
+                
+                # 转换为标准格式并递归处理更深层级
+                standard_subchapters = []
+                
+                # 限制子章节数量
+                max_subchapters = min(len(subchapters_raw), 7)  # 最多7个子章节
+                
+                for i in range(max_subchapters):
+                    subchapter = subchapters_raw[i]
+                    
+                    # 验证子章节格式
+                    if not isinstance(subchapter, dict) or "title" not in subchapter:
+                        continue
+                    
+                    # 整理子章节数据
+                    subchapter_title = subchapter.get("title", f"子章节{i+1}")
+                    subchapter_description = subchapter.get("description", "")
+                    
+                    # 跳过无意义的标题
+                    if "详细内容" in subchapter_title or len(subchapter_title) < 3:
+                        continue
+                    
+                    # 创建子章节对象
+                    subchapter_obj = {
+                        "title": subchapter_title,
+                        "description": subchapter_description,
+                        "level": current_level + 1,
+                        "children": []
+                    }
+                    
+                    # 如果当前层级还没达到要求的深度，递归生成更深层级的子章节
+                    if next_level < required_level:
+                        # 计算更深层级子章节的字数/页数（按比例分配）
+                        sub_word_count = int(chapter_word_count / max_subchapters) if chapter_word_count else None
+                        sub_page_count = max(1, int(chapter_page_count / max_subchapters)) if chapter_page_count else None
+                        
+                        # 递归生成更深层级子章节
+                        deeper_subchapters = self._generate_subchapters_recursively(
+                            prompt,
+                            subchapter_title,
+                            subchapter_description,
+                            file_context,
+                            rag_context,
+                            required_level,
+                            next_level,
+                            sub_word_count,
+                            sub_page_count,
+                            task_id,
+                            chapter_index,
+                            total_chapters
+                        )
+                        
+                        subchapter_obj["children"] = deeper_subchapters
+                    
+                    standard_subchapters.append(subchapter_obj)
+                
+                # 确保至少有一些子章节
+                if standard_subchapters:
+                    return standard_subchapters
+                
+            except Exception as e:
+                logger.error(f"Error parsing subchapters: {str(e)}")
+                # 解析失败，使用备用生成
+        
+        except Exception as e:
+            logger.error(f"Error calling LLM for subchapters: {str(e)}")
+            # 调用失败，使用备用生成
+        
+        # 所有尝试失败后，使用备用生成方案
+        return []
+        
+    def _generate_subchapters(self, prompt: str, parent_chapter: Dict[str, Any], chapter_context: str, file_context: str, rag_context: str, required_level: int, current_level: int, chapter_word_count: Optional[int], chapter_page_count: Optional[int]) -> List[Dict[str, Any]]:
+        """生成指定章节的子章节"""
+        # 如果已经达到要求的层级深度，则不需要继续生成
+        if current_level >= required_level:
+            return []
+            
+        template = """
+        你是一个专业的写作助手，请根据用户的写作需求为特定章节生成结构化子章节。
+        
+        【用户需求】
+        {prompt}
+        
+        【章节信息】
+        {chapter_context}
+        
+        【参考文件】
+        {file_context}
+        
+        【参考资料】
+        {rag_context}
+        
+        【子章节要求】
+        1. 为上述章节创建{next_level}级子章节
+        2. 大纲总层级需要达到{required_level}级
+        3. 当前章节深度为{current_level}级，子章节为{next_level}级
+        4. {word_count_req}
+        5. {page_count_req}
+        6. 每个子章节包含:
+           - 标题(不要使用任何编号)
+           - 简短描述
+           - 如果还未达到要求的层级深度，请确保章节结构可以进一步展开
+        
+        【格式要求】
+        1. 严格禁止在标题中使用任何形式的编号
+        2. 确保子章节标题与父章节相关且不重复
+        3. 每个子章节内容应该是父章节的合理细分
+        
+        【返回格式】
+        以JSON数组格式返回子章节列表，格式如下:
+        [
+            {{
+                "title": "子章节标题1",
+                "description": "子章节描述1",
+                "level": {current_level} + 1
+                "children": []
+            }},
+            ...
+        ]
+        """
+        
+        next_level = current_level + 1
+        word_count_req = f"本章节总字数约为{chapter_word_count}字" if chapter_word_count else ""
+        page_count_req = f"本章节总页数约为{chapter_page_count}页" if chapter_page_count else ""
+        
+        # 构建提示
+        input_variables = {
+            "prompt": prompt,
+            "chapter_context": chapter_context,
+            "file_context": file_context,
+            "rag_context": rag_context,
+            "current_level": current_level,
+            "next_level": next_level,
+            "required_level": required_level,
+            "word_count_req": word_count_req,
+            "page_count_req": page_count_req
+        }
+
+        result = self.llm.invoke(template.format(**input_variables))
+        content = result.content
+        # 处理可能的markdown代码块
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+        
+        if not content:
+            logger.warning(f"Empty content after processing LLM response: {result.content}")
+            return []
+        subchapters = json.loads(content)
+        
+        if next_level < required_level:
+            subchapter_count = len(subchapters)
+            for i, subchapter in enumerate(subchapters):
+                # 为每个子章节计算相应的字数/页数
+                subchapter_word_count = int(chapter_word_count / subchapter_count) if chapter_word_count else None
+                subchapter_page_count = max(1, int(chapter_page_count / subchapter_count)) if chapter_page_count else None
+                
+                # 构建子章节上下文
+                subchapter_context = f"{chapter_context} 这是其中的第{i+1}个子章节，标题为: {subchapter['title']}，描述为: {subchapter['description']}。"
+                
+                # 递归生成更深层级的子章节
+                sub_subchapters = self._generate_subchapters(
+                    prompt,
+                    subchapter,
+                    subchapter_context,
+                    file_context,
+                    rag_context,
+                    required_level,
+                    next_level,
+                    subchapter_word_count,
+                    subchapter_page_count
+                )
+                
+                subchapter["children"] = sub_subchapters
+                
+        return subchapters
 
     def _validate_and_fix_outline(self, outline_data: Dict[str, Any]) -> None:
         """
@@ -876,39 +1400,70 @@ class OutlineGenerator:
         
     def _extract_required_level_from_prompt(self, prompt: str) -> int:
         """
-        从用户提示中提取所需的目录层级数量
+        通过 LLM 提取用户提示中的目录层级要求和字数要求
         
         Args:
             prompt: 用户提示
             
         Returns:
-            int: 要求的层级数，默认为2
+            dict: 包含层级要求和字数要求的字典，如 {"level": 3, "word_count": 2000}
         """
         if not prompt:
-            return 2
+            return {"level": 2, "word_count": None}
             
-        # 常见的层级表达
-        level_patterns = [
-            r'([三四五]级|[3-5]\s*级)(标题|目录|大纲)',
-            r'(标题|目录|大纲)([三四五]级|[3-5]\s*级)',
-            r'([3-5])[\s-]*level',
-            r'level[\s-]*([3-5])'
-        ]
+        # 构建提示词让 LLM 分析用户需求
+        analysis_prompt = f"""
+        请分析以下用户提示，提取出关于文章大纲结构的具体要求：
+        1. 大纲层级要求（默认为2级，如有明确要求请指出具体层级数字）
+        2. 文章总字数要求（如有明确要求请提供具体数字）
+        3. 文章页数要求（如有明确要求请提供具体数字）
         
-        for pattern in level_patterns:
-            matches = re.findall(pattern, prompt, re.IGNORECASE)
-            if matches:
-                for match in matches:
-                    # 可能是元组或字符串
-                    level_text = match[0] if isinstance(match, tuple) else match
-                    if '三' in level_text or '3' in level_text:
-                        return 3
-                    elif '四' in level_text or '4' in level_text:
-                        return 4
-                    elif '五' in level_text or '5' in level_text:
-                        return 5
+        仅返回 JSON 格式结果，包含 level（整数）、word_count（整数或 null）和 page_count（整数或 null）字段。
         
-        return 2  # 默认为2级目录
+        用户提示: {prompt}
+        """
+        
+        try:
+            # 调用 LLM 获取分析结果
+            response = self.llm.invoke(analysis_prompt)
+            
+            # 尝试解析结果为 JSON
+            import json
+            import re
+            
+            response_text = response.content if hasattr(response, 'content') else str(response)
+            # 尝试从响应中提取 JSON 部分
+            json_match = re.search(r'(\{.*?\})', response_text.replace('\n', ' '), re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group(1))
+            else:
+                # 如果找不到 JSON，采用保守的默认值
+                result = {"level": 2, "word_count": None, "page_count": None}
+                
+            # 确保结果包含必要的字段
+            if "level" not in result:
+                result["level"] = 2
+            if "word_count" not in result:
+                result["word_count"] = None
+            if "page_count" not in result:
+                result["page_count"] = None
+                
+            # 如果有页数要求但没有字数要求，则将页数转换为字数（每页800字）
+            if result["page_count"] and (result["word_count"] is None or result["word_count"] == 0):
+                try:
+                    page_count = float(result["page_count"])
+                    result["word_count"] = int(page_count * 800)
+                    logger.info(f"基于页数要求({page_count}页)换算字数要求为{result['word_count']}字")
+                except (ValueError, TypeError):
+                    logger.warning(f"页数转换失败: {result['page_count']}")
+                    
+            logger.info(f"从用户提示中提取的要求: 层级={result['level']}, 字数={result['word_count']}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"提取用户要求时出错: {str(e)}")
+            # 出错时返回默认值
+            return {"level": 2, "word_count": None}
 
     def save_outline_to_db(self, outline_data: Dict[str, Any], db_session, outline_id: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
