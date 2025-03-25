@@ -327,7 +327,7 @@ async def get_departments(
 @router.get("/departments/{department_id}", summary="获取部门信息")
 async def get_department_info(
     department_id: str,
-    user_name: Optional[str] = Query(None, description="根据用户名过滤", example="张三"),
+    username: Optional[str] = Query(None, description="根据用户名过滤", example="张三"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -351,8 +351,8 @@ async def get_department_info(
         user_depts = []
 
     user_query = db.query(User).filter(User.user_id.in_([user_dept.user_id for user_dept in user_depts]))
-    if user_name:
-        user_query = user_query.filter(User.username.contains(user_name))
+    if username:
+        user_query = user_query.filter(User.username.contains(username))
     users = user_query.all()
     if not users:
         users = []
@@ -489,7 +489,7 @@ async def remove_user_department(
 @router.get("/users", summary="获取用户列表")
 async def get_users(
     filter: Optional[str] = Query("no_departments", description="过滤条件", example="no_departments", enum=["no_departments"]),
-    user_name: Optional[str] = Query(None, description="根据用户名过滤", example="张三"),
+    username: Optional[str] = Query(None, description="根据用户名过滤", example="张三"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, gt=0, description="每页记录数"),
     current_user: User = Depends(get_current_user),
@@ -505,8 +505,8 @@ async def get_users(
         if filter == "no_departments":
             query = query.outerjoin(UserDepartment, User.user_id == UserDepartment.user_id).filter(UserDepartment.user_id == None)
 
-        if user_name:
-            query = query.filter(User.username.contains(user_name))
+        if username:
+            query = query.filter(User.username.contains(username))
 
         # 计算分页的偏移量
         offset = (page - 1) * page_size
