@@ -587,7 +587,7 @@ async def get_chat_session_detail(
                         "outline_id": msg.outline_id if hasattr(msg, 'outline_id') else "",
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
                         "model_name": json.loads(msg.meta).get("model_name", "") if msg.meta else "",
-                        "docs": json.loads(msg.meta).get("docs", []) if msg.meta else [],
+                        "reference_files": json.loads(msg.meta).get("reference_files", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages
@@ -778,7 +778,7 @@ async def chat(
                         content=assistant_content,
                         meta=json.dumps({
                             "model_name": request.model_name,
-                            "docs": docs
+                            "reference_files": docs
                         })
                     )
                     db.add(assistant_message)
@@ -830,7 +830,7 @@ async def chat(
                     content=answer,
                     meta=json.dumps({
                         "model_name": request.model_name,
-                        "docs": docs
+                        "reference_files": docs
                     })
                 )
                 db.add(assistant_message)
