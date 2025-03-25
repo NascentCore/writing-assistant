@@ -13,3 +13,9 @@ def get_departments(user: User, db: Session) -> List[Department]:
         return db.query(Department).filter(Department.department_id.in_(department_ids)).all()
     else:
         return []
+
+def get_all_departments(user: User, db: Session) -> List[Department]:
+    """
+    获取所有部门列表
+    """
+    return db.query(Department).all()

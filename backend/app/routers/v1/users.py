@@ -332,12 +332,21 @@ async def get_department_info(
     db: Session = Depends(get_db)
 ):
     """获取部门信息"""
-    if current_user.admin != UserRole.SYS_ADMIN:
+    if current_user.admin == UserRole.USER:
         return APIResponse.error(message="无权限访问")
 
     department = db.query(Department).filter(Department.department_id == department_id).first()
     if not department:
         return APIResponse.error(message="部门不存在")
+
+    # 检查部门是否属于当前用户
+    if current_user.admin == UserRole.DEPT_ADMIN:
+        user_dept = db.query(UserDepartment).filter(
+            UserDepartment.user_id == current_user.user_id,
+            UserDepartment.department_id == department_id
+        ).first()
+        if not user_dept:
+            return APIResponse.error(message="无权限访问")
 
     # 获取部门知识库
     knowledge_base = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_id == department.department_id, 
