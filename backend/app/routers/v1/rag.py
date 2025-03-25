@@ -19,7 +19,7 @@ from app.models.chat import ChatSession, ChatMessage, ChatSessionType
 from app.rag.parser import convert_doc_to_docx, get_parser, get_file_format
 from app.rag.rag_api_async import rag_api_async
 from app.rag.kb import ensure_user_knowledge_base, get_department_kb, get_department_kbs, get_knowledge_base, get_system_kb, get_user_kb, get_user_shared_kb, has_permission_to_file, has_permission_to_kb
-from app.rag.department import get_departments
+from app.rag.department import get_all_departments, get_departments
 from app.schemas.response import APIResponse, PaginationData, PaginationResponse
 from app.models.task import Task, TaskStatus
 from app.models.document import Document
@@ -215,7 +215,11 @@ async def get_files(
                 return APIResponse.error(message="没有权限访问部门知识库")
             kb_ids.add(get_department_kb(department_id, db))
         elif category == "department_all":
-            departments = get_departments(current_user, db)
+            departments = []
+            if current_user.admin == UserRole.SYS_ADMIN:
+                departments = get_all_departments(current_user, db)
+            else:
+                departments = get_departments(current_user, db)
             dept_map = {dept.department_id: dept for dept in departments}
             dept_kb_ids, kb_dept_map = get_department_kbs([dept.department_id for dept in departments], db)
             kb_ids.update(dept_kb_ids)
