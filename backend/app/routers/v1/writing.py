@@ -32,7 +32,7 @@ from app.models.outline import (
     generate_uuid
 )
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType, ContentType
-from app.config import Settings
+from app.config import Settings, settings
 from app.parser import DocxParser, MarkdownParser
 from app.auth import get_current_user
 from app.models.user import User
@@ -1269,7 +1269,7 @@ async def _prepare_generation_resources(db: Session, task_id: str, file_ids: Lis
     for file_id in file_ids:
         file = db.query(RagFile).filter(RagFile.file_id == file_id, RagFile.is_deleted == False).first()
         if file and file.content:
-            file_contents.append(file.content[:Settings.RAG_CHAT_PER_FILE_MAX_LENGTH])
+            file_contents.append(file.content[:settings.RAG_CHAT_PER_FILE_MAX_LENGTH])
             logger.info(f"加载参考文件内容 [file_id={file_id}]")
     
     return user_id, file_contents
