@@ -39,9 +39,19 @@ export const routes = [
     component: './SystemKnowledge',
   },
   {
+    name: '部门知识库',
+    path: '/DepartKnowledge',
+    component: './DepartKnowledge',
+  },
+  {
     name: '个人知识库',
     path: '/PersonalKnowledge',
     component: './PersonalKnowledge',
+  },
+  {
+    name: '部门管理',
+    path: '/DepartManage',
+    component: './DepartManage',
   },
   {
     name: '知识库检索',

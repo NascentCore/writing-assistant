@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons';
 import { Attachments, XProvider, Sender as XSender } from '@ant-design/x';
 import { history } from '@umijs/max';
-import { Badge, Button, Flex, GetRef, Select, message } from 'antd';
+import { Badge, Button, Flex, GetRef, Select, Switch, message } from 'antd';
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import styles from './Sender.module.less';
 
@@ -54,6 +54,16 @@ const Sender = forwardRef<any, SenderProps>(
     const [selectedOutlineId, setSelectedOutlineId] = useState<number | null>(
       initialOutlineId || null,
     );
+    const [saveToKb, setSaveToKb] = useState<boolean>(() => {
+      const saved = localStorage.getItem('ai_save_to_kb');
+      return saved ? saved === 'true' : true;
+    });
+    console.log('saveToKb', saveToKb);
+
+    const [webSearch, setWebSearch] = useState<boolean>(() => {
+      const saved = localStorage.getItem('ai_web_search');
+      return saved ? saved === 'true' : true;
+    });
 
     const attachmentsRef = useRef<GetRef<typeof Attachments>>(null);
     const senderRef = useRef<GetRef<typeof XSender>>(null);
@@ -114,6 +124,8 @@ const Sender = forwardRef<any, SenderProps>(
           customRequest={({ file, onSuccess, onError, onProgress }) => {
             const formData = new FormData();
             formData.append('files', file);
+            formData.append('save_to_kb', saveToKb.toString());
+
             const xhr = new XMLHttpRequest();
             xhr.open('POST', `${API_BASE_URL}/api/v1/rag/attachments`);
             xhr.setRequestHeader(
@@ -222,12 +234,19 @@ const Sender = forwardRef<any, SenderProps>(
       if (!value.trim()) return;
 
       try {
+        // 根据has_steps选择不同的API路径
+        const apiPath = has_steps
+          ? '/api/v1/writing/outlines/generate'
+          : '/api/v1/writing/content/generate';
+
         // 构建请求数据
         const requestData: {
           model_name: string;
           file_ids: string[];
           prompt: string;
           outline_id?: number;
+          save_to_kb: boolean;
+          web_search?: boolean;
         } = {
           model_name: selectedModel,
           file_ids: selectedFiles
@@ -239,7 +258,13 @@ const Sender = forwardRef<any, SenderProps>(
             )
             .map((file) => file.file_id),
           prompt: value,
+          save_to_kb: saveToKb,
         };
+
+        // 如果是内容生成接口，添加web_search参数
+        if (apiPath === '/api/v1/writing/content/generate') {
+          requestData.web_search = webSearch;
+        }
 
         // 如果选择了大纲，添加到请求数据中
         if (selectedOutlineId) {
@@ -254,11 +279,6 @@ const Sender = forwardRef<any, SenderProps>(
         setOpen(false);
         setSelectedFiles([]);
         setItems([]);
-
-        // 根据has_steps选择不同的API路径
-        const apiPath = has_steps
-          ? '/api/v1/writing/outlines/generate'
-          : '/api/v1/writing/content/generate';
 
         // 发送请求
         const response = await fetchWithAuthNew(apiPath, {
@@ -299,9 +319,7 @@ const Sender = forwardRef<any, SenderProps>(
                 style={{ display: 'flex', alignItems: 'center', gap: '16px' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <div style={{ fontSize: '16px', fontWeight: 500 }}>
-                    模型：
-                  </div>
+                  <div style={{ fontSize: '16px' }}>模型：</div>
                   <Select
                     size="small"
                     value={handleSelectedModel(selectedModel)}
@@ -319,6 +337,44 @@ const Sender = forwardRef<any, SenderProps>(
                       </Select.Option>
                     ))}
                   </Select>
+                  <div
+                    style={{
+                      marginLeft: 20,
+                      fontSize: '16px',
+                      display: 'none',
+                    }}
+                  >
+                    同步到个人知识库：
+                  </div>
+                  <Switch
+                    style={{ display: 'none' }}
+                    checked={saveToKb}
+                    onChange={(checked) => {
+                      setSaveToKb(checked);
+                      localStorage.setItem('ai_save_to_kb', checked.toString());
+                    }}
+                    checkedChildren="开启"
+                    unCheckedChildren="关闭"
+                  />
+                  <div
+                    style={{
+                      marginLeft: 20,
+                      fontSize: '16px',
+                      display: 'none',
+                    }}
+                  >
+                    联网搜索：
+                  </div>
+                  <Switch
+                    style={{ display: 'none' }}
+                    checked={webSearch}
+                    onChange={(checked) => {
+                      setWebSearch(checked);
+                      localStorage.setItem('ai_web_search', checked.toString());
+                    }}
+                    checkedChildren="开启"
+                    unCheckedChildren="关闭"
+                  />
                 </div>
 
                 {outlines && outlines.length > 0 && (

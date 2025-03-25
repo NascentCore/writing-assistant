@@ -268,7 +268,7 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
           }
         } else {
           // 如果响应为空，显示默认消息
-          onSessionChange(sessionId, [defaultMessage]);
+          // onSessionChange(sessionId, [defaultMessage]);
         }
       } catch (error) {
         console.error('加载会话消息失败', error);

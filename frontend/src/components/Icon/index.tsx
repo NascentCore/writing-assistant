@@ -41,8 +41,11 @@ import { ReactComponent as ImageView } from './assets/icon_view_artwork.svg';
 
 import { ReactComponent as AIChat } from './assets/icon_ai_chat.svg';
 import { ReactComponent as Close } from './assets/icon_close.svg';
+import { ReactComponent as DepartKn } from './assets/icon_depart_kn.svg';
+import { ReactComponent as DepartMana } from './assets/icon_depart_manage.svg';
 import { ReactComponent as Down } from './assets/icon_down.svg';
 import { ReactComponent as PreviewClose } from './assets/icon_form_preview_close.svg';
+import { ReactComponent as KnSearch } from './assets/icon_kn_search.svg';
 import { ReactComponent as PersonalKnowledge } from './assets/icon_personal_knowledge.svg';
 import { ReactComponent as RecentChat } from './assets/icon_recent_chat.svg';
 import { ReactComponent as SystemKnowledge } from './assets/icon_system_knowledge.svg';
@@ -92,6 +95,9 @@ type IconType =
   | 'PersonalKnowledge'
   | 'SystemKnowledge'
   | 'WritingAssistant'
+  | 'KnSearch'
+  | 'DepartKn'
+  | 'DepartMana'
   | 'RecentChat'
   | 'AIChat';
 
@@ -193,6 +199,12 @@ const RoadIcon: React.FC<{
     IconComponent = RecentChat;
   } else if (type === 'AIChat') {
     IconComponent = AIChat;
+  } else if (type === 'KnSearch') {
+    IconComponent = KnSearch;
+  } else if (type === 'DepartKn') {
+    IconComponent = DepartKn;
+  } else if (type === 'DepartMana') {
+    IconComponent = DepartMana;
   }
 
   return <Icon style={{ fontSize: 24 }} component={IconComponent} {...rest} />;

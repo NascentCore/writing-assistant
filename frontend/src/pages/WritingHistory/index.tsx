@@ -430,6 +430,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
         data: {
           outline_id: currentMessage.outline_id,
           session_id: activeSessionId,
+          model_name: localStorage.getItem('ai_chat_model') || '',
+          web_search: Boolean(localStorage.getItem('ai_web_search')) || false,
         },
       });
 

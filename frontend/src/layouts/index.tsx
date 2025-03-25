@@ -39,18 +39,28 @@ const iconMap: Record<string, React.ReactNode> = {
   '/WritingAssistant': <Icon type="WritingAssistant" />,
   '/RecentChat': <Icon type="RecentChat" />,
   '/AiChat': <Icon type="AIChat" />,
+  '/DepartKnowledge': <Icon type="DepartKn" />,
+  '/DepartManage': <Icon type="DepartMana" />,
+  '/KnowledgeSearch': <Icon type="KnSearch" />,
 };
 
 // 将路由配置转换为菜单项
 const convertRoutesToMenuItems = (routes: RouteItem[]): MenuItem[] => {
-  const isAdmin = localStorage.getItem('admin') === '2';
+  const admin = localStorage.getItem('admin');
 
   const menuItems: MenuItem[] = routes
     .filter((route) => {
       // 如果不是管理员，过滤掉 SystemKnowledge 路由
-      if (route.path === '/SystemKnowledge' && !isAdmin) {
+      if (route.path === '/SystemKnowledge' && admin !== '2') {
         return false;
       }
+      if (route.path === '/DepartKnowledge' && admin === '0') {
+        return false;
+      }
+      if (route.path === '/DepartManage' && admin === '0') {
+        return false;
+      }
+
       return !route.hideInMenu && route.name && !route.redirect;
     })
     .map((route) => ({

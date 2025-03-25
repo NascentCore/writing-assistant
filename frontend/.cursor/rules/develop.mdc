@@ -1,7 +1,7 @@
 ---
-description: Global style-related development specifications
+description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 
 - The current project is built with umi Max, so when it comes to styles, the new styles should follow the cssModule specification, do not directly use the simple className, the existing content can continue to remain the original way

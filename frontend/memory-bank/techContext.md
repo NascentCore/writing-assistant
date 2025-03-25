@@ -100,11 +100,19 @@
 
 ```typescript
 // 文件命名
+pages/
+  ├── MyPage/
+      ├── index.tsx      // 页面主文件
+      ├── index.less     // 样式文件
+      ├── service.ts     // 数据请求
+      ├── utils.ts       // 工具函数
+      ├── constants.ts   // 常量定义
+      └── type.ts   // 类型定义
 components/
   ├── MyComponent/
       ├── index.tsx      // 组件主文件
       ├── index.less     // 样式文件
-      └── interface.ts   // 类型定义
+      └── type.ts   // 类型定义
 ```
 
 ### 2. 样式规范
