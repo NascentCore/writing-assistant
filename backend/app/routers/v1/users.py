@@ -53,6 +53,14 @@ class DeleteUserDepartmentRequest(BaseModel):
     user_id: str
     department_id: str
 
+class SetUserAdminRequest(BaseModel):
+    user_id: str = Field(..., description="用户ID", example="user_123")
+    admin: int = Field(..., description="管理员级别", example=1, enum=[0, 1, 2])
+
+class SetUsersDepartmentRequest(BaseModel):
+    user_ids: List[str] = Field(..., description="用户ID列表", example=["user_1", "user_2"])
+    department_id: str = Field(..., description="部门ID", example="dept_123")
+
 @router.get("/me")
 async def get_current_user_info(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取当前用户信息"""
@@ -377,6 +385,50 @@ async def set_user_department(
         logger.error(f"设置用户部门信息失败: {str(e)}")
         return APIResponse.error(message=f"设置用户部门信息失败: {str(e)}")
 
+@router.post("/users/department", summary="批量设置用户部门信息")
+async def set_users_departments(
+    request: SetUsersDepartmentRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """批量设置用户部门信息"""
+    try:
+        # 检查当前用户是否是系统管理员
+        if current_user.admin != UserRole.SYS_ADMIN and current_user.admin != UserRole.DEPT_ADMIN:
+            return APIResponse.error(message="无权限设置用户的部门信息")
+
+        # 检查部门是否存在
+        department = db.query(Department).filter(Department.department_id == request.department_id).first()
+        if not department:
+            return APIResponse.error(message="部门不存在")
+
+        # 遍历用户ID列表
+        for user_id in request.user_ids:
+            # 检查用户是否存在
+            user = db.query(User).filter(User.user_id == user_id).first()
+            if not user:
+                return APIResponse.error(message=f"用户 {user_id} 不存在")
+
+            # 检查用户部门信息是否已存在
+            user_department = db.query(UserDepartment).filter(
+                UserDepartment.user_id == user_id,
+                UserDepartment.department_id == request.department_id
+            ).first()
+
+            if not user_department:
+                # 创建新的用户部门信息
+                user_department = UserDepartment(
+                    user_id=user_id,
+                    department_id=request.department_id
+                )
+                db.add(user_department)
+
+        db.commit()
+        return APIResponse.success(message="用户部门信息已更新")
+    except Exception as e:
+        logger.error(f"批量设置用户部门信息失败: {str(e)}")
+        return APIResponse.error(message=f"批量设置用户部门信息失败: {str(e)}")
+
 @router.delete("/user/department", summary="解除用户的部门信息")
 async def remove_user_department(
     request: DeleteUserDepartmentRequest,
@@ -445,3 +497,29 @@ async def get_users(
         ))
     except Exception as e:
         return APIResponse.error(message=f"获取用户列表失败: {str(e)}")
+
+@router.post("/user/admin", summary="设置用户的管理员权限")
+async def set_user_admin(
+    request: SetUserAdminRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """设置用户的管理员权限"""
+    try:
+        # 检查当前用户是否是系统管理员
+        if current_user.admin != UserRole.SYS_ADMIN:
+            return APIResponse.error(message="无权限设置管理员权限")
+
+        # 检查目标用户是否存在
+        user = db.query(User).filter(User.user_id == request.user_id).first()
+        if not user:
+            return APIResponse.error(message="用户不存在")
+
+        # 更新用户的管理员权限
+        user.admin = request.admin
+        db.commit()
+
+        return APIResponse.success(message="管理员权限设置成功")
+    except Exception as e:
+        logger.error(f"设置管理员权限失败: {str(e)}")
+        return APIResponse.error(message=f"设置管理员权限失败: {str(e)}")
