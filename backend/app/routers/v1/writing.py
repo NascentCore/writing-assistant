@@ -1437,7 +1437,8 @@ async def get_templates(
     template_type: Optional[WritingTemplateType] = None,
     page: int = 1,
     page_size: int = 10,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     获取写作模板列表 

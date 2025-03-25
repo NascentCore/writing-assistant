@@ -436,7 +436,9 @@ async def download_file(
     )
 
 @router.get("/models")
-async def get_models():
+async def get_models(
+    current_user: User = Depends(get_current_user)
+):
     """获取支持的模型列表"""
     return APIResponse.success(
         message="success",
