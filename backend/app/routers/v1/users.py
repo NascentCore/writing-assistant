@@ -288,7 +288,7 @@ def build_department_tree(departments: List[Department], parent_id: Optional[str
             tree.append(dept_response)
     return tree
 
-@router.get("/departments", summary="获取部门树状列表")
+@router.get("/departments/tree", summary="获取部门树状列表")
 async def get_department_tree(
     db: Session = Depends(get_db)
 ):
@@ -300,9 +300,34 @@ async def get_department_tree(
     except Exception as e:
         return APIResponse.error(message=f"获取失败: {str(e)}")
 
+@router.get("/departments", summary="获取部门列表")
+async def get_departments(
+    my_own: bool = Query(False, description="是否只获取当前用户所属的部门", example=False),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取部门列表"""
+    try:
+        if my_own:
+            user_depts = db.query(UserDepartment).filter(UserDepartment.user_id == current_user.user_id).all()
+            departments = db.query(Department).filter(Department.department_id.in_([user_dept.department_id for user_dept in user_depts])).all()
+        else:
+            departments = db.query(Department).all()
+        return APIResponse.success(
+            message="获取部门列表成功",
+            data=[{
+                "department_id": department.department_id,
+                "name": department.name,
+                "description": department.description,
+                "parent_id": department.parent_id if department.parent_id else ""
+            } for department in departments])
+    except Exception as e:
+        return APIResponse.error(message=f"获取失败: {str(e)}")
+
 @router.get("/departments/{department_id}", summary="获取部门信息")
 async def get_department_info(
     department_id: str,
+    user_name: Optional[str] = Query(None, description="根据用户名过滤", example="张三"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -325,7 +350,10 @@ async def get_department_info(
     if not user_depts:
         user_depts = []
 
-    users = db.query(User).filter(User.user_id.in_([user_dept.user_id for user_dept in user_depts])).all()
+    user_query = db.query(User).filter(User.user_id.in_([user_dept.user_id for user_dept in user_depts]))
+    if user_name:
+        user_query = user_query.filter(User.username.contains(user_name))
+    users = user_query.all()
     if not users:
         users = []
 
@@ -461,6 +489,7 @@ async def remove_user_department(
 @router.get("/users", summary="获取用户列表")
 async def get_users(
     filter: Optional[str] = Query("no_departments", description="过滤条件", example="no_departments", enum=["no_departments"]),
+    user_name: Optional[str] = Query(None, description="根据用户名过滤", example="张三"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, gt=0, description="每页记录数"),
     current_user: User = Depends(get_current_user),
@@ -475,6 +504,9 @@ async def get_users(
         
         if filter == "no_departments":
             query = query.outerjoin(UserDepartment, User.user_id == UserDepartment.user_id).filter(UserDepartment.user_id == None)
+
+        if user_name:
+            query = query.filter(User.username.contains(user_name))
 
         # 计算分页的偏移量
         offset = (page - 1) * page_size
