@@ -648,8 +648,9 @@ async def chat(
         ).all()
         
         custom_prompt = ''
+        per_file_max_length = int(settings.RAG_CHAT_TOTAL_FILE_MAX_LENGTH / (len(reference_files) if len(reference_files) > 0 else 1))
         for file in reference_files:
-            content_preview = file.content[:settings.RAG_CHAT_PER_FILE_MAX_LENGTH]
+            content_preview = file.content[:per_file_max_length]
             custom_prompt += f"文件名: {file.file_name}\n文件内容: {content_preview}\n\n"
 
         if chat_session.doc_id:
@@ -965,15 +966,20 @@ async def upload_attachment(
             })
             db.commit()
 
-        if existing_files:
-            logger.info(f"附件上传失败, 用户 {current_user.user_id} 已存在文件: {existing_files}")
-            return APIResponse.error(
-                message=f"文件 [{', '.join([file.file_name for file in existing_files])}] 已存在",
-            )
+        result_files = new_files
+        for file in existing_files:
+            result_files.append({
+                "file_id": file.file_id,
+                "file_name": file.file_name,
+                "size": file.file_size,
+                "content_type": file.file_ext,
+                "path": file.file_path,
+                "hash": file.hash
+            })
         
         return APIResponse.success(
             message=f"附件上传成功, 正在解析中。",
-            data=new_files
+            data=result_files
         )
     except Exception as e:
         logger.error(f"上传附件时发生异常: {str(e)}")
