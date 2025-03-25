@@ -291,7 +291,7 @@ function App() {
               : {}),
           }}
         >
-          {!window.isIframe && (
+          {!(window as any).isIframe && (
             <Button
               style={{ marginLeft: 10 }}
               onClick={() => {
@@ -307,7 +307,7 @@ function App() {
             {/* <Button onClick={() => setShowFileModal(true)}> 文件上传</Button> */}
             <Button onClick={() => setShowAIChat(!showAIChat)}>AI对话</Button>
             <ExportBtnGroup editorRef={editorRef} />
-            {window.isIframe && (
+            {(window as any).isIframe && (
               <>
                 <Button
                   onClick={() => {
@@ -336,7 +336,7 @@ function App() {
                 </Button>
               </>
             )}
-            {currentDocId && !window.isIframe && (
+            {currentDocId && !(window as any).isIframe && (
               <Button onClick={() => setShowVersionHistory(true)}>
                 版本历史
               </Button>

@@ -317,7 +317,8 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
             lastMessage &&
             lastMessage.task_id &&
             lastMessage.task_status !== 'completed' &&
-            !new URLSearchParams(location.search).get('task_id')
+            !new URLSearchParams(location.search).get('task_id') &&
+            lastMessage.task_status !== 'failed'
           ) {
             // 更新 URL，添加 task_id 参数
             history.push(
@@ -760,7 +761,7 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
   }
 
   return (
-    !window.isIframe && (
+    !(window as any).isIframe && (
       <div className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
           <Typography.Title level={5} style={{ margin: 0 }}>

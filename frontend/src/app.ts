@@ -23,9 +23,9 @@ if (window.self !== window.top) {
   const admin = query.get('admin');
   localStorage.setItem('token', token?.split(' ')?.['1'] as string);
   localStorage.setItem('admin', admin as string);
-  window.isIframe = true;
+  (window as any).isIframe = true;
 } else {
-  window.isIframe = false;
+  (window as any).isIframe = false;
 }
 
 // 保存原始的fetch方法

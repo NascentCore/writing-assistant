@@ -157,7 +157,7 @@ const Layout: React.FC = () => {
 
   return (
     <div className={styles.layoutContainer}>
-      {!window.isIframe && (
+      {!(window as any).isIframe && (
         <div
           className={`${styles.sideMenu} ${collapsed ? styles.collapsed : ''}`}
         >
