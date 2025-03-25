@@ -112,7 +112,7 @@ const KnowledgeBaseList: React.FC = () => {
               params: {
                 page: current,
                 page_size: pageSize,
-                category: 'system',
+                category: 'department_all',
                 ...rest,
               },
             });
@@ -158,7 +158,7 @@ const KnowledgeBaseList: React.FC = () => {
         cancelButtonProps={{ style: { display: 'none' } }}
         destroyOnClose
       >
-        <FileUpload category="system" />
+        <FileUpload category="department" />
       </Modal>
     </>
   );

@@ -1,0 +1,81 @@
+.departmentContainer {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 600px;
+  padding: 16px;
+  background-color: #fff;
+  gap: 16px;
+
+  .siderContainer {
+    width: 280px;
+    margin-right: 24px;
+    border-right: 1px solid #f0f0f0;
+    padding-right: 16px;
+  }
+
+  .contentContainer {
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .departmentHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .departmentTitle {
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .departmentList {
+    height: calc(100% - 60px);
+    overflow-y: auto;
+  }
+
+  .departmentItem {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.3s;
+
+    &:hover {
+      background-color: #f5f5f5;
+    }
+
+    &.active {
+      background-color: #e6f7ff;
+      color: #1890ff;
+    }
+  }
+
+  .departmentName {
+    font-size: 14px;
+    margin-right: 8px;
+  }
+
+  .userTableHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .tableContainer {
+    width: 100%;
+  }
+
+  .emptyTip {
+    margin-top: 60px;
+    text-align: center;
+    color: #999;
+  }
+}
