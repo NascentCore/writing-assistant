@@ -487,7 +487,7 @@ class OutlineGenerator:
 
         # 使用LLM提取用户需求
         user_requirements = self._extract_requirements_with_llm(prompt)
-        required_level = user_requirements.get("required_level", 3)  # 默认为3级
+        required_level = user_requirements.get("required_level", 2)  # 默认为2级
         word_count = user_requirements.get("word_count")
         page_count = user_requirements.get("page_count")
         predefined_chapters = user_requirements.get("predefined_chapters", [])
@@ -590,7 +590,7 @@ class OutlineGenerator:
         4. 预定义章节：用户是否已明确定义了一级大纲或主要章节
         
         注意：
-        - 如果用户没有明确指定大纲层级数，默认为3级
+        - 如果用户没有明确指定大纲层级数，默认为2级
         - 仔细辨别用户提供的一级大纲/章节列表，通常会以列表形式出现
         - 有些用户会使用"一级标题包括"、"主要章节有"等表述方式定义章节结构
         
