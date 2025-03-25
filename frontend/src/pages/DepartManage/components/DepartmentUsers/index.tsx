@@ -110,6 +110,7 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
       title: '角色',
       dataIndex: 'admin',
       key: 'admin',
+      search: false,
       render: (_, record) => (
         <span>
           {record.admin === 2 ? (

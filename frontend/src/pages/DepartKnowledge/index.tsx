@@ -1,10 +1,10 @@
-import FileUpload from '@/components/FileUpload';
 import { fetchWithAuthNew } from '@/utils/fetch';
 import { UploadOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
 import { Button, message, Modal, Popconfirm, Tag, Tooltip } from 'antd';
 import { useRef, useState } from 'react';
+import FileUpload from './components/FileUpload';
 
 type KnowledgeBaseFile = {
   kb_id: string;

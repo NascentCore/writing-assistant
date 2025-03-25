@@ -15,7 +15,10 @@ const BASE_API = '/api/v1/users';
 export async function getDepartments(): Promise<
   Department[] | undefined | null
 > {
-  return fetchWithAuthNew<Department[]>(`${BASE_API}/departments`);
+  let my_own = localStorage.getItem('admin') !== '2';
+  return fetchWithAuthNew<Department[]>(
+    `${BASE_API}/departments?my_own=${my_own}`,
+  ) as Promise<Department[] | undefined | null>;
 }
 
 // 创建部门
@@ -25,7 +28,7 @@ export async function createDepartment(
   return fetchWithAuthNew<Department>(`${BASE_API}/departments`, {
     method: 'POST',
     data: params,
-  });
+  }) as Promise<Department | undefined | null>;
 }
 
 // 获取部门成员
@@ -34,7 +37,7 @@ export async function getDepartmentUsers(
 ): Promise<DepartmentDetail | undefined | null> {
   return fetchWithAuthNew<DepartmentDetail>(
     `${BASE_API}/departments/${departmentId}`,
-  );
+  ) as Promise<DepartmentDetail | undefined | null>;
 }
 
 // 查询用户列表（添加部门用户时使用）
@@ -46,7 +49,7 @@ export async function getUserList(params: {
   const { filter = 'no_departments', page, page_size } = params;
   return fetchWithAuthNew<UserListResponse>(
     `${BASE_API}/users?filter=${filter}&page=${page}&page_size=${page_size}`,
-  );
+  ) as Promise<UserListResponse | undefined | null>;
 }
 
 // 添加用户到部门
