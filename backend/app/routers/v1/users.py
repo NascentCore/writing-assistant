@@ -492,7 +492,7 @@ async def remove_user_department(
 ):
     try:
         # 检查当前用户是否是系统管理员
-        if current_user.admin != UserRole.SYS_ADMIN:
+        if current_user.admin == UserRole.USER:
             return APIResponse.error(message="无权限解除用户的部门信息")
 
         # 检查用户部门信息是否存在
@@ -503,6 +503,15 @@ async def remove_user_department(
 
         if not user_department:
             return APIResponse.error(message="用户部门信息不存在")
+
+        # 检查部门是否属于当前用户
+        if current_user.admin == UserRole.DEPT_ADMIN:
+            user_dept = db.query(UserDepartment).filter(
+                UserDepartment.user_id == current_user.user_id,
+                UserDepartment.department_id == request.department_id
+            ).first()
+            if not user_dept:
+                return APIResponse.error(message="无权限移除部门用户")
 
         # 删除用户部门信息
         db.delete(user_department)
