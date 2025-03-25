@@ -378,13 +378,22 @@ async def set_user_department(
 ):
     try:
         # 检查当前用户是否是系统管理员
-        if current_user.admin != UserRole.SYS_ADMIN:
+        if current_user.admin != UserRole.SYS_ADMIN and current_user.admin != UserRole.DEPT_ADMIN:
             return APIResponse.error(message="无权限设置用户的部门信息")
 
         # 检查部门是否存在
         department = db.query(Department).filter(Department.department_id == request.department_id).first()
         if not department:
             return APIResponse.error(message="部门不存在")
+
+        # 检查部门是否属于当前用户
+        if current_user.admin == UserRole.DEPT_ADMIN:
+            user_dept = db.query(UserDepartment).filter(
+                UserDepartment.user_id == current_user.user_id,
+                UserDepartment.department_id == request.department_id
+            ).first()
+            if not user_dept:
+                return APIResponse.error(message="无权限设置该部门")
 
         # 检查用户是否存在
         user = db.query(User).filter(User.user_id == request.user_id).first()
@@ -429,6 +438,15 @@ async def set_users_departments(
         department = db.query(Department).filter(Department.department_id == request.department_id).first()
         if not department:
             return APIResponse.error(message="部门不存在")
+
+        # 检查部门是否属于当前用户
+        if current_user.admin == UserRole.DEPT_ADMIN:
+            user_dept = db.query(UserDepartment).filter(
+                UserDepartment.user_id == current_user.user_id,
+                UserDepartment.department_id == request.department_id
+            ).first()
+            if not user_dept:
+                return APIResponse.error(message="无权限设置该部门")
 
         # 遍历用户ID列表
         for user_id in request.user_ids:
