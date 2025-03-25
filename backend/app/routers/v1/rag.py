@@ -77,7 +77,7 @@ async def upload_files(
         if category == "system" and not current_user.admin == UserRole.SYS_ADMIN:
             return APIResponse.error(message="没有权限上传系统知识库")
         if category == "department":
-            if not current_user.admin == UserRole.DEPT_ADMIN:
+            if current_user.admin == UserRole.USER:
                 return APIResponse.error(message="没有权限上传部门知识库")
             if not department_id:
                 return APIResponse.error(message="部门ID不能为空")
