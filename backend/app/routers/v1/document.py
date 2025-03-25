@@ -341,6 +341,7 @@ async def delete_document(
 async def export_document_docx(
     doc_id: str,
     include_versions: bool = False,
+    add_numbering: bool = True,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -350,6 +351,7 @@ async def export_document_docx(
     直接返回二进制文件流供下载。
     
     - **include_versions**: 是否包含历史版本信息
+    - **add_numbering**: 是否为标题添加序号，默认为True
     """
     try:
         # 检查文档所有权
@@ -377,12 +379,13 @@ async def export_document_docx(
                 for v in versions_query
             ]
         
-        # 转换HTML到DOCX
+        # 转换HTML到DOCX，添加add_numbering参数
         docx_bytes = html_to_docx(
             html_content=document.content,
             title=document.title,
             author=current_user.username,
-            versions=versions
+            versions=versions,
+            add_numbering=add_numbering
         )
 
         # 设置文件名（处理可能的非法字符）
@@ -412,6 +415,7 @@ async def export_document_docx(
 async def export_document_pdf(
     doc_id: str,
     include_versions: bool = False,
+    add_numbering: bool = True,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -421,6 +425,7 @@ async def export_document_pdf(
     直接返回二进制文件流供下载。
     
     - **include_versions**: 是否包含历史版本信息
+    - **add_numbering**: 是否为标题添加序号，默认为True
     """
     try:
         # 检查文档所有权
@@ -448,12 +453,13 @@ async def export_document_pdf(
                 for v in versions_query
             ]
         
-        # 转换HTML到PDF
+        # 转换HTML到PDF，添加add_numbering参数
         pdf_bytes = html_to_pdf(
             html_content=document.content,
             title=document.title,
             author=current_user.username,
-            versions=versions
+            versions=versions,
+            add_numbering=add_numbering
         )
 
         # 设置文件名（处理可能的非法字符）
