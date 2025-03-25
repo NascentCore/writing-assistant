@@ -45,10 +45,10 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
             user_id: user.user_id,
             department_id: currentDepartment.department_id,
           });
-          message.success('移除成功');
           if (result !== undefined) {
             // 刷新表格数据
             actionRef.current?.reload();
+            message.success('移除成功');
           }
         } catch (error) {
           console.error('移除用户失败:', error);
@@ -64,8 +64,8 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
         user_id: user.user_id,
         admin: user.admin === 1 ? 0 : 1, // 切换管理员状态
       });
-      message.success('设置成功');
       if (result !== undefined) {
+        message.success('设置成功');
         // 刷新表格数据
         actionRef.current?.reload();
       }
@@ -84,8 +84,8 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
         user_ids: selectedUserIds,
         department_id: currentDepartment.department_id,
       });
-      message.success('添加用户成功');
       if (result !== undefined) {
+        message.success('添加用户成功');
         setAddUserModalVisible(false);
         setSelectedUserIds([]);
         // 刷新表格数据
