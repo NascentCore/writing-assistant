@@ -13,6 +13,7 @@ import json
 import time
 from fastapi.responses import StreamingResponse
 import threading
+from datetime import datetime, timedelta
 
 from app.schemas.response import APIResponse, PaginationData
 from app.database import get_db
@@ -40,6 +41,7 @@ from app.models.task import Task, TaskStatus, TaskType
 from app.models.document import Document, DocumentVersion
 from app.models.rag import RagFile, RagKnowledgeBase, RagKnowledgeBaseType
 from app.models.department import UserDepartment
+from app.models.system_config import SystemConfig
 
 logger = logging.getLogger("app")
 
@@ -2213,11 +2215,89 @@ def refresh_writing_tasks_status():
     """
     刷新写作任务状态，在应用启动时恢复未完成的任务
     1. 查找所有状态为PENDING或PROCESSING的写作任务
-    2. 重新启动这些任务
+    2. 对于创建时间大于一天的任务，直接修改为Failed状态
+    3. 对于其他任务，重新启动任务处理
+    
+    使用数据库作为分布式锁，确保在多实例环境中只有一个实例执行任务恢复
     """
     logger.info("开始刷新写作任务状态...")
     db = next(get_db())
+    
+    # 定义锁ID和过期时间
+    lock_name = "writing_tasks_refresh_lock"
+    lock_timeout = 300  # 5分钟，单位秒
+    instance_id = f"instance-{shortuuid.uuid()}"
+    lock_acquired = False
+    
     try:
+        # 尝试获取分布式锁
+        try:
+            # 创建锁记录 - 使用原子操作
+            from sqlalchemy.exc import IntegrityError
+            
+            # 获取当前时间和过期时间
+            current_time = datetime.now()
+            expire_time = current_time + timedelta(seconds=lock_timeout)
+            
+            # 尝试创建或更新锁记录
+            # 首先查询现有锁
+            existing_lock = db.query(SystemConfig).filter(
+                SystemConfig.key == f"lock:{lock_name}"
+            ).with_for_update(nowait=True).first()
+            
+            if existing_lock:
+                # 检查锁是否过期
+                lock_data = json.loads(existing_lock.value)
+                lock_expire_time = datetime.fromisoformat(lock_data.get("expire_time"))
+                
+                if current_time > lock_expire_time:
+                    # 锁已过期，可以获取
+                    logger.info(f"发现过期的锁，过期时间: {lock_expire_time}，当前时间: {current_time}")
+                    existing_lock.value = json.dumps({
+                        "instance_id": instance_id,
+                        "acquire_time": current_time.isoformat(),
+                        "expire_time": expire_time.isoformat()
+                    })
+                    lock_acquired = True
+                else:
+                    # 锁仍有效，不能获取
+                    logger.info(f"任务刷新已被实例 {lock_data.get('instance_id')} 锁定，跳过执行")
+                    return
+            else:
+                # 不存在锁，创建新锁
+                new_lock = SystemConfig(
+                    key=f"lock:{lock_name}",
+                    value=json.dumps({
+                        "instance_id": instance_id,
+                        "acquire_time": current_time.isoformat(),
+                        "expire_time": expire_time.isoformat()
+                    }),
+                    description="任务恢复分布式锁"
+                )
+                db.add(new_lock)
+                lock_acquired = True
+            
+            # 提交事务
+            db.commit()
+            
+            if lock_acquired:
+                logger.info(f"实例 {instance_id} 成功获取任务恢复锁")
+            
+        except IntegrityError:
+            # 冲突发生，锁已被其他实例获取
+            db.rollback()
+            logger.info("无法获取任务恢复锁，可能已被其他实例获取")
+            return
+        except Exception as e:
+            # 发生其他错误
+            db.rollback()
+            logger.error(f"获取任务恢复锁时发生错误: {str(e)}")
+            return
+        
+        # 如果没有获取到锁，直接返回
+        if not lock_acquired:
+            return
+            
         # 查找所有未完成的大纲生成和内容生成任务
         unfinished_tasks = db.query(Task).filter(
             Task.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING]),
@@ -2228,7 +2308,10 @@ def refresh_writing_tasks_status():
             logger.info("没有未完成的写作任务需要恢复")
             return
         
-        logger.info(f"发现 {len(unfinished_tasks)} 个未完成的写作任务，准备恢复...")
+        logger.info(f"发现 {len(unfinished_tasks)} 个未完成的写作任务，准备处理...")
+        
+        # 获取当前时间
+        current_time = datetime.now()
         
         for task in unfinished_tasks:
             try:
@@ -2237,6 +2320,35 @@ def refresh_writing_tasks_status():
                 task_id = task.id
                 task_type = task.type
                 session_id = task.session_id
+                
+                # 检查任务创建时间是否超过一天
+                task_created_time = task.created_at  # 假设Task模型有created_at字段
+                time_diff = current_time - task_created_time
+                
+                # 对于创建时间超过一天的任务，直接标记为失败
+                if time_diff.days >= 1:
+                    logger.info(f"任务 {task_id} 已创建超过一天，标记为失败")
+                    task.status = TaskStatus.FAILED
+                    task.error = "任务生成超时，已自动终止"
+                    
+                    # 更新对应的消息状态
+                    assistant_message = db.query(ChatMessage).filter(
+                        ChatMessage.session_id == session_id,
+                        ChatMessage.role == "assistant",
+                        ChatMessage.task_status.in_([TaskStatus.PENDING.value, TaskStatus.PROCESSING.value])
+                    ).order_by(desc(ChatMessage.id)).first()
+                    
+                    if assistant_message:
+                        assistant_message.task_status = TaskStatus.FAILED.value
+                        assistant_message.content = "任务生成超时，已自动终止"
+                    
+                    db.commit()
+                    continue
+                
+                # 清理任务状态相关字段
+                task.process = 0
+                task.process_detail_info = ""
+                task.log = ""
                 
                 # 查找相关的消息
                 assistant_message = db.query(ChatMessage).filter(
@@ -2258,21 +2370,16 @@ def refresh_writing_tasks_status():
                     logger.warning(f"无法找到任务 {task_id} 的关联消息，跳过恢复")
                     continue
                 
-                # 对于内容生成任务，检查文档是否已经有部分内容生成
+                # 对于生成全文任务，清理文档内容
                 if task_type == TaskType.GENERATE_CONTENT:
                     doc_id = params.get("doc_id")
                     if doc_id:
                         document = db.query(Document).filter(Document.doc_id == doc_id).first()
                         if document:
-                            content_length = len(document.content or "")
-                            # 如果文档已经有较长的内容（超过100个字符），则说明已经开始生成
-                            if content_length > 100:
-                                logger.info(f"文档 {doc_id} 已有内容 ({content_length} 字符)，将继续生成")
-                                task.process = max(40, task.process or 40)  # 确保进度至少为40%，表示已经开始生成内容
-                                # 更新进度详情信息
-                                current_title = document.title or ""
-                                task.process_detail_info = f"已生成部分内容，内容长度: {content_length} 字符，标题: {current_title}"
-                                db.commit()
+                            # 清空文档内容，但保留文档记录
+                            document.content = ""
+                            document.title = "正在生成..."
+                            logger.info(f"清空文档内容 [doc_id={doc_id}]")
                 
                 # 查找用户消息
                 user_message = db.query(ChatMessage).filter(
@@ -2298,6 +2405,9 @@ def refresh_writing_tasks_status():
                         logger.info(f"任务 {task_id} 已经在处理中，跳过")
                         continue
                     running_tasks.add(task_id)
+                
+                # 首先提交当前的数据库更改
+                db.commit()
                 
                 # 根据任务类型恢复任务
                 if task_type == TaskType.GENERATE_OUTLINE:
@@ -2350,6 +2460,27 @@ def refresh_writing_tasks_status():
     except Exception as e:
         logger.error(f"刷新写作任务状态时出错: {str(e)}")
     finally:
+        # 释放锁 - 仅当我们获取了锁时才需要释放
+        if lock_acquired:
+            try:
+                # 获取锁记录
+                lock_record = db.query(SystemConfig).filter(
+                    SystemConfig.key == f"lock:{lock_name}"
+                ).first()
+                
+                if lock_record:
+                    # 解析值
+                    lock_data = json.loads(lock_record.value)
+                    # 确保是我们获取的锁
+                    if lock_data.get("instance_id") == instance_id:
+                        # 设置过期时间为当前时间，表示释放锁
+                        lock_data["expire_time"] = datetime.now().isoformat()
+                        lock_record.value = json.dumps(lock_data)
+                        logger.info(f"实例 {instance_id} 释放任务恢复锁")
+                        db.commit()
+            except Exception as e:
+                logger.error(f"释放任务恢复锁时出错: {str(e)}")
+        
         db.close()
 
 # 用于启动大纲生成任务的函数
