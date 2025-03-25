@@ -44,6 +44,11 @@ export const routes = [
     component: './PersonalKnowledge',
   },
   {
+    name: '知识库检索',
+    path: '/KnowledgeSearch',
+    component: './KnowledgeSearch',
+  },
+  {
     name: '历史记录',
     path: '/WritingHistory',
     component: './WritingHistory',

@@ -12,6 +12,7 @@ import concurrent.futures
 import json
 import time
 from fastapi.responses import StreamingResponse
+import threading
 
 from app.schemas.response import APIResponse, PaginationData
 from app.database import get_db
@@ -44,6 +45,10 @@ logger = logging.getLogger("app")
 
 router = APIRouter()
 
+# 存储正在运行的任务ID，避免重复处理
+running_tasks = set()
+# 线程锁，确保线程安全
+task_lock = threading.Lock()
 # 创建线程池执行器
 executor = concurrent.futures.ThreadPoolExecutor()
 
@@ -347,8 +352,22 @@ async def generate_outline(
         # 提交事务
         db.commit()
         
-        # 返回任务ID和会话ID
-        return APIResponse.success(message="大纲获取成功", data={
+        # 记录任务到运行集合中
+        with task_lock:
+            running_tasks.add(task_id)
+        
+        # 启动异步任务
+        executor.submit(run_outline_task,
+            task_id=task_id,
+            prompt=request.prompt,
+            file_ids=request.file_ids or [],
+            session_id=session_id,
+            assistant_message_id=assistant_message_id,
+            readable_model_name=request.model_name
+        )
+        
+        # 立即返回响应，不等待异步任务完成
+        return APIResponse.success(message="大纲生成任务已创建", data={
             "task_id": task_id,
             "session_id": session_id
         })
@@ -402,26 +421,19 @@ async def generate_outline(
     # 提交事务
     db.commit()
     
-    # 使用线程池运行异步任务，避免阻塞当前事件循环
-    def run_async_task():
-        # 创建新的事件循环
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # 在新的事件循环中运行异步任务
-        loop.run_until_complete(process_outline_generation(
-            task_id=task_id,
-            prompt=request.prompt,
-            file_ids=request.file_ids or [],
-            session_id=session_id,
-            assistant_message_id=assistant_message_id,
-            readable_model_name=request.model_name
-        ))
-        
-        loop.close()
+    # 记录任务到运行集合中
+    with task_lock:
+        running_tasks.add(task_id)
     
-    # 在线程池中启动任务
-    executor.submit(run_async_task)
+    # 启动异步任务
+    executor.submit(run_outline_task,
+        task_id=task_id,
+        prompt=request.prompt,
+        file_ids=request.file_ids or [],
+        session_id=session_id,
+        assistant_message_id=assistant_message_id,
+        readable_model_name=request.model_name
+    )
     
     # 立即返回响应，不等待异步任务完成
     return APIResponse.success(message="大纲生成任务已创建", data={
@@ -1132,29 +1144,22 @@ async def generate_content(
     db.add(task)
     db.commit()
     
-    # 启动异步任务
-    def run_async_task():
-        # 创建新的事件循环
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # 在新的事件循环中运行异步任务
-        loop.run_until_complete(process_content_generation(
-            task_id=task_id,
-            outline_id=request.outline_id,
-            prompt=request.prompt,
-            file_ids=request.file_ids or [],
-            session_id=session_id,
-            message_id=message_id,
-            assistant_message_id=assistant_message_id,
-            readable_model_name=request.model_name,
-            doc_id=doc_id
-        ))
-        
-        loop.close()
+    # 记录任务到运行集合中
+    with task_lock:
+        running_tasks.add(task_id)
     
-    # 在线程池中启动任务
-    executor.submit(run_async_task)
+    # 启动异步任务
+    executor.submit(run_content_task,
+        task_id=task_id,
+        outline_id=request.outline_id,
+        prompt=request.prompt,
+        file_ids=request.file_ids or [],
+        session_id=session_id,
+        message_id=message_id,
+        assistant_message_id=assistant_message_id,
+        readable_model_name=request.model_name,
+        doc_id=doc_id
+    )
     
     # 立即返回响应，不等待异步任务完成
     return APIResponse.success(message="全文生成任务已创建", data={
@@ -1432,7 +1437,8 @@ async def get_templates(
     template_type: Optional[WritingTemplateType] = None,
     page: int = 1,
     page_size: int = 10,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     获取写作模板列表 
@@ -1867,6 +1873,9 @@ async def stream_doc_content(
         task_id = task.id
         current_task_status = task.status
         
+        # 检查是否是恢复的任务（通过进度和进度详情信息判断）
+        is_resumed_task = (task.process or 0) >= 40 and "已生成部分内容" in (task.process_detail_info or "")
+        
         # 流式响应函数
         async def generate():
             # 创建metadata字典，包含状态信息
@@ -1874,7 +1883,8 @@ async def stream_doc_content(
                 "doc_id": doc_id,
                 "task_id": task_id,
                 "title": initial_title,
-                "status": current_task_status.value
+                "status": current_task_status.value,
+                "is_resumed": is_resumed_task
             }
             
             # 发送文档元数据作为系统消息
@@ -1963,13 +1973,46 @@ async def stream_doc_content(
             
             # 如果任务正在处理中，等待更新并流式返回
             if current_task_status in [TaskStatus.PENDING, TaskStatus.PROCESSING]:
-                # 设置最大等待时间（60秒）和检查间隔（2秒）
-                max_wait_time = 60  # 秒
-                check_interval = 2  # 秒
+                # 根据任务类型设置等待时间和检查间隔
+                # 如果是恢复的任务，需要给予更长的等待时间
+                if is_resumed_task:
+                    max_wait_time = 300  # 5分钟
+                    check_interval = 5   # 5秒钟检查一次
+                    initial_wait = 10    # 初始等待10秒钟，等待任务真正启动
+                    logger.info(f"检测到恢复的任务 [task_id={task_id}]，等待任务恢复运行...")
+                    
+                    # 发送初始等待消息
+                    chunk = {
+                        "id": f"docstream-{shortuuid.uuid()}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": "doc-stream",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": "\n\n*任务正在恢复中，请耐心等待...*\n\n",
+                                    "status": "processing"
+                                }
+                            }
+                        ]
+                    }
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    
+                    # 初始等待一段时间，让任务有时间启动
+                    await asyncio.sleep(initial_wait)
+                else:
+                    max_wait_time = 120  # 2分钟
+                    check_interval = 2   # 2秒钟检查一次
+                
                 wait_time = 0
                 
                 # 上次内容的长度，用于检测变化
                 last_content_length = len(initial_content)
+                
+                # 保存最后一次内容更新的时间
+                last_update_time = time.time()
                 
                 while wait_time < max_wait_time:
                     # 等待一段时间
@@ -2032,9 +2075,32 @@ async def stream_doc_content(
                             }
                             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                             last_content_length = len(current_content)
+                            last_update_time = time.time()  # 更新最后一次内容更新时间
                         
-                        # 如果任务状态有变化
+                        # 检查任务是否已经完成
                         if current_task.status == TaskStatus.COMPLETED:
+                            # 如果还有未发送的内容，发送最终内容
+                            if len(current_document.content or "") > last_content_length:
+                                final_new_content = (current_document.content or "")[last_content_length:]
+                                chunk = {
+                                    "id": f"docstream-{shortuuid.uuid()}",
+                                    "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": "doc-stream",
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": {
+                                                "role": "assistant",
+                                                "content": final_new_content,
+                                                "status": "completed"
+                                            }
+                                        }
+                                    ]
+                                }
+                                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                            
+                            # 发送完成状态
                             chunk = {
                                 "id": f"docstream-{shortuuid.uuid()}",
                                 "object": "chat.completion.chunk",
@@ -2073,7 +2139,56 @@ async def stream_doc_content(
                             }
                             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                             break
+                        
+                        # 检查是否长时间没有更新内容（超过30秒），如果是则发送进度信息
+                        # 仅针对恢复的任务
+                        current_time = time.time()
+                        if is_resumed_task and current_time - last_update_time > 30:
+                            # 获取当前任务进度
+                            progress = current_task.process or 0
+                            progress_info = current_task.process_detail_info or "任务处理中..."
+                            
+                            # 发送进度信息
+                            chunk = {
+                                "id": f"docstream-{shortuuid.uuid()}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": "doc-stream",
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {
+                                            "role": "assistant",
+                                            "content": f"\n\n*当前进度: {progress}% - {progress_info}*\n\n",
+                                            "status": "processing",
+                                            "progress": progress
+                                        }
+                                    }
+                                ]
+                            }
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                            last_update_time = current_time  # 更新最后一次更新时间
                 
+                # 如果超时退出循环，发送一个超时信息
+                if wait_time >= max_wait_time:
+                    chunk = {
+                        "id": f"docstream-{shortuuid.uuid()}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": "doc-stream",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": "\n\n*等待超时，请刷新页面重新获取内容*\n\n",
+                                    "status": "timeout"
+                                }
+                            }
+                        ]
+                    }
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            
             # 结束流
             yield "data: [DONE]\n\n"
         
@@ -2093,3 +2208,197 @@ async def stream_doc_content(
     except Exception as e:
         logger.error(f"流式获取文档内容失败: {str(e)}")
         return APIResponse.error(message=f"获取文档内容失败: {str(e)}")
+
+def refresh_writing_tasks_status():
+    """
+    刷新写作任务状态，在应用启动时恢复未完成的任务
+    1. 查找所有状态为PENDING或PROCESSING的写作任务
+    2. 重新启动这些任务
+    """
+    logger.info("开始刷新写作任务状态...")
+    db = next(get_db())
+    try:
+        # 查找所有未完成的大纲生成和内容生成任务
+        unfinished_tasks = db.query(Task).filter(
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING]),
+            Task.type.in_([TaskType.GENERATE_OUTLINE, TaskType.GENERATE_CONTENT])
+        ).all()
+        
+        if not unfinished_tasks:
+            logger.info("没有未完成的写作任务需要恢复")
+            return
+        
+        logger.info(f"发现 {len(unfinished_tasks)} 个未完成的写作任务，准备恢复...")
+        
+        for task in unfinished_tasks:
+            try:
+                # 获取任务参数
+                params = task.params
+                task_id = task.id
+                task_type = task.type
+                session_id = task.session_id
+                
+                # 查找相关的消息
+                assistant_message = db.query(ChatMessage).filter(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.role == "assistant",
+                    ChatMessage.task_id == task_id
+                ).first()
+                
+                if not assistant_message:
+                    # 如果找不到关联的消息，查找会话中最后一条助手消息
+                    assistant_message = db.query(ChatMessage).filter(
+                        ChatMessage.session_id == session_id,
+                        ChatMessage.role == "assistant",
+                        ChatMessage.task_status.in_([TaskStatus.PENDING.value, TaskStatus.PROCESSING.value])
+                    ).order_by(desc(ChatMessage.id)).first()
+                
+                if not assistant_message:
+                    # 仍然找不到，跳过此任务
+                    logger.warning(f"无法找到任务 {task_id} 的关联消息，跳过恢复")
+                    continue
+                
+                # 对于内容生成任务，检查文档是否已经有部分内容生成
+                if task_type == TaskType.GENERATE_CONTENT:
+                    doc_id = params.get("doc_id")
+                    if doc_id:
+                        document = db.query(Document).filter(Document.doc_id == doc_id).first()
+                        if document:
+                            content_length = len(document.content or "")
+                            # 如果文档已经有较长的内容（超过100个字符），则说明已经开始生成
+                            if content_length > 100:
+                                logger.info(f"文档 {doc_id} 已有内容 ({content_length} 字符)，将继续生成")
+                                task.process = max(40, task.process or 40)  # 确保进度至少为40%，表示已经开始生成内容
+                                # 更新进度详情信息
+                                current_title = document.title or ""
+                                task.process_detail_info = f"已生成部分内容，内容长度: {content_length} 字符，标题: {current_title}"
+                                db.commit()
+                
+                # 查找用户消息
+                user_message = db.query(ChatMessage).filter(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.role == "user",
+                    ChatMessage.message_id == assistant_message.question_id
+                ).order_by(ChatMessage.id).first()
+                
+                if not user_message and task_type == TaskType.GENERATE_CONTENT:
+                    # 找不到用户消息，查找会话中的第一条用户消息
+                    user_message = db.query(ChatMessage).filter(
+                        ChatMessage.session_id == session_id,
+                        ChatMessage.role == "user"
+                    ).order_by(ChatMessage.id).first()
+                
+                # 准备恢复任务参数
+                assistant_message_id = assistant_message.message_id
+                message_id = user_message.message_id if user_message else None
+                
+                with task_lock:
+                    # 检查任务是否已经在处理中
+                    if task_id in running_tasks:
+                        logger.info(f"任务 {task_id} 已经在处理中，跳过")
+                        continue
+                    running_tasks.add(task_id)
+                
+                # 根据任务类型恢复任务
+                if task_type == TaskType.GENERATE_OUTLINE:
+                    # 恢复大纲生成任务
+                    prompt = params.get("prompt", "")
+                    file_ids = params.get("file_ids", [])
+                    model_name = params.get("model_name")
+                    
+                    # 在线程池中启动任务
+                    logger.info(f"恢复大纲生成任务: {task_id}")
+                    executor.submit(run_outline_task, 
+                        task_id=task_id,
+                        prompt=prompt,
+                        file_ids=file_ids,
+                        session_id=session_id,
+                        assistant_message_id=assistant_message_id,
+                        readable_model_name=model_name
+                    )
+                
+                elif task_type == TaskType.GENERATE_CONTENT:
+                    # 恢复内容生成任务
+                    outline_id = params.get("outline_id")
+                    prompt = params.get("prompt")
+                    file_ids = params.get("file_ids", [])
+                    doc_id = params.get("doc_id")
+                    model_name = params.get("model_name")
+                    
+                    # 在线程池中启动任务
+                    logger.info(f"恢复内容生成任务: {task_id}")
+                    executor.submit(run_content_task,
+                        task_id=task_id,
+                        outline_id=outline_id,
+                        prompt=prompt,
+                        file_ids=file_ids,
+                        session_id=session_id,
+                        message_id=message_id,
+                        assistant_message_id=assistant_message_id,
+                        readable_model_name=model_name,
+                        doc_id=doc_id
+                    )
+            
+            except Exception as e:
+                logger.error(f"恢复任务 {task.id} 时出错: {str(e)}")
+                # 移除任务ID
+                with task_lock:
+                    if task.id in running_tasks:
+                        running_tasks.remove(task.id)
+        
+        logger.info("写作任务状态刷新完成")
+    except Exception as e:
+        logger.error(f"刷新写作任务状态时出错: {str(e)}")
+    finally:
+        db.close()
+
+# 用于启动大纲生成任务的函数
+def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id, readable_model_name=None):
+    try:
+        # 创建新的事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # 在新的事件循环中运行异步任务
+        loop.run_until_complete(process_outline_generation(
+            task_id=task_id,
+            prompt=prompt,
+            file_ids=file_ids,
+            session_id=session_id,
+            assistant_message_id=assistant_message_id,
+            readable_model_name=readable_model_name
+        ))
+        
+        loop.close()
+    finally:
+        # 任务完成后从运行集合中移除
+        with task_lock:
+            if task_id in running_tasks:
+                running_tasks.remove(task_id)
+
+# 用于启动内容生成任务的函数
+def run_content_task(task_id, outline_id, prompt, file_ids, session_id, message_id, assistant_message_id, readable_model_name=None, doc_id=None):
+    try:
+        # 创建新的事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # 在新的事件循环中运行异步任务
+        loop.run_until_complete(process_content_generation(
+            task_id=task_id,
+            outline_id=outline_id,
+            prompt=prompt,
+            file_ids=file_ids,
+            session_id=session_id,
+            message_id=message_id,
+            assistant_message_id=assistant_message_id,
+            readable_model_name=readable_model_name,
+            doc_id=doc_id
+        ))
+        
+        loop.close()
+    finally:
+        # 任务完成后从运行集合中移除
+        with task_lock:
+            if task_id in running_tasks:
+                running_tasks.remove(task_id)

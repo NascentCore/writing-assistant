@@ -3,7 +3,7 @@ import { fetchWithAuthNew } from '@/utils/fetch';
 import { UploadOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
-import { Button, message, Modal, Popconfirm, Tag, Tooltip } from 'antd';
+import { Button, message, Modal, Popconfirm, Switch, Tag, Tooltip } from 'antd';
 import { useRef, useState } from 'react';
 
 type KnowledgeBaseFile = {
@@ -15,6 +15,7 @@ type KnowledgeBaseFile = {
   status: string;
   error_message: string;
   created_at: string;
+  kb_type: string;
 };
 
 const KnowledgeBaseList: React.FC = () => {
@@ -60,6 +61,44 @@ const KnowledgeBaseList: React.FC = () => {
         );
       },
     },
+
+    {
+      title: '仅自己可见',
+      dataIndex: 'kb_type',
+      search: false,
+      render: (_, record) => {
+        return (
+          <Switch
+            checked={record.kb_type === 'user'}
+            checkedChildren="开启"
+            unCheckedChildren="关闭"
+            onChange={async (checked) => {
+              try {
+                const result = await fetchWithAuthNew(
+                  '/api/v1/rag/file/switch',
+                  {
+                    method: 'POST',
+                    data: {
+                      file_id: record.file_id,
+                      private: checked,
+                    },
+                  },
+                );
+                if (result !== undefined) {
+                  message.success(
+                    checked ? '已设为私人可见' : '已设为公开可见',
+                  );
+                  actionRef.current?.reload();
+                }
+              } catch (error) {
+                message.error('切换状态失败');
+              }
+            }}
+          />
+        );
+      },
+    },
+
     {
       title: '创建时间',
       search: false,
@@ -112,7 +151,7 @@ const KnowledgeBaseList: React.FC = () => {
               params: {
                 page: current,
                 page_size: pageSize,
-                category: 'user',
+                category: 'user_all',
                 ...rest,
               },
             });

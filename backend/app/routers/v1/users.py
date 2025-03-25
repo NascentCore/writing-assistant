@@ -292,6 +292,48 @@ async def get_department_tree(
     except Exception as e:
         return APIResponse.error(message=f"获取失败: {str(e)}")
 
+@router.get("/departments/{department_id}", summary="获取部门信息")
+async def get_department_info(
+    department_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取部门信息"""
+    if current_user.admin != UserRole.SYS_ADMIN:
+        return APIResponse.error(message="无权限访问")
+
+    department = db.query(Department).filter(Department.department_id == department_id).first()
+    if not department:
+        return APIResponse.error(message="部门不存在")
+
+    # 获取部门知识库
+    knowledge_base = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_id == department.department_id, 
+                                                       RagKnowledgeBase.is_deleted == False).first()
+    # if not knowledge_base:
+    #     return APIResponse.error(message="部门知识库不存在")
+
+    # 获取部门所有人员
+    user_depts = db.query(UserDepartment).filter(UserDepartment.department_id == department_id).all()
+    if not user_depts:
+        user_depts = []
+
+    users = db.query(User).filter(User.user_id.in_([user_dept.user_id for user_dept in user_depts])).all()
+    if not users:
+        users = []
+
+    return APIResponse.success(data={
+        "department_id": department.department_id,
+        "department_name": department.name,
+        "knowledge_base": knowledge_base.kb_id if knowledge_base else "",
+        "users": [{
+            "user_id": user.user_id,
+            "username": user.username,
+            "email": user.email,
+            "admin": user.admin,
+            "created_at": user.created_at
+        } for user in users]
+    })
+
 @router.post("/user/department", summary="设置用户的部门信息")
 async def set_user_department(
     request: SetUserDepartmentRequest,

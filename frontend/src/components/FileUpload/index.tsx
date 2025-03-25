@@ -29,8 +29,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
       try {
         const fileId = file.response?.data[0]?.file_id;
         if (!fileId) {
-          message.error('文件ID不存在');
-          return false;
+          // message.error('文件ID不存在');
+          return true;
         }
         const result = await fetchWithAuthNew('/api/v1/rag/files', {
           method: 'DELETE',
@@ -66,6 +66,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
             const response = JSON.parse(xhr.responseText);
             if (response.code !== 200) {
               onError?.(new Error('上传失败'));
+              message.error(`${response.message}`);
               return;
             }
             onSuccess?.(response);
@@ -88,7 +89,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
       if (status === 'done') {
         message.success(`${info.file.name} 文件上传成功`);
       } else if (status === 'error') {
-        message.error(`${info.file.name} 文件上传失败`);
+        console.error(`${info.file.name} 文件上传失败`);
+        // onError?.(new Error('上传失败'));
       }
     },
     ...restProps,

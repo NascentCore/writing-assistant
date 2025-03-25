@@ -106,7 +106,7 @@ async def upload_files(
                 # 计算文件的哈希值
                 file_hash = hashlib.sha256(contents).hexdigest()
                 # 查询文件是否存在
-                existing_file = db.query(RagFile).filter(RagFile.hash == file_hash, 
+                shared_existing_file = db.query(RagFile).filter(RagFile.hash == file_hash, 
                                                          RagFile.kb_type.in_([RagKnowledgeBaseType.SYSTEM, 
                                                                               RagKnowledgeBaseType.USER_SHARED,
                                                                               RagKnowledgeBaseType.DEPARTMENT]), 
@@ -115,7 +115,8 @@ async def upload_files(
                                                                 RagFile.kb_type == RagKnowledgeBaseType.USER, 
                                                                 RagFile.user_id == current_user.user_id, 
                                                                 RagFile.is_deleted == False).first()
-                if existing_file or myself_existing_file:
+                existing_file = shared_existing_file or myself_existing_file
+                if existing_file:
                     logger.warning(f"文件 {file.filename} 已存在, 跳过上传")
                     existing_files.append({
                         "file_id": existing_file.file_id,
@@ -199,6 +200,8 @@ async def get_files(
         dept_map = {}
         kb_depts = {}
         if category == "system":
+            if current_user.admin != UserRole.SYS_ADMIN:
+                return APIResponse.error(message="没有权限访问系统知识库")
             kb_ids.add(get_system_kb(db))
         elif category == "user":
             kb_ids.add(get_user_kb(current_user, db))
@@ -208,6 +211,8 @@ async def get_files(
             kb_ids.add(get_user_kb(current_user, db))
             kb_ids.add(get_user_shared_kb(db))
         elif category == "department":
+            if current_user.admin != UserRole.DEPT_ADMIN and current_user.admin != UserRole.SYS_ADMIN:
+                return APIResponse.error(message="没有权限访问部门知识库")
             kb_ids.add(get_department_kb(department_id, db))
         elif category == "department_all":
             departments = get_departments(current_user, db)
@@ -582,6 +587,7 @@ async def get_chat_session_detail(
                         "outline_id": msg.outline_id if hasattr(msg, 'outline_id') else "",
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
                         "model_name": json.loads(msg.meta).get("model_name", "") if msg.meta else "",
+                        "reference_files": json.loads(msg.meta).get("reference_files", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages
@@ -642,8 +648,9 @@ async def chat(
         ).all()
         
         custom_prompt = ''
+        per_file_max_length = int(settings.RAG_CHAT_TOTAL_FILE_MAX_LENGTH / (len(reference_files) if len(reference_files) > 0 else 1))
         for file in reference_files:
-            content_preview = file.content[:settings.RAG_CHAT_PER_FILE_MAX_LENGTH]
+            content_preview = file.content[:per_file_max_length]
             custom_prompt += f"文件名: {file.file_name}\n文件内容: {content_preview}\n\n"
 
         if chat_session.doc_id:
@@ -736,11 +743,25 @@ async def chat(
             async def generate():
                 try:
                     assistant_content = ''
+                    docs = []
                     async for chunk in response:
                         if chunk:
                             response_text = chunk.get("response", "")
                             if chunk.get("msg") == "success stream chat":
                                 response_text = ""
+                                retrieval_documents = chunk.get("retrieval_documents", [])
+                                for retrieval_document in retrieval_documents:
+                                    kb_file_id = retrieval_document.get("file_id")
+                                    kb_file = db.query(RagFile).filter(RagFile.kb_file_id == kb_file_id, RagFile.is_deleted == False).first()
+                                    if kb_file:
+                                        docs.append({
+                                            "file_id": kb_file.file_id,
+                                            "file_name": kb_file.file_name,
+                                            "file_path": kb_file.file_path,
+                                            "file_ext": kb_file.file_ext,
+                                            "file_size": kb_file.file_size,
+                                            "content": retrieval_document.get("content", "")
+                                        })
                             new_chunk = {
                                 **chunk,
                                 "choices": [
@@ -755,7 +776,11 @@ async def chat(
                         session_id=session_id,
                         question_id=question_message_id,
                         role="assistant",
-                        content=assistant_content
+                        content=assistant_content,
+                        meta=json.dumps({
+                            "model_name": request.model_name,
+                            "reference_files": docs
+                        })
                     )
                     db.add(assistant_message)
                     db.commit()
@@ -782,13 +807,32 @@ async def chat(
                     return APIResponse.error(message="RAG对话返回异常")
                 
                 answer = history[-1][1]
+
+                retrieval_documents = response.get("retrieval_documents", [])
+                docs = []
+                for retrieval_document in retrieval_documents:
+                    kb_file_id = retrieval_document.get("file_id")
+                    kb_file = db.query(RagFile).filter(RagFile.kb_file_id == kb_file_id, RagFile.is_deleted == False).first()
+                    if kb_file:
+                        docs.append({
+                            "file_id": kb_file.file_id,
+                            "file_name": kb_file.file_name,
+                            "file_path": kb_file.file_path,
+                            "file_ext": kb_file.file_ext,
+                            "file_size": kb_file.file_size,
+                            "content": retrieval_document.get("content", "")
+                        })
+
                 assistant_message = ChatMessage(
                     message_id=f"msg-{shortuuid.uuid()}",
                     session_id=session_id,
                     question_id=question_message_id,
                     role="assistant",
                     content=answer,
-                    meta=json.dumps({"model_name": request.model_name})
+                    meta=json.dumps({
+                        "model_name": request.model_name,
+                        "reference_files": docs
+                    })
                 )
                 db.add(assistant_message)
                 db.commit()
@@ -922,15 +966,20 @@ async def upload_attachment(
             })
             db.commit()
 
-        if existing_files:
-            logger.info(f"附件上传失败, 用户 {current_user.user_id} 已存在文件: {existing_files}")
-            return APIResponse.error(
-                message=f"文件 [{', '.join([file.file_name for file in existing_files])}] 已存在",
-            )
+        result_files = new_files
+        for file in existing_files:
+            result_files.append({
+                "file_id": file.file_id,
+                "file_name": file.file_name,
+                "size": file.file_size,
+                "content_type": file.file_ext,
+                "path": file.file_path,
+                "hash": file.hash
+            })
         
         return APIResponse.success(
             message=f"附件上传成功, 正在解析中。",
-            data=new_files
+            data=result_files
         )
     except Exception as e:
         logger.error(f"上传附件时发生异常: {str(e)}")

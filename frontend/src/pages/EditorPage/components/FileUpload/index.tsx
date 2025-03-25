@@ -27,6 +27,7 @@ const FileUpload: React.FC = () => {
             const response = JSON.parse(xhr.responseText);
             if (response.code !== 200) {
               onError?.(new Error('上传失败'));
+              message.error(`${response.message}`);
               return;
             }
 
@@ -50,7 +51,8 @@ const FileUpload: React.FC = () => {
       if (status === 'done') {
         message.success(`${info.file.name} 文件上传成功`);
       } else if (status === 'error') {
-        message.error(`${info.file.name} 文件上传失败`);
+        console.log('🚀 ~ info:', info);
+        // message.error(`${info.file.name} 文件上传失败`);
       }
     },
   };

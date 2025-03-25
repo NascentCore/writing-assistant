@@ -8,7 +8,7 @@ from app.models.system_config import SystemConfig
 from app.models.chat import ChatSession, ChatSessionType
 from app.schemas.response import APIResponse
 from app.auth import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.document import Document, DocumentVersion
 import logging
 import shortuuid
@@ -289,14 +289,17 @@ async def get_document(
     """获取单个文档"""
     document = db.query(Document).filter(
         Document.doc_id == doc_id,
-        Document.user_id == current_user.user_id
+        # Document.user_id == current_user.user_id
     ).first()
     if not document:
         return APIResponse.error(message="文档不存在或无权访问")
 
+    if document.user_id != current_user.user_id and current_user.admin != UserRole.SYS_ADMIN:
+        return APIResponse.error(message="无权访问")
+
     # 获取文档的session_id
     sessions = db.query(ChatSession).filter(
-        ChatSession.user_id == current_user.user_id,
+        # ChatSession.user_id == current_user.user_id,
         ChatSession.doc_id == doc_id,
         ChatSession.session_type == ChatSessionType.EDITING_ASSISTANT
     ).order_by(desc(ChatSession.id)).all()

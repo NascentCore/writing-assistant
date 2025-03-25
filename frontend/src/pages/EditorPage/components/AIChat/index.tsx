@@ -671,6 +671,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                               const response = JSON.parse(xhr.responseText);
                               if (response.code !== 200) {
                                 onError?.(new Error('上传失败'));
+                                message.error(`${response.message}`);
                                 return;
                               }
                               onSuccess?.(response);
@@ -714,7 +715,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                             );
                           })
                           .map((file) => {
-                            const fileData = file.response.data[0];
+                            const fileData = file.response.data?.[0];
                             return {
                               file_id: fileData.file_id,
                               name: fileData.name || file.name,
