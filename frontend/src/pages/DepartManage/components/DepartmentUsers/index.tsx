@@ -15,12 +15,10 @@ import { Department, DepartmentUser } from '../../type';
 
 interface DepartmentUsersProps {
   currentDepartment: Department | null;
-  onRefreshUsers: () => void;
 }
 
 const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
   currentDepartment,
-  onRefreshUsers,
 }) => {
   const [addUserModalVisible, setAddUserModalVisible] = useState(false);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -43,14 +41,15 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
         if (!currentDepartment) return;
 
         try {
-          await removeUserFromDepartment({
+          const result = await removeUserFromDepartment({
             user_id: user.user_id,
             department_id: currentDepartment.department_id,
           });
           message.success('移除成功');
-          onRefreshUsers();
-          // 刷新表格数据
-          actionRef.current?.reload();
+          if (result !== undefined) {
+            // 刷新表格数据
+            actionRef.current?.reload();
+          }
         } catch (error) {
           console.error('移除用户失败:', error);
         }
@@ -61,14 +60,15 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
   // 设置用户为管理员
   const handleSetUserAdmin = async (user: DepartmentUser) => {
     try {
-      await setUserAdmin({
+      const result = await setUserAdmin({
         user_id: user.user_id,
         admin: user.admin === 1 ? 0 : 1, // 切换管理员状态
       });
       message.success('设置成功');
-      onRefreshUsers();
-      // 刷新表格数据
-      actionRef.current?.reload();
+      if (result !== undefined) {
+        // 刷新表格数据
+        actionRef.current?.reload();
+      }
     } catch (error) {
       console.error('设置管理员失败:', error);
     }
@@ -80,16 +80,17 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
 
     setAddUserLoading(true);
     try {
-      await addUsersToDepartment({
+      const result = await addUsersToDepartment({
         user_ids: selectedUserIds,
         department_id: currentDepartment.department_id,
       });
       message.success('添加用户成功');
-      setAddUserModalVisible(false);
-      setSelectedUserIds([]);
-      onRefreshUsers();
-      // 刷新表格数据
-      actionRef.current?.reload();
+      if (result !== undefined) {
+        setAddUserModalVisible(false);
+        setSelectedUserIds([]);
+        // 刷新表格数据
+        actionRef.current?.reload();
+      }
     } catch (error) {
       console.error('添加用户失败:', error);
     } finally {
@@ -146,7 +147,7 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
       valueType: 'option',
       render: (_, record) => (
         <Space size="middle">
-          {record.admin !== 2 && (
+          {record.admin !== 2 && localStorage.getItem('admin') === '2' && (
             <Tooltip title={record.admin === 1 ? '取消管理员' : '设为管理员'}>
               <Button
                 type="link"

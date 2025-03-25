@@ -12,7 +12,6 @@ const DepartManage: React.FC = () => {
   const [currentDepartment, setCurrentDepartment] = useState<Department | null>(
     null,
   );
-  const [userLoading, setUserLoading] = useState(false);
 
   // 获取部门列表
   const fetchDepartments = async () => {
@@ -43,7 +42,7 @@ const DepartManage: React.FC = () => {
   }, []);
 
   return (
-    <Spin spinning={departmentLoading && userLoading}>
+    <Spin spinning={departmentLoading}>
       <div className={styles.departmentContainer}>
         <DepartmentList
           departments={departments}
@@ -53,13 +52,7 @@ const DepartManage: React.FC = () => {
           onCreateSuccess={fetchDepartments}
         />
 
-        <DepartmentUsers
-          currentDepartment={currentDepartment}
-          onRefreshUsers={() => {
-            // 表格内部通过 request 获取数据，这里只需要将 loading 状态复位
-            setUserLoading(false);
-          }}
-        />
+        <DepartmentUsers currentDepartment={currentDepartment} />
       </div>
     </Spin>
   );
