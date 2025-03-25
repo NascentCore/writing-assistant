@@ -22,6 +22,10 @@ export interface DepartmentDetail {
   department_name: string;
   knowledge_base: string;
   users: DepartmentUser[];
+  total?: number;
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
 }
 
 // 用户列表接口返回类型

@@ -2,9 +2,9 @@ import { Spin } from 'antd';
 import React, { useEffect, useState } from 'react';
 import DepartmentList from './components/DepartmentList';
 import DepartmentUsers from './components/DepartmentUsers';
-import { getDepartments, getDepartmentUsers } from './service';
+import { getDepartments } from './service';
 import styles from './style.less';
-import { Department, DepartmentUser } from './type';
+import { Department } from './type';
 
 const DepartManage: React.FC = () => {
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -12,7 +12,6 @@ const DepartManage: React.FC = () => {
   const [currentDepartment, setCurrentDepartment] = useState<Department | null>(
     null,
   );
-  const [departmentUsers, setDepartmentUsers] = useState<DepartmentUser[]>([]);
   const [userLoading, setUserLoading] = useState(false);
 
   // 获取部门列表
@@ -34,21 +33,6 @@ const DepartManage: React.FC = () => {
     }
   };
 
-  // 获取部门成员
-  const fetchDepartmentUsers = async (departmentId: string) => {
-    setUserLoading(true);
-    try {
-      const result = await getDepartmentUsers(departmentId);
-      if (result) {
-        setDepartmentUsers(result.users || []);
-      }
-    } catch (error) {
-      console.error('获取部门成员失败:', error);
-    } finally {
-      setUserLoading(false);
-    }
-  };
-
   // 选择部门
   const handleSelectDepartment = (department: Department) => {
     setCurrentDepartment(department);
@@ -57,12 +41,6 @@ const DepartManage: React.FC = () => {
   useEffect(() => {
     fetchDepartments();
   }, []);
-
-  useEffect(() => {
-    if (currentDepartment) {
-      fetchDepartmentUsers(currentDepartment.department_id);
-    }
-  }, [currentDepartment]);
 
   return (
     <Spin spinning={departmentLoading && userLoading}>
@@ -77,12 +55,9 @@ const DepartManage: React.FC = () => {
 
         <DepartmentUsers
           currentDepartment={currentDepartment}
-          departmentUsers={departmentUsers}
-          loading={userLoading}
           onRefreshUsers={() => {
-            if (currentDepartment) {
-              fetchDepartmentUsers(currentDepartment.department_id);
-            }
+            // 表格内部通过 request 获取数据，这里只需要将 loading 状态复位
+            setUserLoading(false);
           }}
         />
       </div>

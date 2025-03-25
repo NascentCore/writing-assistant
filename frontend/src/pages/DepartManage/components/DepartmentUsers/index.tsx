@@ -1,10 +1,11 @@
 import { CrownOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import type { ProColumns } from '@ant-design/pro-components';
+import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
 import { Button, Empty, message, Modal, Space, Tooltip } from 'antd';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   addUsersToDepartment,
+  getDepartmentUsers,
   getUserList,
   removeUserFromDepartment,
   setUserAdmin,
@@ -14,20 +15,24 @@ import { Department, DepartmentUser } from '../../type';
 
 interface DepartmentUsersProps {
   currentDepartment: Department | null;
-  departmentUsers: DepartmentUser[];
-  loading: boolean;
   onRefreshUsers: () => void;
 }
 
 const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
   currentDepartment,
-  departmentUsers,
-  loading,
   onRefreshUsers,
 }) => {
   const [addUserModalVisible, setAddUserModalVisible] = useState(false);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [addUserLoading, setAddUserLoading] = useState(false);
+  const actionRef = useRef<ActionType>();
+
+  // 当选择的部门变化时刷新表格
+  useEffect(() => {
+    if (currentDepartment && actionRef.current) {
+      actionRef.current.reload();
+    }
+  }, [currentDepartment]);
 
   // 删除用户确认
   const confirmRemoveUser = (user: DepartmentUser) => {
@@ -44,6 +49,8 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
           });
           message.success('移除成功');
           onRefreshUsers();
+          // 刷新表格数据
+          actionRef.current?.reload();
         } catch (error) {
           console.error('移除用户失败:', error);
         }
@@ -60,6 +67,8 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
       });
       message.success('设置成功');
       onRefreshUsers();
+      // 刷新表格数据
+      actionRef.current?.reload();
     } catch (error) {
       console.error('设置管理员失败:', error);
     }
@@ -79,6 +88,8 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
       setAddUserModalVisible(false);
       setSelectedUserIds([]);
       onRefreshUsers();
+      // 刷新表格数据
+      actionRef.current?.reload();
     } catch (error) {
       console.error('添加用户失败:', error);
     } finally {
@@ -178,11 +189,32 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
       {currentDepartment ? (
         <div className={styles.tableContainer}>
           <ProTable<DepartmentUser>
+            actionRef={actionRef}
             rowKey="user_id"
             columns={columns}
             headerTitle={`${currentDepartment.name} - 成员管理`}
-            dataSource={departmentUsers}
-            loading={loading}
+            search={{
+              labelWidth: 'auto',
+            }}
+            request={async (params) => {
+              const { current = 1, pageSize = 10, username, ...rest } = params;
+              // 使用当前部门ID进行搜索，并传入分页参数
+              const result = await getDepartmentUsers(
+                currentDepartment.department_id,
+                {
+                  page: current,
+                  page_size: pageSize,
+                  username,
+                  ...rest,
+                },
+              );
+
+              return {
+                data: result?.users || [],
+                success: true,
+                total: result?.total || result?.users?.length || 0,
+              };
+            }}
             cardBordered
             pagination={{ showSizeChanger: true }}
             options={false}
@@ -225,11 +257,12 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
           }}
           cardBordered
           request={async (params) => {
-            const { current = 1, pageSize = 10 } = params;
+            const { current = 1, pageSize = 10, ...rest } = params;
             const result = await getUserList({
               filter: 'no_departments',
               page: current,
               page_size: pageSize,
+              ...rest,
             });
 
             return {
@@ -239,7 +272,6 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
             };
           }}
           rowSelection={{
-            // selections: [Table.SELECTION_ALL, Table.SELECTION_INVERT],
             onChange: (selectedRowKeys) => {
               setSelectedUserIds(selectedRowKeys as string[]);
             },

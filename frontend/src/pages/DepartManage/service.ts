@@ -34,10 +34,32 @@ export async function createDepartment(
 // 获取部门成员
 export async function getDepartmentUsers(
   departmentId: string,
+  params?: {
+    page?: number;
+    page_size?: number;
+    username?: string;
+    [key: string]: any;
+  },
 ): Promise<DepartmentDetail | undefined | null> {
-  return fetchWithAuthNew<DepartmentDetail>(
-    `${BASE_API}/departments/${departmentId}`,
-  ) as Promise<DepartmentDetail | undefined | null>;
+  let url = `${BASE_API}/departments/${departmentId}`;
+
+  // 如果有分页和搜索参数，添加到URL
+  if (params) {
+    const queryParams: string[] = [];
+    Object.keys(params).forEach((key) => {
+      if (params[key] !== undefined && params[key] !== null) {
+        queryParams.push(`${key}=${encodeURIComponent(params[key])}`);
+      }
+    });
+
+    if (queryParams.length > 0) {
+      url += `?${queryParams.join('&')}`;
+    }
+  }
+
+  return fetchWithAuthNew<DepartmentDetail>(url) as Promise<
+    DepartmentDetail | undefined | null
+  >;
 }
 
 // 查询用户列表（添加部门用户时使用）
@@ -45,11 +67,33 @@ export async function getUserList(params: {
   filter?: string;
   page: number;
   page_size: number;
+  username?: string;
+  [key: string]: any;
 }): Promise<UserListResponse | undefined | null> {
-  const { filter = 'no_departments', page, page_size } = params;
-  return fetchWithAuthNew<UserListResponse>(
-    `${BASE_API}/users?filter=${filter}&page=${page}&page_size=${page_size}`,
-  ) as Promise<UserListResponse | undefined | null>;
+  const {
+    filter = 'no_departments',
+    page,
+    page_size,
+    username,
+    ...restParams
+  } = params;
+  let url = `${BASE_API}/users?filter=${filter}&page=${page}&page_size=${page_size}`;
+
+  // 添加搜索参数
+  if (username) {
+    url += `&username=${encodeURIComponent(username)}`;
+  }
+
+  // 添加其他可能的查询参数
+  Object.keys(restParams).forEach((key) => {
+    if (restParams[key] !== undefined && restParams[key] !== null) {
+      url += `&${key}=${encodeURIComponent(restParams[key])}`;
+    }
+  });
+
+  return fetchWithAuthNew<UserListResponse>(url) as Promise<
+    UserListResponse | undefined | null
+  >;
 }
 
 // 添加用户到部门

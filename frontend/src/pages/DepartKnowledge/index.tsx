@@ -112,7 +112,10 @@ const KnowledgeBaseList: React.FC = () => {
               params: {
                 page: current,
                 page_size: pageSize,
-                category: 'department_all',
+                category:
+                  localStorage.getItem('admin') === '2'
+                    ? 'department_all'
+                    : 'department',
                 ...rest,
               },
             });
