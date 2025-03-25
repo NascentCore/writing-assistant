@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import get_db, sync_engine, Base
 from app.rag.process import rag_worker
 from app.rag.kb import ensure_knowledge_bases
+from app.routers.v1.writing import refresh_writing_tasks_status
 from fastapi.logger import logger as fastapi_logger
 
 logger = logging.getLogger("app")
@@ -77,6 +78,13 @@ async def lifespan(app: FastAPI):
     thread.daemon = True
     thread.start()
     logger.info("知识库文件处理线程已启动")
+    
+    # 恢复未完成的写作任务
+    try:
+        refresh_writing_tasks_status()
+        logger.info("未完成的写作任务恢复检查完成")
+    except Exception as e:
+        logger.error(f"恢复写作任务失败: {str(e)}")
     
     yield
     

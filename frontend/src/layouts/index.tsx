@@ -157,95 +157,97 @@ const Layout: React.FC = () => {
 
   return (
     <div className={styles.layoutContainer}>
-      <div
-        className={`${styles.sideMenu} ${collapsed ? styles.collapsed : ''}`}
-      >
-        <div className={styles.menuHeader}>
-          <div className={styles.userAvatar}>
-            <Dropdown
-              menu={{ items: userMenuItems }}
-              placement="bottomRight"
-              trigger={['click']}
-            >
-              <div className={styles.avatarContainer}>
-                <Avatar icon={<UserOutlined />} size="large" />
-                <span className={styles.userName}>{username}</span>
-              </div>
-            </Dropdown>
-          </div>
-          <div
-            className={styles.collapseButton}
-            onClick={() => setCollapsed(!collapsed)}
-          >
-            {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-          </div>
-        </div>
-
-        {menuItems.map((item) => (
-          <div key={item.key} className={styles.menuItemContainer}>
+      {!window.isIframe && (
+        <div
+          className={`${styles.sideMenu} ${collapsed ? styles.collapsed : ''}`}
+        >
+          <div className={styles.menuHeader}>
+            <div className={styles.userAvatar}>
+              <Dropdown
+                menu={{ items: userMenuItems }}
+                placement="bottomRight"
+                trigger={['click']}
+              >
+                <div className={styles.avatarContainer}>
+                  <Avatar icon={<UserOutlined />} size="large" />
+                  <span className={styles.userName}>{username}</span>
+                </div>
+              </Dropdown>
+            </div>
             <div
-              className={`${styles.menuItem} ${
-                selectedMenu === item.key && item.key !== 'RecentChat'
-                  ? styles.selected
-                  : ''
-              }`}
-              onClick={() => {
-                if (item.key !== 'RecentChat') {
-                  setSelectedMenu(item.key);
-                  if (item.path) {
-                    history.push(item.path);
-                  }
-                }
-                if (item.children) {
-                  setExpandedMenu((prev) =>
-                    prev.includes(item.key)
-                      ? prev.filter((key) => key !== item.key)
-                      : [...prev, item.key],
-                  );
-                }
-              }}
+              className={styles.collapseButton}
+              onClick={() => setCollapsed(!collapsed)}
             >
-              <div className={styles.menuItemContent}>
-                {item.icon}
-                {!collapsed && (
-                  <span className={styles.menuItemTitle}>{item.title}</span>
+              {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            </div>
+          </div>
+
+          {menuItems.map((item) => (
+            <div key={item.key} className={styles.menuItemContainer}>
+              <div
+                className={`${styles.menuItem} ${
+                  selectedMenu === item.key && item.key !== 'RecentChat'
+                    ? styles.selected
+                    : ''
+                }`}
+                onClick={() => {
+                  if (item.key !== 'RecentChat') {
+                    setSelectedMenu(item.key);
+                    if (item.path) {
+                      history.push(item.path);
+                    }
+                  }
+                  if (item.children) {
+                    setExpandedMenu((prev) =>
+                      prev.includes(item.key)
+                        ? prev.filter((key) => key !== item.key)
+                        : [...prev, item.key],
+                    );
+                  }
+                }}
+              >
+                <div className={styles.menuItemContent}>
+                  {item.icon}
+                  {!collapsed && (
+                    <span className={styles.menuItemTitle}>{item.title}</span>
+                  )}
+                </div>
+                {item.children && !collapsed && (
+                  <UpOutlined
+                    className={`${styles.arrow} ${
+                      expandedMenu.includes(item.key)
+                        ? styles.expanded
+                        : styles.unexpanded
+                    }`}
+                  />
                 )}
               </div>
               {item.children && !collapsed && (
-                <UpOutlined
-                  className={`${styles.arrow} ${
-                    expandedMenu.includes(item.key)
-                      ? styles.expanded
-                      : styles.unexpanded
+                <div
+                  className={`${styles.subMenu} ${
+                    expandedMenu.includes(item.key) ? 'expanded' : ''
                   }`}
-                />
+                >
+                  {item.children.map((child) => (
+                    <div
+                      key={child.key}
+                      className={`${styles.subMenuItem} ${
+                        selectedMenu === child.key ? styles.selected : ''
+                      }`}
+                      onClick={() => {
+                        setSelectedMenu(child.key);
+                        history.push(`/AiChat?chatId=${child.key}`);
+                      }}
+                    >
+                      {child.title}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-            {item.children && !collapsed && (
-              <div
-                className={`${styles.subMenu} ${
-                  expandedMenu.includes(item.key) ? 'expanded' : ''
-                }`}
-              >
-                {item.children.map((child) => (
-                  <div
-                    key={child.key}
-                    className={`${styles.subMenuItem} ${
-                      selectedMenu === child.key ? styles.selected : ''
-                    }`}
-                    onClick={() => {
-                      setSelectedMenu(child.key);
-                      history.push(`/AiChat?chatId=${child.key}`);
-                    }}
-                  >
-                    {child.title}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
       <div className={styles.mainContent}>
         <Outlet />
       </div>
