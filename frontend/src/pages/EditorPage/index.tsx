@@ -111,6 +111,7 @@ function App() {
             query.set('id', result.data.session_ids[0]);
             history.push(`${location.pathname}?${query.toString()}`);
           }
+
           // 创建临时 div 来解析内容
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = content;
@@ -290,21 +291,52 @@ function App() {
               : {}),
           }}
         >
-          <Button
-            style={{ marginLeft: 10 }}
-            onClick={() => {
-              // 更新路由，添加会话ID参数
-              const query = new URLSearchParams(location.search);
-              history.push(`/WritingHistory?id=${query.get('pre-id') || ''}`);
-            }}
-          >
-            返回
-          </Button>
+          {!window.isIframe && (
+            <Button
+              style={{ marginLeft: 10 }}
+              onClick={() => {
+                // 更新路由，添加会话ID参数
+                const query = new URLSearchParams(location.search);
+                history.push(`/WritingHistory?id=${query.get('pre-id') || ''}`);
+              }}
+            >
+              返回
+            </Button>
+          )}
           <div className="header-buttons">
             {/* <Button onClick={() => setShowFileModal(true)}> 文件上传</Button> */}
             <Button onClick={() => setShowAIChat(!showAIChat)}>AI对话</Button>
             <ExportBtnGroup editorRef={editorRef} />
-            {currentDocId && (
+            {window.isIframe && (
+              <>
+                <Button
+                  onClick={() => {
+                    window.parent.postMessage({ type: 'onCancel' }, '*'); // 发送消息到父页面
+                  }}
+                  ghost
+                  type="primary"
+                >
+                  取消
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (editorRef?.current) {
+                      window.parent.postMessage(
+                        {
+                          type: 'onUpdate',
+                          value: editorRef.current.getHtml(),
+                        },
+                        '*',
+                      );
+                    }
+                  }}
+                  type="primary"
+                >
+                  更新
+                </Button>
+              </>
+            )}
+            {currentDocId && !window.isIframe && (
               <Button onClick={() => setShowVersionHistory(true)}>
                 版本历史
               </Button>
