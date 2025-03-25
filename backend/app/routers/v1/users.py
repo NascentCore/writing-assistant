@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 import shortuuid
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -7,7 +7,7 @@ from app.models.user import User, UserRole
 from app.auth import get_current_user, get_password_hash, verify_password
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
-from app.schemas.response import APIResponse
+from app.schemas.response import APIResponse, PaginationData
 from app.models.department import Department, UserDepartment
 from app.models.rag import RagKnowledgeBase, RagKnowledgeBaseType
 from app.rag.rag_api_async import rag_api_async
@@ -406,4 +406,42 @@ async def remove_user_department(
         logger.error(f"解除用户部门信息失败: {str(e)}")
         return APIResponse.error(message=f"解除用户部门信息失败: {str(e)}")
 
+@router.get("/users", summary="获取用户列表")
+async def get_users(
+    filter: Optional[str] = Query("no_departments", description="过滤条件", example="no_departments", enum=["no_departments"]),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, gt=0, description="每页记录数"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取用户列表"""
+    try:
+        if current_user.admin != UserRole.SYS_ADMIN and current_user.admin != UserRole.DEPT_ADMIN:
+            return APIResponse.error(message="无权限获取用户列表")
 
+        query = db.query(User)
+        
+        if filter == "no_departments":
+            query = query.outerjoin(UserDepartment, User.user_id == UserDepartment.user_id).filter(UserDepartment.user_id == None)
+
+        # 计算分页的偏移量
+        offset = (page - 1) * page_size
+        total = query.count()
+
+        users = query.offset(offset).limit(page_size).all()
+        
+        return APIResponse.success(message="获取用户列表成功", data=PaginationData(
+            list=[{
+                "user_id": user.user_id,
+                "username": user.username,
+                "email": user.email,
+                "admin": user.admin,
+                "created_at": user.created_at
+            } for user in users],
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total // page_size + 1
+        ))
+    except Exception as e:
+        return APIResponse.error(message=f"获取用户列表失败: {str(e)}")
