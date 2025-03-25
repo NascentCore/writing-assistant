@@ -61,6 +61,11 @@ const KnowledgeBaseList: React.FC = () => {
       },
     },
     {
+      title: '部门名称',
+      search: false,
+      dataIndex: 'department_name',
+    },
+    {
       title: '创建时间',
       search: false,
       dataIndex: 'created_at',
