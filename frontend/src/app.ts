@@ -16,6 +16,18 @@ interface ChatRequestBody {
   doc_id?: string;
 }
 
+//判断是否是以iframe的方式被应用
+if (window.self !== window.top) {
+  const query = new URLSearchParams(location.search);
+  const token = query.get('token');
+  const admin = query.get('admin');
+  localStorage.setItem('token', token?.split(' ')?.['1'] as string);
+  localStorage.setItem('admin', admin as string);
+  window.isIframe = true;
+} else {
+  window.isIframe = false;
+}
+
 // 保存原始的fetch方法
 const originalFetch = window.fetch;
 

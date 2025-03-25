@@ -760,12 +760,13 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
   }
 
   return (
-    <div className={styles.sidebar}>
-      <div className={styles.sidebarHeader}>
-        <Typography.Title level={5} style={{ margin: 0 }}>
-          写作历史
-        </Typography.Title>
-        {/* <Button
+    !window.isIframe && (
+      <div className={styles.sidebar}>
+        <div className={styles.sidebarHeader}>
+          <Typography.Title level={5} style={{ margin: 0 }}>
+            写作历史
+          </Typography.Title>
+          {/* <Button
           type="text"
           size="small"
           onClick={() => setShowSidebar(false)}
@@ -773,37 +774,38 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
         >
           &lt;
         </Button> */}
+        </div>
+        <div className={styles.conversationsContainer} id="scrollableDiv">
+          {sessionsLoading && sessions.length === 0 ? (
+            <div className={styles.loading}>
+              <Spin size="small" />
+              <div>加载中...</div>
+            </div>
+          ) : sessions.length === 0 ? (
+            <Empty description="暂无会话记录" />
+          ) : (
+            <div style={{ height: '100%', overflow: 'auto' }}>
+              <ConversationsList
+                items={conversationItems}
+                activeKey={activeSessionId || undefined}
+                onActiveChange={handleSessionChange}
+                onDeleteSession={handleDeleteSession}
+              />
+              <LoadMoreButton
+                hasMore={hasMore}
+                loading={sessionsLoading}
+                onClick={loadMoreSessions}
+              />
+            </div>
+          )}
+        </div>
+        <div className={styles.sidebarFooter} style={{ display: 'none' }}>
+          <Button type="primary" block onClick={handleCreateNewSession}>
+            新建会话
+          </Button>
+        </div>
       </div>
-      <div className={styles.conversationsContainer} id="scrollableDiv">
-        {sessionsLoading && sessions.length === 0 ? (
-          <div className={styles.loading}>
-            <Spin size="small" />
-            <div>加载中...</div>
-          </div>
-        ) : sessions.length === 0 ? (
-          <Empty description="暂无会话记录" />
-        ) : (
-          <div style={{ height: '100%', overflow: 'auto' }}>
-            <ConversationsList
-              items={conversationItems}
-              activeKey={activeSessionId || undefined}
-              onActiveChange={handleSessionChange}
-              onDeleteSession={handleDeleteSession}
-            />
-            <LoadMoreButton
-              hasMore={hasMore}
-              loading={sessionsLoading}
-              onClick={loadMoreSessions}
-            />
-          </div>
-        )}
-      </div>
-      <div className={styles.sidebarFooter} style={{ display: 'none' }}>
-        <Button type="primary" block onClick={handleCreateNewSession}>
-          新建会话
-        </Button>
-      </div>
-    </div>
+    )
   );
 };
 
