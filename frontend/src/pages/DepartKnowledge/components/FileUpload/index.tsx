@@ -29,9 +29,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
     const fetchDepartments = async () => {
       setLoading(true);
       try {
-        const result = await fetchWithAuthNew('/api/v1/users/departments', {
-          method: 'GET',
-        });
+        let my_own = localStorage.getItem('admin') !== '2';
+        const result = await fetchWithAuthNew(
+          `/api/v1/users/departments?my_own=${my_own}`,
+          {
+            method: 'GET',
+          },
+        );
 
         if (result.length > 0) {
           setDepartments(result);
