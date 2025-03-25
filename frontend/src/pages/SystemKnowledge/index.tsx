@@ -103,6 +103,7 @@ const KnowledgeBaseList: React.FC = () => {
     <>
       <ProTable<KnowledgeBaseFile>
         columns={columns}
+        options={false}
         actionRef={actionRef}
         cardBordered
         request={async (params) => {

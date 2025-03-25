@@ -144,6 +144,7 @@ const KnowledgeBaseList: React.FC = () => {
         }}
         dateFormatter="string"
         headerTitle="知识库文件列表"
+        options={false}
         toolBarRender={() => [
           <Button
             key="upload"

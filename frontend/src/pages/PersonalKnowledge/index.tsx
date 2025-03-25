@@ -144,6 +144,7 @@ const KnowledgeBaseList: React.FC = () => {
         columns={columns}
         actionRef={actionRef}
         cardBordered
+        options={false}
         request={async (params) => {
           const { current, pageSize, ...rest } = params;
           try {

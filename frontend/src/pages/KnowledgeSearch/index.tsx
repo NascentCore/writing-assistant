@@ -67,6 +67,7 @@ const KnowledgeSearch: React.FC = () => {
         columns={columns}
         cardBordered
         manualRequest
+        options={false}
         request={async (params) => {
           if (!params.file_name?.trim()) {
             message.warning('请输入搜索关键词');
@@ -142,7 +143,6 @@ const KnowledgeSearch: React.FC = () => {
             '知识库检索'
           )
         }
-        options={false}
       />
     </div>
   );
