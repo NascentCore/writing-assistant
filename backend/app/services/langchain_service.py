@@ -843,6 +843,15 @@ class OutlineGenerator:
         """为大纲中的每个一级章节生成所有子章节"""
         first_level_chapters = outline_data["sub_paragraphs"]
         chapter_count = len(first_level_chapters)
+
+        # 根据字数或页数要求决定生成的子章节数量
+        children_num = "2-3"
+        if (word_count and word_count >= 80000 and word_count < 150000) or (page_count and page_count >= 100 and page_count < 200):
+            children_num = "4-5"
+        elif (word_count and word_count >= 150000) or (page_count and page_count >= 200):
+            children_num = "6-7"
+
+        logger.info(f"字数要求：{word_count}，页数要求：{page_count}，子章节数量：{children_num}")
         
         # 使用并行处理框架
         try:
@@ -883,7 +892,8 @@ class OutlineGenerator:
                 chapter_page_count=chapter_page_count,
                 task_id=task_id,  # 传递task_id用于日志记录
                 chapter_index=index,
-                total_chapters=chapter_count
+                total_chapters=chapter_count,
+                children_num=children_num
             )
             
             return index, subchapters
@@ -948,7 +958,8 @@ class OutlineGenerator:
                     chapter_page_count=max(1, int(page_count / chapter_count)) if page_count else None,
                     task_id=task_id,
                     chapter_index=i,
-                    total_chapters=chapter_count
+                    total_chapters=chapter_count,
+                    children_num=children_num
                 )
                 
                 chapter["children"] = subchapters
@@ -968,7 +979,8 @@ class OutlineGenerator:
         chapter_page_count: Optional[int] = None,
         task_id: Optional[str] = None,
         chapter_index: int = 0,
-        total_chapters: int = 1
+        total_chapters: int = 1,
+        children_num: str = "2-3"
     ) -> List[Dict[str, Any]]:
         """递归生成章节的子章节"""
         # 记录日志但不更新数据库
@@ -1001,7 +1013,7 @@ class OutlineGenerator:
         
         【任务要求】
         1. 仅创建下一级({next_level}级)的子章节，不要生成更深层级
-        2. 生成2-3个子章节，请结合字数、页数要求灵活分配
+        2. 生成{children_num}个子章节，请结合字数、页数要求灵活分配
         3. 每个子章节必须有明确具体的标题和简短描述
         4. 标题必须有实质性内容，与父章节紧密相关
         5. 标题不得包含编号，不要使用"详细内容"等无意义词语
@@ -1037,7 +1049,8 @@ class OutlineGenerator:
             "next_level": next_level,
             "required_level": required_level,
             "prompt": prompt,
-            "context": combined_context
+            "context": combined_context,
+            "children_num": children_num
         }
         
         try:
@@ -1111,7 +1124,8 @@ class OutlineGenerator:
                             sub_page_count,
                             task_id,
                             chapter_index,
-                            total_chapters
+                            total_chapters,
+                            children_num
                         )
                         
                         subchapter_obj["children"] = deeper_subchapters
@@ -1994,8 +2008,8 @@ class OutlineGenerator:
             "chapter_summaries": {},  # 已生成章节的摘要，格式为 {章节标题: 摘要内容}
             "generated_contents": {},  # 已生成段落的内容，格式为 {段落ID: {title: 标题, content: 内容}}
             "total_content_length": len(f"# {article_title}\n"),  # 当前已生成内容的总长度
-            "max_total_length": 100000,  # 内容总长度限制
-            "max_chapter_length": 5000,  # 单个章节长度限制
+            "max_total_length": 200000,  # 内容总长度限制
+            "max_chapter_length": 10000,  # 单个章节长度限制
             "duplicate_titles": set(),  # 记录重复的标题
             "generated_titles": set(),  # 记录已生成的标题
             "doc_id": doc_id,  # 文档ID，用于更新HTML内容
