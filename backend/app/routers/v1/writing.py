@@ -1259,10 +1259,11 @@ async def _prepare_generation_resources(db: Session, task_id: str, file_ids: Lis
     
     # 获取文件内容
     file_contents = []
+    per_file_max_length = int(Settings.RAG_CHAT_TOTAL_FILE_MAX_LENGTH / (len(file_ids) if len(file_ids) > 0 else 1))
     for file_id in file_ids:
         file = db.query(RagFile).filter(RagFile.file_id == file_id, RagFile.is_deleted == False).first()
         if file and file.content:
-            file_contents.append(file.content[:Settings.RAG_CHAT_PER_FILE_MAX_LENGTH])
+            file_contents.append(file.content[:per_file_max_length])
             logger.info(f"加载参考文件内容 [file_id={file_id}]")
     
     return user_id, file_contents
