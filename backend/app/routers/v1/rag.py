@@ -233,6 +233,9 @@ async def get_files(
             raise ValueError(f"不支持的知识库类别: {category}")
 
         query_filter = db.query(RagFile).filter(RagFile.kb_id.in_(kb_ids), RagFile.is_deleted == False)
+
+        if category == "user" or category == "user_shared" or category == "user_all":
+            query_filter = query_filter.filter(RagFile.user_id == current_user.user_id)
         
         # 文件名搜索
         if file_name:
