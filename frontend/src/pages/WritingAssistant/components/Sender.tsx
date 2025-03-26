@@ -339,6 +339,7 @@ const Sender = forwardRef<any, SenderProps>(
                   </Select>
                   <div
                     style={{
+                      display: 'none',
                       marginLeft: 20,
                       fontSize: '16px',
                     }}
@@ -346,6 +347,7 @@ const Sender = forwardRef<any, SenderProps>(
                     同步到个人知识库：
                   </div>
                   <Switch
+                    style={{ display: 'none' }}
                     checked={saveToKb}
                     onChange={(checked) => {
                       setSaveToKb(checked);
