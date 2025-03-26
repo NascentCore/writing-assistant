@@ -34,6 +34,7 @@ from app.rag.rag_api import rag_api
 from app.models.document import Document
 from app.models.task import Task, TaskStatus
 from app.utils.web_search import baidu_search
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -507,6 +508,9 @@ class OutlineGenerator:
         required_level = user_requirements.get("required_level", 2)  # 默认为2级
         word_count = user_requirements.get("word_count")
         page_count = user_requirements.get("page_count")
+        if not word_count and page_count:
+            word_count = page_count * settings.WRITING_PER_PAGE_WORD_COUNT
+            logger.info(f"根据页数({page_count}页)计算字数要求: {word_count}字")
         predefined_chapters = user_requirements.get("predefined_chapters", [])
         logger.info(f"要求层级：{required_level} 级")
         
@@ -550,6 +554,11 @@ class OutlineGenerator:
             # 验证和优化大纲结构
             self._validate_and_fix_outline(complete_outline)
             self._optimize_outline_structure(complete_outline)
+
+            # 根据字数要求，重新分配大纲中各章节和段落的字数
+            if word_count:
+                self._distribute_word_outline(complete_outline, word_count)
+
             
             # 更新任务进度 - 完成
             update_task_progress(task_id, db_session, 100, "大纲生成完成", f"大纲包含{len(complete_outline['sub_paragraphs'])}个一级标题")
@@ -1253,6 +1262,273 @@ class OutlineGenerator:
                 
         return subchapters
 
+    def _distribute_word_outline(self, outline_data: Dict[str, Any], word_count: int) -> None:
+        """
+        根据总体字数，计算每个段落的预估字数
+        
+        Args:
+            outline_data: 大纲数据
+            word_count: 总字数
+        """
+        logger.info(f"开始分配大纲字数，总字数: {word_count}字")
+        
+        # 从配置文件获取每个段落生成的最大字数
+        WRITING_MAX_WORD_COUNT_PER_GENERATION = settings.WRITING_MAX_WORD_COUNT_PER_GENERATION
+        logger.info(f"每个段落的最大生成字数: {WRITING_MAX_WORD_COUNT_PER_GENERATION}")
+        
+        if not outline_data or "sub_paragraphs" not in outline_data or not outline_data["sub_paragraphs"]:
+            logger.warning("大纲为空或没有段落，无法分配字数")
+            return
+            
+        # 计算当前大纲段落数量和能够生成的最大字数
+        def count_paragraphs(paragraphs):
+            count = len(paragraphs)
+            for para in paragraphs:
+                if "children" in para and para["children"]:
+                    count += count_paragraphs(para["children"])
+            return count
+            
+        total_paragraphs = count_paragraphs(outline_data["sub_paragraphs"])
+        max_possible_words = total_paragraphs * WRITING_MAX_WORD_COUNT_PER_GENERATION
+        
+        logger.info(f"当前大纲有 {total_paragraphs} 个段落，最多可生成 {max_possible_words} 字")
+        
+        # 如果当前段落数不足以满足字数要求，需要添加更多段落
+        if max_possible_words < word_count:
+            logger.info(f"当前段落数不足以满足 {word_count} 字的要求，需要添加更多段落")
+            
+            # 计算需要添加的段落数
+#             additional_paragraphs_needed = (word_count - max_possible_words + WRITING_MAX_WORD_COUNT_PER_GENERATION - 1) // WRITING_MAX_WORD_COUNT_PER_GENERATION
+#             logger.info(f"需要额外添加 {additional_paragraphs_needed} 个段落")
+            
+#             # 找出最深层级的段落，并为其添加子段落
+#             def add_paragraphs_to_deep_nodes(paragraphs, depth=1, to_add=0):
+#                 if to_add <= 0:
+#                     return 0
+                
+#                 # 如果当前层级有段落且没有子段落，则添加子段落
+#                 leaf_nodes = [p for p in paragraphs if "children" not in p or not p["children"]]
+                
+#                 # 如果没有叶子节点，递归检查每个段落的子节点
+#                 if not leaf_nodes:
+#                     remaining = to_add
+#                     for para in paragraphs:
+#                         if "children" in para and para["children"]:
+#                             added = add_paragraphs_to_deep_nodes(para["children"], depth+1, remaining)
+#                             remaining -= added
+#                             if remaining <= 0:
+#                                 break
+#                     return to_add - remaining
+                
+#                 # 为每个叶子节点添加子段落，直到达到所需数量
+#                 added_count = 0
+#                 for leaf in leaf_nodes:
+#                     if added_count >= to_add:
+#                         break
+                    
+#                     # 确保有children字段
+#                     if "children" not in leaf:
+#                         leaf["children"] = []
+                    
+#                     # 使用大模型生成子段落标题和描述
+#                     parent_title = leaf.get("title", "无标题")
+#                     parent_description = leaf.get("description", "")
+                    
+#                     # 构建提示词
+#                     prompt = f"""
+# 根据以下父段落的信息，为其生成一个合适的子段落标题和描述。生成的内容应该与父段落自然衔接并进一步扩展其主题。
+
+# 父段落标题: {parent_title}
+# 父段落描述: {parent_description}
+
+# 请提供一个格式为JSON的响应，包含:
+# {{
+#     "title": "子段落标题",
+#     "description": "子段落详细描述"
+# }}
+# """
+                    
+#                     try:
+#                         # 调用大模型生成子段落信息
+#                         logger.info(f"通过大模型为段落 '{parent_title}' 生成子段落")
+#                         response = self.llm.invoke(prompt)
+                        
+#                         # 解析响应
+#                         import json
+#                         import re
+                        
+#                         # 尝试提取JSON部分
+#                         json_match = re.search(r'(\{.*?\})', response.content.replace('\n', ' '), re.DOTALL)
+#                         if json_match:
+#                             result = json.loads(json_match.group(1))
+                            
+#                             # 创建子段落
+#                             new_para = {
+#                                 "title": result.get("title", f"{parent_title} - 补充内容"),
+#                                 "description": result.get("description", "详细展开父段落内容"),
+#                                 "level": leaf.get("level", 1) + 1,
+#                                 "count_style": "medium"
+#                             }
+#                         else:
+#                             # 如果无法解析JSON，使用默认值
+#                             new_para = {
+#                                 "title": f"{parent_title} - 补充内容 {len(leaf['children'])+1}",
+#                                 "description": f"根据父段落内容补充详细说明",
+#                                 "level": leaf.get("level", 1) + 1,
+#                                 "count_style": "medium"
+#                             }
+#                     except Exception as e:
+#                         logger.error(f"生成子段落时出错: {str(e)}")
+#                         # 出错时使用默认值
+#                         new_para = {
+#                             "title": f"{parent_title} - 补充内容 {len(leaf['children'])+1}",
+#                             "description": f"根据父段落内容补充详细说明",
+#                             "level": leaf.get("level", 1) + 1,
+#                             "count_style": "medium"
+#                         }
+                    
+#                     leaf["children"].append(new_para)
+#                     added_count += 1
+                    
+#                     logger.info(f"为段落 '{leaf.get('title', '无标题')}' 添加子段落: '{new_para['title']}'")
+                
+#                 return added_count
+            
+#             # 添加段落
+#             added = add_paragraphs_to_deep_nodes(outline_data["sub_paragraphs"], to_add=additional_paragraphs_needed)
+#             logger.info(f"成功添加了 {added} 个段落")
+            
+#             # 重新计算段落总数
+#             total_paragraphs = count_paragraphs(outline_data["sub_paragraphs"])
+#             max_possible_words = total_paragraphs * WRITING_MAX_WORD_COUNT_PER_GENERATION
+#             logger.info(f"调整后大纲有 {total_paragraphs} 个段落，最多可生成 {max_possible_words} 字")
+            
+        # 获取一级段落列表
+        top_level_paragraphs = outline_data["sub_paragraphs"]
+        
+        # 第一步：创建权重映射并计算段落权重
+        def calculate_weight(paragraph):
+            # 默认权重为1
+            weight = 1
+            
+            # 根据篇幅风格调整权重
+            count_style = paragraph.get("count_style", "medium").lower()
+            if count_style == "short":
+                weight = 0.5
+            elif count_style == "medium":
+                weight = 1
+            elif count_style == "long":
+                weight = 2
+                
+            # 如果段落有子段落，考虑子段落的复杂度
+            children = paragraph.get("children", [])
+            if children:
+                # 子段落数量会增加权重
+                child_factor = 1 + 0.1 * len(children)
+                weight *= child_factor
+                
+            return weight
+        
+        # 为每个一级段落计算权重
+        total_weight = 0
+        for para in top_level_paragraphs:
+            para["_weight"] = calculate_weight(para)
+            total_weight += para["_weight"]
+        
+        # 第二步：根据权重比例分配总字数
+        for para in top_level_paragraphs:
+            # 计算该段落应分配的字数
+            para_weight = para["_weight"]
+            weight_ratio = para_weight / total_weight if total_weight > 0 else 1 / len(top_level_paragraphs)
+            para_word_count = int(word_count * weight_ratio)
+            
+            # 设置段落字数
+            para["expected_word_count"] = para_word_count
+            
+            logger.info(f"一级段落 '{para.get('title', '无标题')}' 分配 {para_word_count} 字")
+            
+            # 递归分配子段落字数
+            children = para.get("children", [])
+            if children:
+                self._distribute_word_count_to_children(children, para_word_count)
+                
+        # 第三步：确保分配的总字数等于预期总字数（处理舍入误差）
+        allocated_words = sum(p.get("expected_word_count", 0) for p in top_level_paragraphs)
+        
+        # 如果存在差异，调整权重最大的段落
+        if allocated_words != word_count:
+            diff = word_count - allocated_words
+            # 找到权重最大的段落
+            max_weight_para = max(top_level_paragraphs, key=lambda p: p.get("_weight", 0))
+            # 调整字数
+            max_weight_para["expected_word_count"] += diff
+            logger.info(f"调整段落 '{max_weight_para.get('title', '无标题')}' 字数 {diff} 字以匹配总字数")
+        
+        # 第四步：确保每个段落的字数不超过最大限制
+        def limit_paragraph_word_count(paragraphs):
+            for para in paragraphs:
+                # 限制字数在最大生成字数以内
+                if para.get("expected_word_count", 0) > WRITING_MAX_WORD_COUNT_PER_GENERATION:
+                    logger.info(f"段落 '{para.get('title', '无标题')}' 字数 {para.get('expected_word_count')} 超过限制，调整为 {WRITING_MAX_WORD_COUNT_PER_GENERATION}")
+                    para["expected_word_count"] = WRITING_MAX_WORD_COUNT_PER_GENERATION
+                
+                # 递归处理子段落
+                if "children" in para and para["children"]:
+                    limit_paragraph_word_count(para["children"])
+        
+        limit_paragraph_word_count(outline_data["sub_paragraphs"])
+        
+        # 清理临时权重数据
+        for para in top_level_paragraphs:
+            if "_weight" in para:
+                del para["_weight"]
+                
+        logger.info("字数分配完成")
+    
+    def _distribute_word_count_to_children(self, children: List[Dict[str, Any]], parent_word_count: int) -> None:
+        """
+        递归地为子段落分配字数
+        
+        Args:
+            children: 子段落列表
+            parent_word_count: 父段落字数
+        """
+        if not children or parent_word_count <= 0:
+            return
+            
+        # 计算每个子段落的权重
+        total_weight = 0
+        for child in children:
+            # 默认每个子段落权重相同
+            child["_weight"] = 1
+            
+            # 考虑子段落的深度
+            if child.get("children", []):
+                # 有子段落的段落权重略高
+                child["_weight"] *= 1.2
+                
+            total_weight += child["_weight"]
+        
+        # 根据权重分配字数
+        remaining_words = parent_word_count
+        for i, child in enumerate(children):
+            # 最后一个子段落分配所有剩余字数，确保总和等于父段落字数
+            if i == len(children) - 1:
+                child["expected_word_count"] = remaining_words
+            else:
+                weight_ratio = child["_weight"] / total_weight if total_weight > 0 else 1 / len(children)
+                child_word_count = int(parent_word_count * weight_ratio)
+                child["expected_word_count"] = child_word_count
+                remaining_words -= child_word_count
+            
+            # 递归处理子段落的子段落
+            if child.get("children", []):
+                self._distribute_word_count_to_children(child["children"], child["expected_word_count"])
+            
+            # 清理临时权重数据
+            if "_weight" in child:
+                del child["_weight"]
+
     def _validate_and_fix_outline(self, outline_data: Dict[str, Any]) -> None:
         """
         验证大纲结构，检查是否有重复标题，并尝试修复问题
@@ -1861,6 +2137,65 @@ class OutlineGenerator:
         
         update_task_progress(task_id, db_session, 10, "解析大纲结构", f"找到 {len(all_paragraphs)} 个段落，{len(root_paragraphs)} 个顶级段落")
         
+        # 从用户提示中提取字数要求
+        requirements = self._extract_required_level_from_prompt(user_prompt)
+        word_count = requirements.get("word_count")
+        
+        # 如果用户指定了字数，则进行分配
+        if word_count:
+            update_task_progress(task_id, db_session, 11, "开始分配字数", f"用户要求总字数: {word_count}字")
+            logger.info(f"从用户提示中提取到字数要求: {word_count}字，开始分配字数到大纲...")
+            
+            # 转换大纲和段落为JSON格式，以便使用_distribute_word_outline方法
+            outline_data = {
+                "title": outline.title,
+                "sub_paragraphs": []
+            }
+            
+            # 递归构建段落树
+            def build_paragraph_tree(paragraphs):
+                result = []
+                for p in paragraphs:
+                    para_data = {
+                        "id": p.id,
+                        "title": p.title,
+                        "description": p.description,
+                        "level": p.level,
+                        "count_style": p.count_style.value if p.count_style else "medium"
+                    }
+                    
+                    if hasattr(p, 'children') and p.children:
+                        para_data["children"] = build_paragraph_tree(sorted(p.children, key=lambda x: x.sort_index if x.sort_index is not None else x.id))
+                        
+                    result.append(para_data)
+                return result
+            
+            # 构建JSON格式的大纲数据
+            outline_data["sub_paragraphs"] = build_paragraph_tree(root_paragraphs)
+            
+            # 分配字数
+            self._distribute_word_outline(outline_data, word_count)
+            
+            # 将分配好的字数更新到段落中
+            def update_word_counts(json_paragraphs, db_paragraphs_dict):
+                for json_para in json_paragraphs:
+                    if "id" in json_para and json_para["id"] in db_paragraphs_dict:
+                        db_para = db_paragraphs_dict[json_para["id"]]
+                        if "expected_word_count" in json_para:
+                            db_para.expected_word_count = json_para["expected_word_count"]
+                            logger.info(f"更新段落 '{db_para.title}' 的预期字数为 {db_para.expected_word_count} 字")
+                    
+                    # 递归处理子段落
+                    if "children" in json_para and json_para["children"]:
+                        update_word_counts(json_para["children"], db_paragraphs_dict)
+            
+            # 将字数分配结果更新到数据库中的段落
+            update_word_counts(outline_data["sub_paragraphs"], paragraphs_dict)
+            
+            # 提交更改
+            db_session.commit()
+            update_task_progress(task_id, db_session, 12, "字数分配完成", f"已为 {len(all_paragraphs)} 个段落分配字数")
+        
         # 获取RAG上下文
         rag_context = ""
         if kb_ids:
@@ -1874,7 +2209,7 @@ class OutlineGenerator:
             {user_prompt}
             </EOF>
             """
-            update_task_progress(task_id, db_session, 12, "开始RAG检索", f"使用知识库: {kb_ids}")
+            update_task_progress(task_id, db_session, 15 if word_count else 12, "开始RAG检索", f"使用知识库: {kb_ids}")
             
             logger.info("开始生成用于RAG查询的问题")
             try:
@@ -2068,6 +2403,9 @@ class OutlineGenerator:
         summary_log = f"生成了 {len(global_context['chapter_summaries'])} 个章节摘要, {len(global_context['generated_contents'])} 个段落内容, 总长度: {len(final_content)} 字符"
         logger.info(summary_log)
         
+        # 将markdown转换为HTML
+        html_content = markdown.markdown(final_content)
+        
         # 更新文档HTML内容
         html_log = ""
         if doc_id:
@@ -2087,18 +2425,19 @@ class OutlineGenerator:
         update_task_progress(task_id, db_session, 100, "内容生成完成", final_log)
         
         # 如果优化失败，返回原始内容
-        html_content = markdown.markdown(final_content)
+        # 这里不需要再次转换HTML，因为已经在上面转换过了
+        # html_content = markdown.markdown(final_content)
         
-        # 更新最终完整的文档HTML内容
-        if doc_id:
-            try:
-                document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
-                if document:
-                    document.content = html_content
-                    db_session.commit()
-                    logger.info(f"更新文档最终完整HTML内容 [doc_id={doc_id}]")
-            except Exception as e:
-                logger.error(f"更新文档最终HTML内容时出错: {str(e)}")
+        # 更新最终完整的文档HTML内容 - 这部分代码是重复的，可以删除
+        # if doc_id:
+        #     try:
+        #         document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
+        #         if document:
+        #             document.content = html_content
+        #             db_session.commit()
+        #             logger.info(f"更新文档最终完整HTML内容 [doc_id={doc_id}]")
+        #     except Exception as e:
+        #         logger.error(f"更新文档最终HTML内容时出错: {str(e)}")
         
         return {
             "title": article_title,
@@ -3201,6 +3540,9 @@ class OutlineGenerator:
             title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
             title = title_match.group(1) if title_match else "生成的文章"
             
+            # 初始化html_content变量
+            html_content = ""
+            
             # 将markdown转换为HTML
             html_time_start = time.time()
             try:
@@ -3213,7 +3555,8 @@ class OutlineGenerator:
                 html_error = f"Markdown转HTML失败: {str(e)}"
                 logger.error(html_error)
                 update_task_progress(task_id, db_session, 90, "格式转换失败", html_error)
-                raise
+                # 在异常情况下，使用原始内容
+                html_content = f"<pre>{content}</pre>"
             
             # 更新文档最终HTML内容（如果提供了文档ID）
             doc_update_log = ""

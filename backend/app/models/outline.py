@@ -109,6 +109,7 @@ class SubParagraph(Base):
     title = Column(String(255), nullable=False, comment="子段落标题")
     description = Column(Text, nullable=True, comment="子段落描述")
     count_style = Column(Enum(CountStyle), nullable=True, comment="篇幅风格，仅1级段落有效")
+    expected_word_count = Column(Integer, nullable=True, comment="预期字数")
     reference_status = Column(Enum(ReferenceStatus), nullable=False, default=ReferenceStatus.NOT_REFERENCED, comment="引用状态")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
