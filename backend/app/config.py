@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     RAG_CHAT_TOTAL_FILE_MAX_LENGTH: int = yaml_config.get("rag", {}).get("chat_total_file_max_length", 10000)
     RAG_CHAT_HISTORY_SIZE: int = yaml_config.get("rag", {}).get("chat_history_size", 20)
     RAG_CHAT_HISTORY_MAX_LENGTH: int = yaml_config.get("rag", {}).get("chat_history_max_length", 10000)
+
+    # 写作助手配置
+    WRITING_PER_PAGE_WORD_COUNT: int = yaml_config.get("writing", {}).get("per_page_word_count", 800)
+    # 大模型每次生成字数限制
+    WRITING_MAX_WORD_COUNT_PER_GENERATION: int = yaml_config.get("writing", {}).get("max_word_count_per_generation", 5000)
     class Config:
         case_sensitive = True
         env_file = ".env"
