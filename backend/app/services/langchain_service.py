@@ -261,7 +261,7 @@ def clean_numbering_from_title(title: str) -> str:
 class OutlineGenerator:
     """使用LangChain调用大模型生成结构化大纲"""
     
-    def __init__(self, readable_model_name: Optional[str] = None, use_rag: bool = True, use_web: bool = True):
+    def __init__(self, readable_model_name: Optional[str] = None, use_rag: bool = True, use_web: bool = False):
         """
         初始化大纲生成器
         

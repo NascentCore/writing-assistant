@@ -80,6 +80,7 @@ class GenerateOutlineRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
     model_name: Optional[str] = Field(None, description="模型")
+    web_search: Optional[bool] = Field(False, description="是否进行网页搜索")
 
 
 class WebLinkUpdate(BaseModel):
@@ -365,7 +366,8 @@ async def generate_outline(
             file_ids=request.file_ids or [],
             session_id=session_id,
             assistant_message_id=assistant_message_id,
-            readable_model_name=request.model_name
+            readable_model_name=request.model_name,
+            web_search=request.web_search
         )
         
         # 立即返回响应，不等待异步任务完成
@@ -415,7 +417,8 @@ async def generate_outline(
         params={
             "user_id": current_user.user_id,
             "prompt": request.prompt,
-            "file_ids": request.file_ids or []
+            "file_ids": request.file_ids or [],
+            "web_search": request.web_search
         }
     )
     db.add(task)
@@ -434,7 +437,8 @@ async def generate_outline(
         file_ids=request.file_ids or [],
         session_id=session_id,
         assistant_message_id=assistant_message_id,
-        readable_model_name=request.model_name
+        readable_model_name=request.model_name,
+        web_search=request.web_search
     )
     
     # 立即返回响应，不等待异步任务完成
@@ -444,7 +448,7 @@ async def generate_outline(
     })
 
 
-async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str], session_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None):
+async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str], session_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None, web_search: bool = False):
     """
     异步处理大纲生成任务
     
@@ -472,7 +476,7 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
         
         # 初始化大纲生成器
         logger.info(f"初始化大纲生成器 [model={readable_model_name or 'default'}]")
-        outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
+        outline_generator = OutlineGenerator(readable_model_name=readable_model_name, use_web=web_search)
         
         try:
             kb_ids = []
@@ -1026,6 +1030,7 @@ class GenerateFullContentRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="直接生成模式下的写作提示")
     file_ids: Optional[List[str]] = Field(None, description="直接生成模式下的参考文件ID列表")
     model_name: Optional[str] = Field(None, description="模型")
+    web_search: Optional[bool] = Field(False, description="是否进行网页搜索")
 
 @router.post("/content/generate")
 async def generate_content(
@@ -1140,7 +1145,8 @@ async def generate_content(
             "outline_id": request.outline_id,
             "prompt": request.prompt,
             "file_ids": request.file_ids or [],
-            "doc_id": doc_id
+            "doc_id": doc_id,
+            "web_search": request.web_search
         }
     )
     db.add(task)
@@ -1160,7 +1166,8 @@ async def generate_content(
         message_id=message_id,
         assistant_message_id=assistant_message_id,
         readable_model_name=request.model_name,
-        doc_id=doc_id
+        doc_id=doc_id,
+        web_search=request.web_search
     )
     
     # 立即返回响应，不等待异步任务完成
@@ -1170,7 +1177,7 @@ async def generate_content(
     })
 
 
-async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None, doc_id: str = None):
+async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None, doc_id: str = None, web_search: bool = False):
     """
     异步处理内容生成任务
     
@@ -1201,7 +1208,7 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
         
         # 初始化大纲生成器
         logger.info(f"初始化写作生成器 [model={readable_model_name or 'default'}]")
-        outline_generator = OutlineGenerator(readable_model_name=readable_model_name)
+        outline_generator = OutlineGenerator(readable_model_name=readable_model_name, use_web=web_search)
         
         try:
             kb_ids = []
@@ -2415,6 +2422,7 @@ def refresh_writing_tasks_status():
                     prompt = params.get("prompt", "")
                     file_ids = params.get("file_ids", [])
                     model_name = params.get("model_name")
+                    web_search = params.get("web_search", False)
                     
                     # 在线程池中启动任务
                     logger.info(f"恢复大纲生成任务: {task_id}")
@@ -2424,7 +2432,8 @@ def refresh_writing_tasks_status():
                         file_ids=file_ids,
                         session_id=session_id,
                         assistant_message_id=assistant_message_id,
-                        readable_model_name=model_name
+                        readable_model_name=model_name,
+                        web_search=web_search
                     )
                 
                 elif task_type == TaskType.GENERATE_CONTENT:
@@ -2434,7 +2443,7 @@ def refresh_writing_tasks_status():
                     file_ids = params.get("file_ids", [])
                     doc_id = params.get("doc_id")
                     model_name = params.get("model_name")
-                    
+                    web_search = params.get("web_search", False)
                     # 在线程池中启动任务
                     logger.info(f"恢复内容生成任务: {task_id}")
                     executor.submit(run_content_task,
@@ -2446,7 +2455,8 @@ def refresh_writing_tasks_status():
                         message_id=message_id,
                         assistant_message_id=assistant_message_id,
                         readable_model_name=model_name,
-                        doc_id=doc_id
+                        doc_id=doc_id,
+                        web_search=web_search
                     )
             
             except Exception as e:
@@ -2484,7 +2494,7 @@ def refresh_writing_tasks_status():
         db.close()
 
 # 用于启动大纲生成任务的函数
-def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id, readable_model_name=None):
+def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id, readable_model_name=None, web_search=False):
     try:
         # 创建新的事件循环
         loop = asyncio.new_event_loop()
@@ -2497,7 +2507,8 @@ def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id
             file_ids=file_ids,
             session_id=session_id,
             assistant_message_id=assistant_message_id,
-            readable_model_name=readable_model_name
+            readable_model_name=readable_model_name,
+            web_search=web_search
         ))
         
         loop.close()
@@ -2508,7 +2519,7 @@ def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id
                 running_tasks.remove(task_id)
 
 # 用于启动内容生成任务的函数
-def run_content_task(task_id, outline_id, prompt, file_ids, session_id, message_id, assistant_message_id, readable_model_name=None, doc_id=None):
+def run_content_task(task_id, outline_id, prompt, file_ids, session_id, message_id, assistant_message_id, readable_model_name=None, doc_id=None, web_search=False):
     try:
         # 创建新的事件循环
         loop = asyncio.new_event_loop()
@@ -2524,7 +2535,8 @@ def run_content_task(task_id, outline_id, prompt, file_ids, session_id, message_
             message_id=message_id,
             assistant_message_id=assistant_message_id,
             readable_model_name=readable_model_name,
-            doc_id=doc_id
+            doc_id=doc_id,
+            web_search=web_search
         ))
         
         loop.close()
