@@ -5,7 +5,7 @@ from pathlib import Path as PathLib
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, UploadFile as FastAPIUploadFile
 from fastapi.params import Body, Path, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -991,3 +991,34 @@ async def upload_attachment(
     except Exception as e:
         logger.error(f"上传附件时发生异常: {str(e)}")
         return APIResponse.error(message=f"附件上传失败: {str(e)}")
+
+@router.get("/files/{file_id}/download", summary="下载知识库文件")
+async def download_file(
+    file_id: str = Path(..., description="文件ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 查询文件
+        file = db.query(RagFile).filter(
+            RagFile.file_id == file_id,
+            RagFile.is_deleted == False
+        ).first()
+        
+        if not file:
+            return APIResponse.error(message="文件不存在或已被删除")
+        
+        # 检查用户是否有权限访问文件
+        if not has_permission_to_file(current_user, file.file_id, db):
+            return APIResponse.error(message="没有权限访问文件")
+        
+        # 返回文件内容
+        return FileResponse(
+            path=file.file_path,
+            filename=file.file_name,
+            media_type='application/octet-stream'
+        )
+    except Exception as e:
+        logger.error(f"下载文件失败: {str(e)}")
+        return APIResponse.error(message=f"下载文件失败: {str(e)}")
+
