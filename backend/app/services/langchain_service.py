@@ -26,6 +26,7 @@ from langchain.schema.runnable import RunnableConfig
 from langchain.memory import ConversationBufferMemory
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
+from langchain.schema import HumanMessage, SystemMessage
 
 from app.utils.outline import build_paragraph_key, build_paragraph_data
 from app.models.outline import SubParagraph, Outline
@@ -235,7 +236,7 @@ def get_sub_paragraph_titles(paragraph: SubParagraph) -> List[str]:
 # 清理标题中的编号
 def clean_numbering_from_title(title: str) -> str:
     """
-    清理标题中的编号格式，如"第一章"、"（一）"、"1."等
+    清理标题中的编号格式，包括中英文数字、特殊符号等
     
     Args:
         title: 原始标题
@@ -249,7 +250,23 @@ def clean_numbering_from_title(title: str) -> str:
         r'^[（(][零一二三四五六七八九十]+[）)]\s*',    # （一）或(一)
         r'^\d+[、.．]\s*',                           # 1、或1.
         r'^\([0-9]+\)\s*',                          # (1)
-        r'^[①②③④⑤⑥⑦⑧⑨⑩]\s*'                       # ①②③等
+        r'^[①②③④⑤⑥⑦⑧⑨⑩]\s*',                      # ①②③等
+        r'^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]\s*',                      # 罗马数字
+        r'^[IVXivx]+[.、]\s*',                      # 罗马数字后跟标点
+        r'^[A-Za-z][.、]\s*',                       # 字母编号
+        r'^[【\[［][^】\]］]*[】\]］]\s*',           # 各种方括号
+        r'^第\s*\d+\s*[章节]\s*',                   # 第1章、第1节
+        r'^\d+\.\d+\.*\s*',                        # 1.1、1.1.1等
+        r'^[零一二三四五六七八九十]+[、.．]\s*',        # 中文数字编号
+        r'^\d+(\.\d+)*[.、．]\s*',                  # 匹配多级数字编号：1.1、1.1.1、2.3.4.5等
+        r'^(\d+[.-])+\d+\s*',                      # 匹配带连字符的多级编号：1-1、1-1-1等
+        r'^[一二三四五六七八九十](\.\d+)+[.、．]\s*',   # 中文数字开头的多级编号：一.1、一.1.1等
+        r'^第[零一二三四五六七八九十]+[条款项目]\s*',    # 第一条、第二款等
+        r'^\d+[.、．][一二三四五六七八九十]+\s*',      # 数字加中文编号：1.一、2.二等
+        r'^[（(]\d+[）)][（(][一二三四五六七八九十]+[）)]\s*',  # (1)(一)等嵌套编号
+        r'^\d+\s*[）)]\s*',                        # 1)、2)等
+        r'^[a-zA-Z](\.\d+)+[.、．]\s*',             # 字母开头的多级编号：A.1、B.1.1等
+        r'^\d+(?:\.\d+)*[\s.、．]+',                 # 匹配如 9.1、9.1.2、9.1.1.1 等多级数字编号
     ]
     
     result = title
@@ -491,6 +508,7 @@ class OutlineGenerator:
         word_count = user_requirements.get("word_count")
         page_count = user_requirements.get("page_count")
         predefined_chapters = user_requirements.get("predefined_chapters", [])
+        logger.info(f"要求层级：{required_level} 级")
         
         # 处理文件内容
         file_context = ""
@@ -519,34 +537,15 @@ class OutlineGenerator:
         update_task_progress(task_id, db_session, 30, "检索RAG知识库完成", f"")
         
         # 更新任务进度 - 准备大纲生成
-        update_task_progress(task_id, db_session, 35, "准备大纲生成", "构建提示模板")
+        update_task_progress(task_id, db_session, 35, "开始生成大纲", "构建提示模板")
         
         try:
-            # 获取一级大纲结构
-            first_level_outline = self._generate_first_level_outline(
-                prompt, 
-                file_context, 
-                rag_context, 
-                required_level, 
-                word_count, 
-                page_count,
-                predefined_chapters
-            )
+            first_outline = self.generate_outline_new(prompt, required_level, task_id=task_id, db_session=db_session)
             if task_id and db_session:
-                update_task_progress(task_id, db_session, 40, "已生成一级大纲，正在处理子章节...")
+                update_task_progress(task_id, db_session, 90, "已生成大纲及描述，正在检验大纲章节")
             
             # 处理子章节
-            complete_outline = self._expand_outline_with_subchapters(
-                first_level_outline, 
-                prompt,
-                file_context,
-                rag_context,
-                required_level,
-                word_count,
-                page_count,
-                task_id,
-                db_session
-            )
+            complete_outline = self._parse_outline_to_json(first_outline, prompt)
             
             # 验证和优化大纲结构
             self._validate_and_fix_outline(complete_outline)
@@ -3304,4 +3303,384 @@ class OutlineGenerator:
         sub_paragraphs = outline_data.get("sub_paragraphs", [])
         traverse_depth(sub_paragraphs)
         return max_level
+    
+    def _check_outline_levels(self, outline_text, required_levels):
+        """检查大纲的层级数是否符合要求"""
+        if not outline_text:
+            return False
+            
+        max_level = 0
+        for line in outline_text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+                
+            # 计算缩进层级
+            indent_level = len(line) - len(line.lstrip())
+            level = indent_level // 4  # 假设每级缩进是4个空格
+            
+            # 检查标题格式
+            content = line.lstrip()
+            if content.startswith(("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、")):
+                level = 0
+            elif re.match(r'^\d+\.\d+$', content.split()[0]):  # 匹配 1.1, 1.2 等
+                level = 1
+            elif re.match(r'^\d+\.\d+\.\d+$', content.split()[0]):  # 匹配 1.1.1, 1.1.2 等
+                level = 2
+            elif re.match(r'^\d+\.\d+\.\d+\.\d+$', content.split()[0]):  # 匹配 1.1.1.1, 1.1.1.2 等
+                level = 3
+                
+            max_level = max(max_level, level)
+        
+        return max_level + 1 == required_levels
+    
+    def generate_outline_new(self, topic, levels=3, show_result=False, task_id: Optional[str] = None, db_session = None):
+        """生成大纲"""        
+        # 构建提示词
+        system_prompt = """你是一个专业的大纲生成助手。你需要根据用户给出的主题，生成一个结构清晰的大纲。
+请确保大纲：
+1. 第一行必须是文章标题，不要带"大纲"字样
+2. 结构清晰，层次分明
+3. 逻辑性强，各部分衔接自然
+4. 内容全面，覆盖主题的各个方面
+5. 每个最底层的子章节都必须包含详细的描述
+6. 使用统一的格式和编号系统
+7. 严格按照指定的层级深度生成大纲
+8. 每个章节的子章节数量必须不同，不要使用固定数量
+9. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
+10. 避免机械地固定章节数量，保持内容的自然性
+11. 确保每个章节的子章节数量都不同，体现内容的差异性
+"""
+
+        # 根据层级深度构建示例格式
+        format_examples = {
+            1: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+二、一级标题2
+三、一级标题3
+四、一级标题4
+五、一级标题5""",
+            2: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+    1.1 二级标题1
+        描述：这里是描述1
+    1.2 二级标题2
+        描述：这里是描述2
+二、一级标题2
+    2.1 二级标题1
+        描述：这里是描述1
+    2.2 二级标题2
+        描述：这里是描述2
+    2.3 二级标题3
+        描述：这里是描述3""",
+            3: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+    1.1 二级标题1
+        1.1.1 三级标题1
+            描述：这里是描述1
+        1.1.2 三级标题2
+            描述：这里是描述2
+    1.2 二级标题2
+        1.2.1 三级标题1
+            描述：这里是描述1
+        1.2.2 三级标题2
+            描述：这里是描述2
+二、一级标题2
+    2.1 二级标题1
+        2.1.1 三级标题1
+            描述：这里是描述1
+        2.1.2 三级标题2
+            描述：这里是描述2""",
+            4: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+    1.1 二级标题1
+        1.1.1 三级标题1
+            1.1.1.1 四级标题1
+                描述：这里是描述1
+            1.1.1.2 四级标题2
+                描述：这里是描述2
+        1.1.2 三级标题2
+            1.1.2.1 四级标题1
+                描述：这里是描述1
+            1.1.2.2 四级标题2
+                描述：这里是描述2
+    1.2 二级标题2
+        1.2.1 三级标题1
+            1.2.1.1 四级标题1
+                描述：这里是描述1
+            1.2.1.2 四级标题2
+                描述：这里是描述2
+            1.2.1.3 四级标题3
+                描述：这里是描述3
+            1.2.1.4 四级标题4
+                描述：这里是描述4
+二、一级标题2
+    2.1 二级标题1
+        2.1.1 三级标题1
+            2.1.1.1 四级标题1
+                描述：这里是描述1
+            2.1.1.2 四级标题2
+                描述：这里是描述2
+            2.1.1.3 四级标题3
+                描述：这里是描述3
+    2.2 二级标题2
+        2.2.1 三级标题1
+            2.2.1.1 四级标题1
+                描述：这里是描述1
+            2.2.1.2 四级标题2
+                描述：这里是描述2"""
+        }
+        
+        format_example = format_examples.get(levels, format_examples[levels])
+
+        # 如果是3级或4级大纲，分两步生成
+        if levels in [3, 4]:
+            max_retries = 3  # 最大重试次数
+            retry_count = 0
+            
+            while retry_count < max_retries:
+                # 第一步：生成完整大纲结构（不含描述）
+                structure_prompt = f"""请为主题"{topic}"生成一个完整的{levels}级大纲结构。
+使用以下格式：
+{format_example}
+
+要求：
+1. 只生成大纲结构，不要包含描述内容
+2. 确保层级结构清晰，逻辑合理
+3. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
+4. 确保每个章节的内容都与主题相关
+5. 确保大纲结构自然，不要机械地固定章节数量
+6. 每个层级都必须使用正确的标题格式：
+   - 一级标题使用中文数字（如：一、二、三、四、五、六、七、八、九、十等）
+   - 二级标题使用"1.1、1.2、"等数字格式
+   - 三级标题使用"1.1.1、1.1.2、"等数字格式
+   - 四级标题使用"1.1.1.1、1.1.1.2、"等数字格式
+7. 确保每个层级的缩进正确（每级缩进4个空格）
+8. 确保大纲结构完整，包含所有必要的章节
+9. 必须严格按照{levels}级层级生成，不要少层级
+
+只返回大纲结构，不要包含额外的说明。"""
+
+                messages = f"System: {system_prompt}\n\nUser: {structure_prompt}"
+                
+                # 调用LLM生成大纲结构
+                structure_outline = self.llm.invoke(messages).content
+                update_task_progress(task_id, db_session, 50, f"已生成 {levels} 级大纲，开始补充章节描述...")
+                
+                if not structure_outline:
+                    retry_count += 1
+                    continue
+                
+                # 检查大纲层级是否符合要求
+                if self._check_outline_levels(structure_outline, levels):
+                    break
+                else:
+                    logger.info(f"生成的大纲层级不符合要求，正在尝试重新生成...")
+                    update_task_progress(task_id, db_session, 55, "生成的大纲层级不符合要求，正在尝试重新生成...")
+                    retry_count += 1
+                    time.sleep(1)  # 添加短暂延迟
+            
+            # 第二步：分批补充描述
+            sections = self._split_outline_into_sections(structure_outline)
+            all_sections = []
+            batch_size = 4  # 每批处理4个章节
+            
+            for i in range(0, len(sections), batch_size):
+                update_task_progress(task_id, db_session, 60 + i + 5, f"正在补充【{i+1}:{i+batch_size}】章节描述...")
+                batch = sections[i:i + batch_size]
+                batch_text = "\n".join(batch)
+                
+                # 构建补充描述的提示词
+                description_prompt = f"""请为以下大纲章节补充详细的描述内容。原始主题是："{topic}"
+
+{batch_text}
+
+要求：
+1. 为每个最底层的子章节添加详细的描述
+2. 描述内容必须以"描述："开头
+3. 描述要具体、专业、有实质性内容，包含：
+   - 具体的工作内容和方法
+   - 关键的技术参数和标准
+   - 重要的注意事项和要求
+   - 相关的规范和标准引用
+4. 保持原有的层级结构和编号格式不变
+5. 只添加描述内容，不要修改或添加新的章节
+6. 确保描述内容与原始主题"{topic}"密切相关
+7. 描述要符合专业文档的要求，使用准确的专业术语
+8. 描述要具有可执行性，能够作为后续生成详细文档的指导
+9. 描述要包含必要的技术细节，但不要过于冗长
+10. 描述要突出重要性和关键点，便于后续展开
+
+只返回补充描述后的大纲内容，不要包含额外的说明。"""
+
+                messages = f"System: {system_prompt}\n\nUser: {description_prompt}"
+                
+                # 调用LLM补充描述
+                batch_with_descriptions = self.llm.invoke(messages).content
+                
+                if batch_with_descriptions:
+                    all_sections.append(batch_with_descriptions)
+                
+                # 添加短暂延迟，避免API限制
+                if i < len(sections) - batch_size:  # 如果不是最后一批
+                    time.sleep(1)
+            
+            # 合并所有章节
+            outline = '\n'.join(all_sections)
+                
+            return outline
+        else:
+            # 非3级或4级大纲，直接生成
+            user_prompt = f"""请为主题"{topic}"大纲，要求大纲层级为{levels}级。
+使用以下格式：
+{format_example}
+
+要求：
+1. 每个最底层的子章节必须有描述
+2. 确保层级结构清晰，逻辑合理
+3. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
+4. 确保每个章节的内容都与主题相关
+5. 确保大纲结构自然，不要机械地固定章节数量
+6. 每个层级都必须使用正确的标题格式：
+   - 一级标题使用"一、二、三、"等中文数字
+   - 二级标题使用"1.1、1.2、"等数字格式
+   - 三级标题使用"1.1.1、1.1.2、"等数字格式
+   - 四级标题使用"1.1.1.1、1.1.1.2、"等数字格式
+7. 描述内容必须以"描述："开头，描述要具体、专业、有实质性内容，包含：
+   - 具体的工作内容和方法
+   - 关键的技术参数和标准
+   - 重要的注意事项和要求
+   - 相关的规范和标准引用
+8. 确保每个层级的缩进正确（每级缩进4个空格）
+9. 描述要具有可执行性，能够作为后续生成详细文档的指导
+10. 描述要包含必要的技术细节，但不要过于冗长
+11. 描述要突出重要性和关键点，便于后续展开
+
+只返回大纲内容，不要包含额外的说明。"""
+
+            messages = f"System: {system_prompt}\n\nUser: {user_prompt}"
+            
+            # 调用LLM生成大纲
+            outline = self.llm.invoke(messages).content
+                
+            return outline
+    
+    def _parse_outline_to_json(self, outline_text, topic):
+        """将大纲文本解析为指定的JSON结构"""
+        try:
+            # 按行分割大纲文本
+            lines = outline_text.strip().split('\n')
+            
+            # 获取第一行作为文章标题
+            article_title = lines[0].strip() if lines else topic
+            
+            # 初始化结果
+            result = {
+                "title": article_title,
+                "sub_paragraphs": []
+            }
+            
+            # 用于跟踪当前处理的节点
+            current_nodes = {-1: result}  # 使用字典来跟踪不同层级的节点
+            last_level = -1
+            
+            # 处理每一行（跳过第一行，因为已经用作标题）
+            for line in lines[1:]:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # 计算当前行的缩进级别
+                indent_level = len(line) - len(line.lstrip())
+                level = indent_level // 4  # 假设每级缩进是4个空格
+                
+                # 提取标题和描述
+                content = line.lstrip()
+                
+                # 检查是否是描述行
+                if content.startswith("描述："):
+                    if last_level >= 0 and last_level in current_nodes:
+                        current_nodes[last_level]["description"] = content[3:].strip()
+                    continue
+                
+                # 检查是否是标题行
+                is_title = False
+                if content.startswith(("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、")):
+                    is_title = True
+                    level = 0
+                elif re.match(r'^\d+\.\d+$', content.split()[0]):  # 匹配 1.1, 1.2 等
+                    is_title = True
+                    level = 1
+                elif re.match(r'^\d+\.\d+\.\d+$', content.split()[0]):  # 匹配 1.1.1, 1.1.2 等
+                    is_title = True
+                    level = 2
+                elif re.match(r'^\d+\.\d+\.\d+\.\d+$', content.split()[0]):  # 匹配 1.1.1.1, 1.1.1.2 等
+                    is_title = True
+                    level = 3
+                
+                if not is_title:
+                    # 如果不是标题，则作为描述
+                    if last_level >= 0 and last_level in current_nodes:
+                        current_nodes[last_level]["description"] = content.strip()
+                    continue
+                
+                # 创建新节点
+                new_node = {
+                    "title": content,
+                    "description": "",
+                    "count_style": "medium",
+                    "level": level + 1,
+                    "children": []
+                }
+                
+                # 根据层级关系构建树结构
+                if level == 0:
+                    # 一级标题
+                    result["sub_paragraphs"].append(new_node)
+                    current_nodes = {-1: result, 0: new_node}
+                else:
+                    # 找到父节点
+                    parent_level = level - 1
+                    if parent_level in current_nodes:
+                        parent = current_nodes[parent_level]
+                        if "children" not in parent:
+                            parent["children"] = []
+                        parent["children"].append(new_node)
+                        current_nodes[level] = new_node
+                        
+                        # 清理更深层级的节点
+                        keys_to_remove = [k for k in current_nodes.keys() if k > level]
+                        for k in keys_to_remove:
+                            del current_nodes[k]
+                
+                last_level = level
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"错误: 大纲解析失败: {e}")
+            return None
+    
+    def _split_outline_into_sections(self, outline):
+        """将大纲文本分割成章节"""
+        sections = []
+        current_section = []
+        
+        for line in outline.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+                
+            # 检查是否是一级标题（以"一、"、"二、"等开头）
+            if re.match(r'^[一二三四五六七八九十]+、', line):
+                if current_section:
+                    sections.append('\n'.join(current_section))
+                current_section = [line]
+            else:
+                current_section.append(line)
+        
+        if current_section:
+            sections.append('\n'.join(current_section))
+        
+        return sections
 
