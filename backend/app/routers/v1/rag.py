@@ -675,6 +675,7 @@ async def chat(
         ).order_by(ChatMessage.id.desc()).limit(settings.RAG_CHAT_HISTORY_SIZE).all()
         
         history = []
+        history_length = 0
         recent_answers.reverse()
         for answer in recent_answers:
             question = db.query(ChatMessage).filter(
@@ -683,8 +684,12 @@ async def chat(
                 ChatMessage.role == "user",
                 ChatMessage.is_deleted == False
             ).first()
-            if question:
-                history.append([question.content, answer.content])
+            if not question:
+                continue
+            history.append([question.content, answer.content])
+            history_length += len(question.content) + len(answer.content)
+            if history_length > settings.RAG_CHAT_HISTORY_MAX_LENGTH:
+                break
 
         question_message_id = f"msg-{shortuuid.uuid()}"
         user_question = ChatMessage(
