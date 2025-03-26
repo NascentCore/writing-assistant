@@ -2456,6 +2456,9 @@ class OutlineGenerator:
 - 所输出的内容必须符合技能 1 中规定的要求，不能偏离框架要求。
 - 生成的是正式的公文，不要使用"我们"这种口语表达的句式。
 - 内容后面不要进行总结，避免出现"总之""总而言之"这样的总结性概括。
+- 重要：只生成简单的段落文本，不要使用任何标题格式（如一、二、三或1.1、1.2等）。即使段落标题暗示这可能是一个规划或大纲，也只生成普通段落，而非含有多级标题的完整文档结构。
+- 重要：不要在生成的内容中包含任何目录、标题编号或分级结构。生成的内容应该是连贯的段落文本，而不是多级结构的文档。
+- 重要：即使是对于规划、方案等文档类型，也只生成该段落应有的内容部分，不要生成整个规划的完整结构和全部内容。
 
 【文章标题】
 {article_title}
@@ -2495,6 +2498,11 @@ class OutlineGenerator:
 
 【用户需求】
 {user_prompt}
+
+【特别说明】
+此处需要生成的是"当前段落标题"下的连贯文本内容，不要再重复或包含当前段落的标题。
+不要生成包含多级标题（如一、二、三或1.1、1.2等）的完整文档结构。
+例如，如果标题是"越西县智慧交通科技治超建设规划"，不要生成一个包含"一、建设背景"、"二、现状与需求"等结构的完整规划文档，而是只生成关于这个规划的单个段落描述。
 """
         
         try:
@@ -2516,6 +2524,61 @@ class OutlineGenerator:
             
             for old, new in replacements.items():
                 content = content.replace(old, new)
+            
+            # 检查并删除内容中的标题结构（如一、二、三或1.1、1.2等）
+            title_patterns = [
+                r'^[一二三四五六七八九十]+、.*?[\r\n]',  # 匹配中文数字标题，如"一、建设背景"
+                r'^（[一二三四五六七八九十]+）.*?[\r\n]',  # 匹配中文数字标题，如"（一）建设背景"
+                r'^\d+\..*?[\r\n]',  # 匹配数字标题，如"1. 建设背景"
+                r'^\d+\.\d+.*?[\r\n]',  # 匹配数字标题，如"1.1 建设背景"
+                r'^\([\d]+\).*?[\r\n]'  # 匹配数字标题，如"(1) 建设背景"
+            ]
+            
+            # 检查是否包含标题结构
+            contains_titles = False
+            for pattern in title_patterns:
+                if re.search(pattern, content, re.MULTILINE):
+                    contains_titles = True
+                    break
+            
+            # 如果检测到标题结构，尝试重新生成或进行修复
+            if contains_titles:
+                logger.warning(f"检测到段落内容包含标题结构，进行修复 [段落ID={paragraph.id}]")
+                
+                # 修改提示模板，更明确地强调不要生成标题结构
+                more_explicit_template = template + """
+【警告】
+检测到你可能会生成包含标题结构的内容。请记住：
+1. 不要生成任何形式的标题（如一、二、三或1.1、1.2等）
+2. 不要将内容分成多个部分或章节
+3. 只生成连贯的段落文本
+4. 不要包含任何标题、编号或分级结构
+
+即使你认为这种类型的内容通常应该有标题结构，在这里也请只生成纯文本段落。
+"""
+                
+                # 重新生成内容
+                result = self.llm.invoke(more_explicit_template)
+                content = result.content
+                
+                # 检查重新生成的内容是否仍包含标题结构
+                still_contains_titles = False
+                for pattern in title_patterns:
+                    if re.search(pattern, content, re.MULTILINE):
+                        still_contains_titles = True
+                        break
+                
+                # 如果仍然包含标题结构，进行强制清理
+                if still_contains_titles:
+                    logger.warning(f"重新生成的内容仍包含标题结构，进行强制清理 [段落ID={paragraph.id}]")
+                    
+                    # 移除所有标题行
+                    for pattern in title_patterns:
+                        content = re.sub(pattern, '', content, flags=re.MULTILINE)
+                    
+                    # 重新清理不必要的空行
+                    content = re.sub(r'\n{3,}', '\n\n', content)
+                    content = content.strip()
             
             # 记录生成完成
             logger.info(f"段落内容生成完成 [段落ID={paragraph.id}, 内容长度={len(content)}字符]")
@@ -3040,6 +3103,7 @@ class OutlineGenerator:
                         question=f"生成关于{prompt}的文章",
                         user_id=user_id,
                         kb_ids=kb_ids,
+                        context_msg=user_prompt
                     )
                     update_task_progress(task_id, db_session, 27, "默认RAG查询完成", f"获取上下文长度: {len(rag_context)} 字符")
 
@@ -3069,6 +3133,7 @@ class OutlineGenerator:
                     question=f"生成关于{prompt}的文章",
                     user_id=user_id,
                     kb_ids=kb_ids,
+                    context_msg=user_prompt
                 )
                 update_task_progress(task_id, db_session, 32, "使用替代方式完成RAG查询", f"获取上下文长度: {len(rag_context)} 字符")
             
