@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky init",
+    "postinstall": "cd frontend && yarn install"
   },
   "dependencies": {
     "@ant-design/x": "^1.0.5"

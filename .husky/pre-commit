@@ -1,6 +1,3 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 cd frontend && {
   echo "Running incremental type check..."
   tsc --noEmit --incremental || exit 1

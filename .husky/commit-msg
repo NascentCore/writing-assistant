@@ -1,0 +1,20 @@
+# 获取当前修改的文件列表
+CHANGED_FILES=$(git diff --cached --name-only)
+
+# 检查是否有前端文件被修改
+FRONTEND_CHANGES=false
+for file in $CHANGED_FILES; do
+  if [[ $file == frontend/* ]]; then
+    FRONTEND_CHANGES=true
+    break
+  fi
+done
+
+# 如果有前端文件被修改，则验证提交信息
+if [ "$FRONTEND_CHANGES" = true ]; then
+  # 获取commit message文件的绝对路径
+  COMMIT_MSG_FILE=$(realpath "$1")
+  
+  # 切换到frontend目录并使用绝对路径验证提交信息
+  cd frontend && npx --no-install max verify-commit "$COMMIT_MSG_FILE"
+fi 
