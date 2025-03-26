@@ -341,13 +341,11 @@ const Sender = forwardRef<any, SenderProps>(
                     style={{
                       marginLeft: 20,
                       fontSize: '16px',
-                      display: 'none',
                     }}
                   >
                     同步到个人知识库：
                   </div>
                   <Switch
-                    style={{ display: 'none' }}
                     checked={saveToKb}
                     onChange={(checked) => {
                       setSaveToKb(checked);
@@ -360,13 +358,11 @@ const Sender = forwardRef<any, SenderProps>(
                     style={{
                       marginLeft: 20,
                       fontSize: '16px',
-                      display: 'none',
                     }}
                   >
                     联网搜索：
                   </div>
                   <Switch
-                    style={{ display: 'none' }}
                     checked={webSearch}
                     onChange={(checked) => {
                       setWebSearch(checked);
