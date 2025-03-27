@@ -1018,10 +1018,6 @@ async def download_file(
         if not file:
             return APIResponse.error(message="文件不存在或已被删除")
         
-        # 检查用户是否有权限访问文件
-        if not has_permission_to_file(current_user, file.file_id, db):
-            return APIResponse.error(message="没有权限访问文件")
-
         # 检查文件是否存在
         if not os.path.exists(file.file_path):
             return APIResponse.error(message="文件已被清理，请删除后重新上传")
