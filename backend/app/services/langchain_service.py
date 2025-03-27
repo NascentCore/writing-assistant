@@ -2659,7 +2659,13 @@ class OutlineGenerator:
             try:
                 # 合并到目前为止生成的内容
                 current_content = "\n".join(markdown_content)
-                current_html = markdown.markdown(current_content)
+                current_html = markdown.markdown(current_content,extensions=[
+                    'markdown.extensions.extra',
+                    'markdown.extensions.toc',
+                    'markdown.extensions.sane_lists',
+                    'markdown.extensions.smarty',
+                    'markdown.extensions.tables',
+                    ])
                 
                 # 更新文档HTML内容
                 document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
