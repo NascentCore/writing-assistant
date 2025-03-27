@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import shortuuid
 from pathlib import Path as PathLib
 from typing import Any, Dict, List, Optional
@@ -1020,6 +1021,10 @@ async def download_file(
         # 检查用户是否有权限访问文件
         if not has_permission_to_file(current_user, file.file_id, db):
             return APIResponse.error(message="没有权限访问文件")
+
+        # 检查文件是否存在
+        if not os.path.exists(file.file_path):
+            return APIResponse.error(message="文件已被清理，请删除后重新上传")
         
         # 返回文件内容
         return FileResponse(
