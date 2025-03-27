@@ -818,6 +818,16 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                       type="link"
                                       size="small"
                                       onClick={() => {
+                                        //查看结果时 通知外部更新doc
+                                        if ((window as any).isIframe) {
+                                          window.parent.postMessage(
+                                            {
+                                              type: 'onUpdateDoc',
+                                              value: currentMessage.document_id,
+                                            },
+                                            '*',
+                                          );
+                                        }
                                         history.push(
                                           `/EditorPage?document_id=${
                                             currentMessage.document_id
