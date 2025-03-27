@@ -860,7 +860,7 @@ async def chat(
 @router.post("/attachments", summary="知识库对话附件上传")
 async def upload_attachment(
     files: List[FastAPIUploadFile] = File(...),
-    save_to_kb: Optional[bool] = Body(default=False, description="是否保存到知识库"),
+    # save_to_kb: Optional[bool] = Body(default=False, description="是否保存到知识库"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -868,15 +868,15 @@ async def upload_attachment(
         upload_dir = PathLib(settings.UPLOAD_DIR)
         upload_dir.mkdir(exist_ok=True) # 确保上传目录存在
         
-        kb_id = ''
-        kb_type = RagKnowledgeBaseType.USER_SHARED
-        # 查询用户共享知识库
-        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == kb_type, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
-        if not kb:
-            logger.error(f"上传附件时未找到用户共享知识库")
-            return APIResponse.error(message="用户共享知识库不存在")
-        kb_id = kb.kb_id
+        # kb_id = ''
+        # kb_type = RagKnowledgeBaseType.USER_SHARED
+        # # 查询用户共享知识库
+        # kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == kb_type, 
+        #                                            RagKnowledgeBase.is_deleted == False).first()
+        # if not kb:
+        #     logger.error(f"上传附件时未找到用户共享知识库")
+        #     return APIResponse.error(message="用户共享知识库不存在")
+        # kb_id = kb.kb_id
 
         new_files = []
         existing_files = []
@@ -934,14 +934,18 @@ async def upload_attachment(
                 meta='',
                 hash=file_hash 
             )
-            if save_to_kb:
-                db_file.kb_id = kb_id
-                db_file.kb_type = kb_type
-                db_file.status = RagFileStatus.LOCAL_SAVED
-            else:
-                db_file.kb_id = ''
-                db_file.kb_type = RagKnowledgeBaseType.NONE
-                db_file.status = RagFileStatus.DONE
+            # if save_to_kb:
+            #     db_file.kb_id = kb_id
+            #     db_file.kb_type = kb_type
+            #     db_file.status = RagFileStatus.LOCAL_SAVED
+            # else:
+            #     db_file.kb_id = ''
+            #     db_file.kb_type = RagKnowledgeBaseType.NONE
+            #     db_file.status = RagFileStatus.DONE
+            db_file.kb_id = ''
+            db_file.kb_type = RagKnowledgeBaseType.NONE
+            db_file.status = RagFileStatus.DONE
+
             db.add(db_file)
             db.commit() 
             # 同步解析内容，附件的内容马上要使用，所以进行同步解析
