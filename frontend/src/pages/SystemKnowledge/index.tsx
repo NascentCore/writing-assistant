@@ -1,5 +1,6 @@
+import FilePreview from '@/components/FilePreview';
 import FileUpload from '@/components/FileUpload';
-import { fetchWithAuthNew } from '@/utils/fetch';
+import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import { UploadOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
@@ -20,6 +21,11 @@ type KnowledgeBaseFile = {
 const KnowledgeBaseList: React.FC = () => {
   const actionRef = useRef<ActionType>();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewFile, setPreviewFile] = useState<{
+    fileName: string;
+    fileId: string;
+  }>({ fileName: '', fileId: '' });
 
   const handleModalOk = () => {
     setIsModalOpen(false);
@@ -71,6 +77,21 @@ const KnowledgeBaseList: React.FC = () => {
       valueType: 'option',
       key: 'option',
       render: (_, record) => [
+        record.status === 'Done' && (
+          <Button
+            key="view"
+            type="link"
+            onClick={() => {
+              setPreviewFile({
+                fileName: record.file_name,
+                fileId: record.file_id,
+              });
+              setPreviewVisible(true);
+            }}
+          >
+            查看
+          </Button>
+        ),
         <Popconfirm
           key="delete"
           title="确定要删除这个文件吗？"
@@ -161,6 +182,23 @@ const KnowledgeBaseList: React.FC = () => {
       >
         <FileUpload category="system" />
       </Modal>
+      <FilePreview
+        open={previewVisible}
+        onCancel={() => setPreviewVisible(false)}
+        fileName={previewFile.fileName}
+        fetchFile={async () => {
+          const response = await fetchWithAuthStream(
+            `/api/v1/rag/files/${previewFile.fileId}/download`,
+            { method: 'GET' },
+            true,
+          );
+          if (!response) {
+            throw new Error('Failed to fetch file');
+          }
+          const blob = await response.blob();
+          return URL.createObjectURL(blob);
+        }}
+      />
     </>
   );
 };

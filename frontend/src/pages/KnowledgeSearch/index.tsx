@@ -1,7 +1,8 @@
-import { fetchWithAuthNew } from '@/utils/fetch';
+import FilePreview from '@/components/FilePreview';
+import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import type { ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
-import { Alert, message } from 'antd';
+import { Alert, Button, message, Tag, Tooltip } from 'antd';
 import React, { useState } from 'react';
 
 interface FileItem {
@@ -25,6 +26,11 @@ interface SearchResponse {
 
 const KnowledgeSearch: React.FC = () => {
   const [totalCount, setTotalCount] = useState<number>(0);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewFile, setPreviewFile] = useState<{
+    fileName: string;
+    fileId: string;
+  }>({ fileName: '', fileId: '' });
 
   const formatFileSize = (size: number) => {
     if (size < 1024) return `${size}B`;
@@ -38,6 +44,7 @@ const KnowledgeSearch: React.FC = () => {
       dataIndex: 'file_name',
       key: 'file_name',
       ellipsis: true,
+      copyable: true,
       fieldProps: {
         placeholder: '请输入文件名',
       },
@@ -52,12 +59,61 @@ const KnowledgeSearch: React.FC = () => {
     },
 
     {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 120,
+      search: false,
+      render: (_, record) => {
+        let color = 'default';
+        let text = record.status;
+
+        if (record.status === 'Done') {
+          color = 'success';
+          text = '解析完成';
+        } else if (record.status === 'Failed') {
+          color = 'error';
+          text = '解析失败';
+        } else {
+          color = 'processing';
+          text = '处理中';
+        }
+
+        return (
+          <Tooltip title={record.error_message}>
+            <Tag color={color}>{text}</Tag>
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 180,
       search: false,
       render: (text) => new Date(text as string).toLocaleString(),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 120,
+      search: false,
+      render: (_, record) =>
+        record.status === 'Done' && (
+          <Button
+            type="link"
+            onClick={() => {
+              setPreviewFile({
+                fileName: record.file_name,
+                fileId: record.file_id,
+              });
+              setPreviewVisible(true);
+            }}
+          >
+            查看
+          </Button>
+        ),
     },
   ];
 
@@ -143,6 +199,23 @@ const KnowledgeSearch: React.FC = () => {
             '知识库检索'
           )
         }
+      />
+      <FilePreview
+        open={previewVisible}
+        onCancel={() => setPreviewVisible(false)}
+        fileName={previewFile.fileName}
+        fetchFile={async () => {
+          const response = await fetchWithAuthStream(
+            `/api/v1/rag/files/${previewFile.fileId}/download`,
+            { method: 'GET' },
+            true,
+          );
+          if (!response) {
+            throw new Error('Failed to fetch file');
+          }
+          const blob = await response.blob();
+          return URL.createObjectURL(blob);
+        }}
       />
     </div>
   );
