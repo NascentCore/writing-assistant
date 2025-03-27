@@ -286,8 +286,9 @@ class OutlineGenerator:
         Args:
             readable_model_name: 模型名称
             use_rag: 是否使用RAG API，默认为True
+            use_web: 是否使用WEB搜索，默认为False
         """
-        logger.info(f"初始化OutlineGenerator [model={readable_model_name or 'default'}, use_rag={use_rag}]")
+        logger.info(f"初始化OutlineGenerator [model={readable_model_name or 'default'}, use_rag={use_rag}, use_web={use_web}]")
         
         # 初始化LLM
         if readable_model_name:
@@ -2404,7 +2405,20 @@ class OutlineGenerator:
         logger.info(summary_log)
         
         # 将markdown转换为HTML
-        html_content = markdown.markdown(final_content)
+        html_content = markdown.markdown(final_content,extensions=[
+            'markdown.extensions.extra',
+            'markdown.extensions.toc',
+            'markdown.extensions.sane_lists',
+            'markdown.extensions.smart_strong',
+            'markdown.extensions.smarty',
+            'markdown.extensions.tables',
+            'markdown.extensions.fenced_code',
+            'markdown.extensions.codehilite',
+            'markdown.extensions.sane_lists',
+            'markdown.extensions.smart_strong',
+            'markdown.extensions.smarty',
+            'markdown.extensions.tables',
+            ])
         
         # 更新文档HTML内容
         html_log = ""
