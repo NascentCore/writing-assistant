@@ -628,7 +628,13 @@ class OutlineGenerator:
             
             # 解析JSON响应
             try:
-                requirements = json.loads(response.content)
+                content = response.content
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+
+                requirements = json.loads(content)
                 # 验证返回值的合法性
                 requirements["required_level"] = int(requirements.get("required_level", 3))
                 if requirements["required_level"] < 1 or requirements["required_level"] > 4:
@@ -3933,8 +3939,6 @@ class OutlineGenerator:
                             del current_nodes[k]
                 
                 last_level = level
-
-            logger.info(result)
             
             return result
             
@@ -3962,8 +3966,6 @@ class OutlineGenerator:
         
         if current_section:
             sections.append('\n'.join(current_section))
-
-        logger.info(sections)
         
         return sections
 
