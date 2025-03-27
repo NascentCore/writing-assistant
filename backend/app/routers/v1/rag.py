@@ -1,11 +1,12 @@
 import json
 import logging
+import os
 import shortuuid
 from pathlib import Path as PathLib
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, UploadFile as FastAPIUploadFile
 from fastapi.params import Body, Path, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -675,6 +676,7 @@ async def chat(
         ).order_by(ChatMessage.id.desc()).limit(settings.RAG_CHAT_HISTORY_SIZE).all()
         
         history = []
+        history_length = 0
         recent_answers.reverse()
         for answer in recent_answers:
             question = db.query(ChatMessage).filter(
@@ -683,8 +685,12 @@ async def chat(
                 ChatMessage.role == "user",
                 ChatMessage.is_deleted == False
             ).first()
-            if question:
-                history.append([question.content, answer.content])
+            if not question:
+                continue
+            history.append([question.content, answer.content])
+            history_length += len(question.content) + len(answer.content)
+            if history_length > settings.RAG_CHAT_HISTORY_MAX_LENGTH:
+                break
 
         question_message_id = f"msg-{shortuuid.uuid()}"
         user_question = ChatMessage(
@@ -855,7 +861,7 @@ async def chat(
 @router.post("/attachments", summary="知识库对话附件上传")
 async def upload_attachment(
     files: List[FastAPIUploadFile] = File(...),
-    save_to_kb: Optional[bool] = Body(default=False, description="是否保存到知识库"),
+    # save_to_kb: Optional[bool] = Body(default=False, description="是否保存到知识库"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -863,15 +869,15 @@ async def upload_attachment(
         upload_dir = PathLib(settings.UPLOAD_DIR)
         upload_dir.mkdir(exist_ok=True) # 确保上传目录存在
         
-        kb_id = ''
-        kb_type = RagKnowledgeBaseType.USER_SHARED
-        # 查询用户共享知识库
-        kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == kb_type, 
-                                                   RagKnowledgeBase.is_deleted == False).first()
-        if not kb:
-            logger.error(f"上传附件时未找到用户共享知识库")
-            return APIResponse.error(message="用户共享知识库不存在")
-        kb_id = kb.kb_id
+        # kb_id = ''
+        # kb_type = RagKnowledgeBaseType.USER_SHARED
+        # # 查询用户共享知识库
+        # kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == kb_type, 
+        #                                            RagKnowledgeBase.is_deleted == False).first()
+        # if not kb:
+        #     logger.error(f"上传附件时未找到用户共享知识库")
+        #     return APIResponse.error(message="用户共享知识库不存在")
+        # kb_id = kb.kb_id
 
         new_files = []
         existing_files = []
@@ -929,14 +935,18 @@ async def upload_attachment(
                 meta='',
                 hash=file_hash 
             )
-            if save_to_kb:
-                db_file.kb_id = kb_id
-                db_file.kb_type = kb_type
-                db_file.status = RagFileStatus.LOCAL_SAVED
-            else:
-                db_file.kb_id = ''
-                db_file.kb_type = RagKnowledgeBaseType.NONE
-                db_file.status = RagFileStatus.DONE
+            # if save_to_kb:
+            #     db_file.kb_id = kb_id
+            #     db_file.kb_type = kb_type
+            #     db_file.status = RagFileStatus.LOCAL_SAVED
+            # else:
+            #     db_file.kb_id = ''
+            #     db_file.kb_type = RagKnowledgeBaseType.NONE
+            #     db_file.status = RagFileStatus.DONE
+            db_file.kb_id = ''
+            db_file.kb_type = RagKnowledgeBaseType.NONE
+            db_file.status = RagFileStatus.DONE
+
             db.add(db_file)
             db.commit() 
             # 同步解析内容，附件的内容马上要使用，所以进行同步解析
@@ -991,3 +1001,34 @@ async def upload_attachment(
     except Exception as e:
         logger.error(f"上传附件时发生异常: {str(e)}")
         return APIResponse.error(message=f"附件上传失败: {str(e)}")
+
+@router.get("/files/{file_id}/download", summary="下载知识库文件")
+async def download_file(
+    file_id: str = Path(..., description="文件ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 查询文件
+        file = db.query(RagFile).filter(
+            RagFile.file_id == file_id,
+            RagFile.is_deleted == False
+        ).first()
+        
+        if not file:
+            return APIResponse.error(message="文件不存在或已被删除")
+        
+        # 检查文件是否存在
+        if not os.path.exists(file.file_path):
+            return APIResponse.error(message="文件已被清理，请删除后重新上传")
+        
+        # 返回文件内容
+        return FileResponse(
+            path=file.file_path,
+            filename=file.file_name,
+            media_type='application/octet-stream'
+        )
+    except Exception as e:
+        logger.error(f"下载文件失败: {str(e)}")
+        return APIResponse.error(message=f"下载文件失败: {str(e)}")
+
