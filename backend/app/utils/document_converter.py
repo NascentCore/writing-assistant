@@ -7,6 +7,8 @@ from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
+from docx.oxml import parse_xml, OxmlElement
 import re
 
 def add_numbering_to_headers(html_text):
@@ -250,6 +252,101 @@ def fix_document_numbering(doc):
     
     return fixed_count
 
+def process_table(table_element, doc):
+    """
+    处理HTML表格，转换为Word表格
+    
+    Args:
+        table_element: BeautifulSoup的表格元素
+        doc: Word文档对象
+    """
+    # 创建Word表格
+    rows = table_element.find_all('tr')
+    if not rows:
+        return
+        
+    # 获取列数（使用第一行的单元格数）
+    first_row = rows[0]
+    cols = len(first_row.find_all(['td', 'th']))
+    
+    # 创建表格
+    table = doc.add_table(rows=len(rows), cols=cols)
+    table.style = 'Table Grid'  # 使用网格样式
+    
+    # 设置表格对齐方式
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    
+    # 处理每一行
+    for i, row in enumerate(rows):
+        cells = row.find_all(['td', 'th'])
+        for j, cell in enumerate(cells):
+            if j >= cols:  # 跳过超出列数的单元格
+                continue
+                
+            # 获取单元格内容
+            cell_text = cell.get_text().strip()
+            
+            # 获取单元格样式
+            is_header = cell.name == 'th'
+            bg_color = cell.get('bgcolor', '')
+            align = cell.get('align', 'left')
+            
+            # 设置单元格内容
+            word_cell = table.cell(i, j)
+            paragraph = word_cell.paragraphs[0]
+            
+            # 设置单元格对齐方式
+            if align == 'center':
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            elif align == 'right':
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+            else:
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+            
+            # 添加文本
+            run = paragraph.add_run(cell_text)
+            
+            # 设置字体
+            font = run.font
+            font.size = Pt(10.5)
+            
+            # 如果是表头，加粗
+            if is_header:
+                run.bold = True
+                # 设置表头背景色
+                if bg_color:
+                    try:
+                        # 处理颜色值（支持十六进制和颜色名）
+                        if bg_color.startswith('#'):
+                            color = bg_color[1:]
+                            r = int(color[0:2], 16)
+                            g = int(color[2:4], 16)
+                            b = int(color[4:6], 16)
+                        else:
+                            # 这里可以添加颜色名到RGB的映射
+                            color_map = {
+                                'gray': (128, 128, 128),
+                                'lightgray': (192, 192, 192),
+                                'darkgray': (64, 64, 64),
+                                'black': (0, 0, 0),
+                                'white': (255, 255, 255),
+                                'red': (255, 0, 0),
+                                'green': (0, 255, 0),
+                                'blue': (0, 0, 255),
+                                'yellow': (255, 255, 0),
+                                'cyan': (0, 255, 255),
+                                'magenta': (255, 0, 255)
+                            }
+                            r, g, b = color_map.get(bg_color.lower(), (255, 255, 255))
+                        
+                        # 设置单元格背景色
+                        word_cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:fill="{bg_color}"/>'))
+                    except:
+                        pass  # 如果颜色处理失败，使用默认背景色
+            
+            # 设置单元格垂直对齐
+            word_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
 def html_to_docx(
     html_content: str, 
     title: str = "Document", 
@@ -396,6 +493,11 @@ def html_to_docx(
                     parent_paragraph.add_run(text)
             return
         
+        # 处理表格
+        if element.name == 'table':
+            process_table(element, doc)
+            return
+        
         # 处理标题
         if element.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
             level = int(element.name[1])
@@ -474,6 +576,8 @@ def html_to_docx(
                     p.add_run(content)
             else:
                 p = doc.add_paragraph()
+                # 设置首行缩进为2个字符（约等于2个中文字符的宽度）
+                p.paragraph_format.first_line_indent = Pt(21)  # 约等于2个中文字符的宽度
                 for child in element.children:
                     process_element(child, p)
             return
@@ -551,6 +655,8 @@ def html_to_docx(
                     run = p.add_run(text)
                     font = run.font
                     font.size = Pt(10.5)
+                    # 设置首行缩进为2个字符（约等于2个中文字符的宽度）
+                    p.paragraph_format.first_line_indent = Pt(21)  # 约等于2个中文字符的宽度
         else:
             process_element(element)
     
@@ -692,6 +798,7 @@ def html_to_pdf(
         p {
             margin-top: 6pt;
             margin-bottom: 6pt;
+            text-indent: 2em;  /* 添加首行缩进 */
         }
         ol, ul {
             margin-left: 18pt;
@@ -713,6 +820,48 @@ def html_to_pdf(
         }
         .numbered-list-content {
             font-weight: normal;
+        }
+
+        /* 表格样式 */
+        .doc-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10pt 0;
+            table-layout: fixed;
+        }
+        
+        .doc-table, .doc-table th, .doc-table td {
+            border: 1px solid black;
+            padding: 8pt;
+        }
+        
+        .table-header {
+            background-color: #f2f2f2;
+            font-weight: bold;
+            text-align: center;
+        }
+        
+        .table-cell {
+            text-align: center;
+            vertical-align: middle;
+        }
+        
+        /* 确保表格边框在 PDF 中显示 */
+        table {
+            -webkit-print-color-adjust: exact;
+            border-collapse: collapse;
+            border: 1px solid black;
+        }
+        
+        th, td {
+            border: 1px solid black;
+            padding: 8pt;
+        }
+
+        /* 表格内的段落不缩进 */
+        td p, th p {
+            text-indent: 0;
+            margin: 0;
         }
         """
         
