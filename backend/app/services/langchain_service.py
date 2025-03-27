@@ -2405,20 +2405,15 @@ class OutlineGenerator:
         logger.info(summary_log)
         
         # 将markdown转换为HTML
-        html_content = markdown.markdown(final_content,extensions=[
+        html_content = markdown.markdown(final_content, extensions=[
             'markdown.extensions.extra',
             'markdown.extensions.toc',
             'markdown.extensions.sane_lists',
-            'markdown.extensions.smart_strong',
             'markdown.extensions.smarty',
             'markdown.extensions.tables',
             'markdown.extensions.fenced_code',
-            'markdown.extensions.codehilite',
-            'markdown.extensions.sane_lists',
-            'markdown.extensions.smart_strong',
-            'markdown.extensions.smarty',
-            'markdown.extensions.tables',
-            ])
+            'markdown.extensions.codehilite'
+        ])
         
         # 更新文档HTML内容
         html_log = ""
@@ -2437,21 +2432,6 @@ class OutlineGenerator:
         # 最终进度100%
         final_log = f"{summary_log}\n{duplicate_log}\n{html_log}".strip()
         update_task_progress(task_id, db_session, 100, "内容生成完成", final_log)
-        
-        # 如果优化失败，返回原始内容
-        # 这里不需要再次转换HTML，因为已经在上面转换过了
-        # html_content = markdown.markdown(final_content)
-        
-        # 更新最终完整的文档HTML内容 - 这部分代码是重复的，可以删除
-        # if doc_id:
-        #     try:
-        #         document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
-        #         if document:
-        #             document.content = html_content
-        #             db_session.commit()
-        #             logger.info(f"更新文档最终完整HTML内容 [doc_id={doc_id}]")
-        #     except Exception as e:
-        #         logger.error(f"更新文档最终HTML内容时出错: {str(e)}")
         
         return {
             "title": article_title,
@@ -3783,7 +3763,7 @@ class OutlineGenerator:
             2.2.1.1 四级标题1
                 描述：这里是描述1
             2.2.1.2 四级标题2
-                描述：这里是描述2"""
+"""
         }
         
         format_example = format_examples.get(levels, format_examples[levels])
