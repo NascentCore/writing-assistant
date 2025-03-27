@@ -242,7 +242,7 @@ async def convert_doc_to_docx(doc_path: str, docx_path: str = None):
         "soffice",
         "--headless",
         "--convert-to", "docx",
-        "--outdir", docx_path,
+        "--outdir", docx_path or "uploads/",
         doc_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
