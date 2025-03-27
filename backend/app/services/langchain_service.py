@@ -3440,8 +3440,7 @@ class OutlineGenerator:
                     rag_context = self._get_rag_context(
                         question=f"生成关于{prompt}的文章",
                         user_id=user_id,
-                        kb_ids=kb_ids,
-                        context_msg=user_prompt
+                        kb_ids=kb_ids
                     )
                     update_task_progress(task_id, db_session, 27, "默认RAG查询完成", f"获取上下文长度: {len(rag_context)} 字符")
 
@@ -3470,8 +3469,7 @@ class OutlineGenerator:
                 rag_context = self._get_rag_context(
                     question=f"生成关于{prompt}的文章",
                     user_id=user_id,
-                    kb_ids=kb_ids,
-                    context_msg=user_prompt
+                    kb_ids=kb_ids
                 )
                 update_task_progress(task_id, db_session, 32, "使用替代方式完成RAG查询", f"获取上下文长度: {len(rag_context)} 字符")
             
