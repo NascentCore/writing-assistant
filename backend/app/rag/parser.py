@@ -239,9 +239,10 @@ async def convert_doc_to_docx(doc_path: str, docx_path: str = None):
     output_file = docx_path or os.path.splitext(doc_path)[0] + ".docx"
     
     process = await asyncio.create_subprocess_exec(
-        "unoconv",
-        "-f", "docx",
-        "-o", output_file,
+        "soffice",
+        "--headless",
+        "--convert-to", "docx",
+        "--outdir", docx_path,
         doc_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
