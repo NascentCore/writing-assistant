@@ -1438,7 +1438,7 @@ class OutlineGenerator:
         # 第二步：根据权重比例分配总字数
         for para in top_level_paragraphs:
             # 计算该段落应分配的字数
-            para_weight = para["_weight"]
+            para_weight = para.get("_weight", 0)  # 确保para_weight有默认值0，避免为None
             weight_ratio = para_weight / total_weight if total_weight > 0 else 1 / len(top_level_paragraphs)
             para_word_count = int(word_count * weight_ratio)
             
@@ -1551,7 +1551,7 @@ class OutlineGenerator:
         # 根据权重分配字数
         for child in children:
             # 只给需要生成内容的段落分配字数
-            if child.get("_weight", 0) > 0:
+            if child.get("_weight", 0) > 0:  # 使用.get方法提供默认值
                 weight_ratio = child["_weight"] / total_weight
                 child_word_count = int(parent_word_count * weight_ratio)
                 child["expected_word_count"] = child_word_count
