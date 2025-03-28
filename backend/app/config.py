@@ -59,6 +59,7 @@ class Settings(BaseSettings):
         "api_key": os.getenv("LLM_API_KEY", "EMPTY"),
         "readable_model_name": os.getenv("LLM_READABLE_MODEL_NAME", "chatglm3-6b-8192"),
         "system_prompt": os.getenv("LLM_SYSTEM_PROMPT", "你是一个专业的写作助手,擅长帮助用户改进文章的结构、内容和表达。"),
+        "max_tokens": os.getenv("LLM_MAX_TOKENS", 4096),
     }]
     LLM_REQUEST_TIMEOUT: float = yaml_config.get("request_timeout", 300.0)
     LLM_CHAT_MAX_TOKENS: int = yaml_config.get("chat_max_tokens", 200)
