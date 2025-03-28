@@ -1296,8 +1296,10 @@ class OutlineGenerator:
                 # 只计算有描述或是最深层级的段落
                 if para.get("description") or is_deepest_level:
                     total_paragraphs += 1
-                    if para.get("children"):
-                        total_paragraphs += count_paragraphs(para["children"])
+                
+                # 无论当前段落是否计入，都递归计算子段落
+                if para.get("children"):
+                    total_paragraphs += count_paragraphs(para["children"])
             return total_paragraphs
             
         total_paragraphs = count_paragraphs(outline_data["sub_paragraphs"])
@@ -2620,7 +2622,7 @@ class OutlineGenerator:
                 outline_content=outline_content,
                 user_prompt=user_prompt,
                 context_info=context_info,
-                expect_word_count=paragraph.expect_word_count
+                expected_word_count=paragraph.expected_word_count
             )
             
             # 检查生成的内容与已有内容的相似度
@@ -2659,7 +2661,7 @@ class OutlineGenerator:
                     outline_content=outline_content,
                     user_prompt=user_prompt,
                     context_info=context_info,
-                    expect_word_count=paragraph.expect_word_count
+                    expected_word_count=paragraph.expected_word_count
                 )
 
         else:
@@ -2739,15 +2741,15 @@ class OutlineGenerator:
         user_prompt: str = "",
         context_info: dict = {},
         max_length: int = 3000,
-        expect_word_count: Optional[int] = None
+        expected_word_count: Optional[int] = None
     ) -> str:
         """生成段落内容，包含上下文信息"""
         # 记录开始生成段落内容
-        logger.info(f"开始生成段落内容 [段落ID={paragraph.id}, 标题='{paragraph.title}', 字数范围={count_style}]")
+        logger.info(f"开始生成段落内容 [段落ID={paragraph.id}, 标题='{paragraph.title}', 字数范围={count_style}, 预期字数={expected_word_count}]")
         
-        # 根据expect_word_count或count_style确定字数范围
-        if expect_word_count is not None:
-            word_count_range = f"{expect_word_count}-{expect_word_count + 100}"
+        # 根据expected_word_count或count_style确定字数范围
+        if expected_word_count is not None:
+            word_count_range = f"{expected_word_count}-{expected_word_count + 100}"
         else:
             word_count_range = {
                 "short": "300-500",
