@@ -1518,6 +1518,39 @@ class OutlineGenerator:
         if not children:
             return
             
+        # 计算权重函数定义
+        def calculate_weight(paragraph):
+            # 判断是否为最深层级段落（没有子段落）
+            is_deepest_level = not paragraph.get("children") or not paragraph["children"]
+            
+            # 只计算有描述或是最深层级段落的权重
+            if not (paragraph.get("description") or is_deepest_level):
+                return 0  # 没有描述且不是最深层级的段落权重为0
+                
+            # 默认权重为1
+            weight = 1
+            
+            # 根据段落级别调整权重
+            level = paragraph.get("level", 1)
+            if level == 1:
+                weight = 2.0  # 一级标题权重最高
+            elif level == 2:
+                weight = 1.5  # 二级标题权重次之
+            elif level == 3:
+                weight = 1.2  # 三级标题权重再次之
+            else:
+                weight = 1.0  # 其他级别权重为1
+            
+            # 如果有描述，增加权重
+            if paragraph.get("description"):
+                weight *= 1.2
+            
+            # 如果是叶子节点（最深层级），增加权重
+            if is_deepest_level:
+                weight *= 1.1
+                
+            return weight
+        
         # 计算子段落权重
         total_weight = 0
         for child in children:
