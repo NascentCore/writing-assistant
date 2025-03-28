@@ -141,7 +141,7 @@ const NodeTitle: React.FC<{
               />
             </Dropdown>
           )}
-          {level < 3 && (
+          {level < 11 && (
             <PlusOutlined
               className={styles.actionIcon}
               onClick={(e) => {
