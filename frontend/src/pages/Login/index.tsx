@@ -34,6 +34,7 @@ const LoginPage: React.FC = () => {
         localStorage.setItem('admin', response.admin.toString());
         localStorage.removeItem('current_chat_session_id');
         localStorage.removeItem('current_document_id');
+        localStorage.removeItem('ai_chat_model');
         window.location.href = '/';
       }
     } catch (error) {

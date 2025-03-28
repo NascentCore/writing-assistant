@@ -681,7 +681,6 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                 backdropFilter: 'blur(8px)',
                 WebkitBackdropFilter: 'blur(8px)',
                 marginBottom: 12,
-                display: 'none',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center' }}>

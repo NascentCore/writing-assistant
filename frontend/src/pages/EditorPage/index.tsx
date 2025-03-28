@@ -95,152 +95,134 @@ function App() {
   }
 
   // 新增加载文档内容的函数
-  const loadDocumentContent = useCallback(
-    async (editor: AiEditor, docId: string) => {
-      try {
-        const response = await fetchWithAuth(
-          `${API_BASE_URL}/api/v1/documents/${docId}`,
-        );
-        if (response && response.ok) {
-          const result = await response.json();
-          const content = result.data.content || '';
-          setDocument(result.data);
-          if (result.data.session_ids.length) {
-            // 更新路由，添加会话ID参数
-            const query = new URLSearchParams(location.search);
-            query.set('id', result.data.session_ids[0]);
-            history.push(`${location.pathname}?${query.toString()}`);
-          }
-
-          // 创建临时 div 来解析内容
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = content;
-
-          // 查找所有段落和标题元素并处理样式
-          const elements = tempDiv.querySelectorAll(
-            'p, h1, h2, h3, h4, h5, h6',
-          ) as NodeListOf<HTMLElement>;
-          elements.forEach((element) => {
-            const textAlign =
-              element.style.textAlign ||
-              element.getAttribute('data-text-align') ||
-              (element.classList.contains('is-style-text-align-center')
-                ? 'center'
-                : '');
-
-            if (textAlign === 'center') {
-              element.style.textAlign = 'center';
-              element.setAttribute('data-text-align', 'center');
-              element.classList.add('is-style-text-align-center');
-            }
-          });
-
-          // 设置内容并立即定位光标到开头
-          editor.setContent(tempDiv.innerHTML);
-          requestAnimationFrame(() => {
-            // 将所有可能的滚动容器都滚动到顶部
-            const editorElement = editor.innerEditor.view.dom;
-            const scrollContainers = [
-              editorElement.parentElement,
-              document.querySelector('.aie-container-panel'),
-              document.querySelector('.aie-container-main'),
-            ];
-
-            scrollContainers.forEach((container) => {
-              if (container) {
-                container.scrollTop = 0;
-              }
-            });
-            editor.focusStart();
-          });
+  const loadDocumentContent = useCallback(async (docId: string) => {
+    try {
+      const response = await fetchWithAuth(
+        `${API_BASE_URL}/api/v1/documents/${docId}`,
+      );
+      if (response && response.ok) {
+        const result = await response.json();
+        const content = result.data.content || '';
+        setDocument(result.data);
+        if (result.data.session_ids.length) {
+          // 更新路由，添加会话ID参数
+          const query = new URLSearchParams(location.search);
+          query.set('id', result.data.session_ids[0]);
+          history.push(`${location.pathname}?${query.toString()}`);
         }
-      } catch (error) {
-        console.error('Fetch document error:', error);
-      }
-    },
-    [],
-  );
 
-  // 监听 currentDocId 变化，只更新内容
-  // useEffect(() => {
-  //   if (editorRef.current && currentDocId) {
-  //     loadDocumentContent(editorRef.current, currentDocId);
-  //   }
-  // }, [currentDocId, loadDocumentContent]);
+        // 创建临时 div 来解析内容
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = content;
 
-  // 生成随机文件ID
-  // const generateFileId = () => {
-  //   return 'file-' + Math.random().toString(36).substr(2, 9);
-  // };
+        // 查找所有段落和标题元素并处理样式
+        const elements = tempDiv.querySelectorAll(
+          'p, h1, h2, h3, h4, h5, h6',
+        ) as NodeListOf<HTMLElement>;
+        elements.forEach((element) => {
+          const textAlign =
+            element.style.textAlign ||
+            element.getAttribute('data-text-align') ||
+            (element.classList.contains('is-style-text-align-center')
+              ? 'center'
+              : '');
 
-  // 修改编辑器初始化代码，在组件挂载和currentDocId变化时执行
-  useEffect(() => {
-    if (divRef.current && currentDocId) {
-      if (!editorRef.current) {
-        const aiEditor = new AiEditor({
-          ...getEditorConfig(divRef.current),
-          textSelectionBubbleMenu: {
-            enable: true,
-            items: [
-              'ai',
-              'Bold',
-              'Italic',
-              'Underline',
-              // {
-              //   id: 'visit',
-              //   title: '插入到对话',
-              //   icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6V8H5V19H16V14H18V20C18 20.5523 17.5523 21 17 21H4C3.44772 21 3 20.5523 3 20V7C3 6.44772 3.44772 6 4 6H10ZM21 3V11H19L18.9999 6.413L11.2071 14.2071L9.79289 12.7929L17.5849 5H13V3H21Z"></path></svg>',
-              //   onClick: (editor) => {
-              //     const content = editor.getSelectedText();
-              //     if (!showAIChat) {
-              //       setShowAIChat(true);
-              //       setTimeout(() => {
-              //         if (content && aiChatRef.current) {
-              //           const newFile = {
-              //             file_id: generateFileId(),
-              //             name:
-              //               content.slice(0, 20) +
-              //               (content.length > 20 ? '...' : ''),
-              //             size: new Blob([content]).size,
-              //             type: 'text',
-              //             status: 1,
-              //             created_at: new Date().toISOString(),
-              //           };
-              //           aiChatRef.current.addSelectedFile(newFile);
-              //         }
-              //       }, 0);
-              //     } else if (content && aiChatRef.current) {
-              //       const newFile = {
-              //         file_id: generateFileId(),
-              //         name:
-              //           content.slice(0, 20) +
-              //           (content.length > 20 ? '...' : ''),
-              //         size: new Blob([content]).size,
-              //         type: 'text',
-              //         status: 1,
-              //         created_at: new Date().toISOString(),
-              //       };
-              //       aiChatRef.current.addSelectedFile(newFile);
-              //     }
-              //   },
-              // },
-            ],
-          },
-          onCreated: async (editor) => {
-            await loadDocumentContent(editor, currentDocId);
-          },
-          onChange: async (editor) => {
-            updateOutLine(editor);
-            const content = editor.getHtml();
-            saveDocumentDebounce(content);
-          },
+          if (textAlign === 'center') {
+            element.style.textAlign = 'center';
+            element.setAttribute('data-text-align', 'center');
+            element.classList.add('is-style-text-align-center');
+          }
         });
 
-        editorRef.current = aiEditor;
-      } else {
-        // 如果编辑器已存在，只需要加载新文档的内容
-        loadDocumentContent(editorRef.current, currentDocId);
+        // 返回处理后的内容
+        return tempDiv.innerHTML;
       }
+    } catch (error) {
+      console.error('Fetch document error:', error);
+    }
+    return ''; // 如果出错或没有内容，返回空字符串
+  }, []);
+
+  // 修改编辑器初始化逻辑
+  useEffect(() => {
+    const initEditor = async () => {
+      if (divRef.current && currentDocId) {
+        // 先获取文档内容
+        const content = await loadDocumentContent(currentDocId);
+
+        if (!editorRef.current) {
+          // 初始化编辑器，将内容通过content属性注入
+          const aiEditor = new AiEditor({
+            ...getEditorConfig(divRef.current),
+            content, // 直接注入内容
+            textSelectionBubbleMenu: {
+              enable: true,
+              items: [
+                'ai',
+                'Bold',
+                'Italic',
+                'Underline',
+                // {
+                //   id: 'visit',
+                //   title: '插入到对话',
+                //   icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6V8H5V19H16V14H18V20C18 20.5523 17.5523 21 17 21H4C3.44772 21 3 20.5523 3 20V7C3 6.44772 3.44772 6 4 6H10ZM21 3V11H19L18.9999 6.413L11.2071 14.2071L9.79289 12.7929L17.5849 5H13V3H21Z"></path></svg>',
+                //   onClick: (editor) => {
+                //     const content = editor.getSelectedText();
+                //     if (!showAIChat) {
+                //       setShowAIChat(true);
+                //       setTimeout(() => {
+                //         if (content && aiChatRef.current) {
+                //           const newFile = {
+                //             file_id: generateFileId(),
+                //             name:
+                //               content.slice(0, 20) +
+                //               (content.length > 20 ? '...' : ''),
+                //             size: new Blob([content]).size,
+                //             type: 'text',
+                //             status: 1,
+                //             created_at: new Date().toISOString(),
+                //           };
+                //           aiChatRef.current.addSelectedFile(newFile);
+                //         }
+                //       }, 0);
+                //     } else if (content && aiChatRef.current) {
+                //       const newFile = {
+                //         file_id: generateFileId(),
+                //         name:
+                //           content.slice(0, 20) +
+                //           (content.length > 20 ? '...' : ''),
+                //         size: new Blob([content]).size,
+                //         type: 'text',
+                //         status: 1,
+                //         created_at: new Date().toISOString(),
+                //       };
+                //       aiChatRef.current.addSelectedFile(newFile);
+                //     }
+                //   },
+                // },
+              ],
+            },
+            onCreated: (editor) => {
+              // 初始化后执行滚动到顶部和聚焦
+              updateOutLine(editor);
+            },
+            onChange: async (editor) => {
+              updateOutLine(editor);
+              const content = editor.getHtml();
+              saveDocumentDebounce(content);
+            },
+          });
+
+          editorRef.current = aiEditor;
+        } else {
+          // 如果编辑器已存在，使用setContent方法更新内容
+          editorRef.current.setContent(content);
+        }
+      }
+    };
+
+    if (currentDocId) {
+      initEditor();
     }
 
     return () => {
@@ -249,7 +231,7 @@ function App() {
         editorRef.current = null;
       }
     };
-  }, [currentDocId, loadDocumentContent]);
+  }, [currentDocId]);
 
   // 监听 URL 查询参数变化，更新 currentDocId
   useEffect(() => {
@@ -279,7 +261,10 @@ function App() {
   }, []);
 
   return (
-    <div style={{ padding: 0, margin: 0, background: '#f3f4f6' }}>
+    <div
+      className="editor-page"
+      style={{ padding: 0, margin: 0, background: '#f3f4f6' }}
+    >
       <>
         <div
           className="page-header"
@@ -324,7 +309,7 @@ function App() {
                       window.parent.postMessage(
                         {
                           type: 'onUpdate',
-                          value: currentDocId,
+                          value: editorRef.current.getHtml(),
                         },
                         '*',
                       );
