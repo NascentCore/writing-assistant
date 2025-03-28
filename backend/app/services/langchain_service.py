@@ -302,8 +302,9 @@ class OutlineGenerator:
             openai_api_key=self.api_key,
             openai_api_base=self.base_url,
             temperature=0.7,
-            max_tokens=self.max_tokens,
+            max_tokens=12288 if readable_model_name != "doubao" else 4096
         )
+        logger.info(f"model: {readable_model_name}, max_tokens: {12288 if readable_model_name != 'doubao' else 4096}")
         
         # 初始化输出解析器
         self.parser = JsonOutputParser()
@@ -520,9 +521,11 @@ class OutlineGenerator:
         update_task_progress(task_id, db_session, 35, "开始生成大纲", "构建提示模板")
         
         try:
-            first_outline = self.generate_outline_new(prompt, required_level, task_id=task_id, db_session=db_session)
+            first_outline = self.generate_outline_new(prompt, required_level, word_count, task_id=task_id, db_session=db_session)
             if task_id and db_session:
                 update_task_progress(task_id, db_session, 90, "已生成大纲及描述，正在检验大纲章节")
+
+            logger.info(f"first_outline: {first_outline}")
             
             # 处理子章节
             complete_outline = self._parse_outline_to_json(first_outline, prompt)
@@ -581,7 +584,7 @@ class OutlineGenerator:
         【返回格式】
         以JSON格式返回分析结果，格式如下：
         {{
-          "required_level": 数字(1-4),
+          "required_level": 数字(1-5),
           "word_count": 数字或null,
           "page_count": 数字或null,
           "predefined_chapters": ["章节1", "章节2", ...] 或 []
@@ -612,7 +615,7 @@ class OutlineGenerator:
                 requirements = json.loads(content)
                 # 验证返回值的合法性
                 requirements["required_level"] = int(requirements.get("required_level", 3))
-                if requirements["required_level"] < 1 or requirements["required_level"] > 4:
+                if requirements["required_level"] < 1 or requirements["required_level"] > 5:
                     requirements["required_level"] = 3  # 如果不在合理范围内，使用默认值
                 
                 if "word_count" in requirements and requirements["word_count"] is not None:
@@ -1929,7 +1932,7 @@ class OutlineGenerator:
         ensure_descriptions(sub_paragraphs)
         
         # 检查层级深度，避免过深的层级结构
-        def check_depth(paragraphs, current_depth=1, max_depth=4):
+        def check_depth(paragraphs, current_depth=1, max_depth=6):
             for para in paragraphs:
                 children = para.get("children", [])
                 
@@ -1938,7 +1941,7 @@ class OutlineGenerator:
                     logger.warning(f"段落 '{para.get('title')}' 层级过深，考虑简化结构")
                     
                     # 简单处理：如果子段落太多，只保留前几个
-                    if len(children) > 3:
+                    if len(children) > 6:
                         logger.info(f"段落 '{para.get('title')}' 子段落过多，保留前3个")
                         para["children"] = children[:3]
                 
@@ -3674,12 +3677,14 @@ class OutlineGenerator:
                 level = 2
             elif re.match(r'^\d+\.\d+\.\d+\.\d+$', content.split()[0]):  # 匹配 1.1.1.1, 1.1.1.2 等
                 level = 3
+            elif re.match(r'^\d+\.\d+\.\d+\.\d+\.\d+$', content.split()[0]):  # 匹配 1.1.1.1.1, 1.1.1.1.2 等
+                level = 4
                 
             max_level = max(max_level, level)
         
         return max_level + 1 == required_levels
     
-    def generate_outline_new(self, topic, levels=3, show_result=False, task_id: Optional[str] = None, db_session = None):
+    def generate_outline_new(self, topic, levels=3, word_count=10000, show_result=False, fill_desc=False, task_id: Optional[str] = None, db_session = None):
         """生成大纲"""        
         # 构建提示词
         system_prompt = """你是一个专业的大纲生成助手。你需要根据用户给出的主题，生成一个结构清晰的大纲。
@@ -3700,55 +3705,151 @@ class OutlineGenerator:
         format_examples = {
             1: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
 一、一级标题1
+    描述：这里是章节描述
 二、一级标题2
+    描述：这里是章节描述
 三、一级标题3
+    描述：这里是章节描述
 四、一级标题4
-五、一级标题5""",
+    描述：这里是章节描述
+五、一级标题5
+    描述：这里是章节描述""",
             2: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
 一、一级标题1
     1.1 二级标题1
+        描述：这里是章节描述
     1.2 二级标题2
+        描述：这里是章节描述
 二、一级标题2
     2.1 二级标题1
+        描述：这里是章节描述
     2.2 二级标题2
-    2.3 二级标题3""",
+        描述：这里是章节描述
+    2.3 二级标题3
+        描述：这里是章节描述""",
             3: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
 一、一级标题1
     1.1 二级标题1
         1.1.1 三级标题1
+            描述：这里是章节描述
         1.1.2 三级标题2
+            描述：这里是章节描述
     1.2 二级标题2
         1.2.1 三级标题1
+            描述：这里是章节描述
         1.2.2 三级标题2
+            描述：这里是章节描述
 二、一级标题2
     2.1 二级标题1
         2.1.1 三级标题1
-        2.1.2 三级标题2""",
+            描述：这里是章节描述
+        2.1.2 三级标题2
+            描述：这里是章节描述""",
             4: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
 一、一级标题1
     1.1 二级标题1
         1.1.1 三级标题1
             1.1.1.1 四级标题1
+                描述：这里是章节描述
             1.1.1.2 四级标题2
+                描述：这里是章节描述
         1.1.2 三级标题2
             1.1.2.1 四级标题1
+                描述：这里是章节描述
             1.1.2.2 四级标题2
+                描述：这里是章节描述
     1.2 二级标题2
         1.2.1 三级标题1
             1.2.1.1 四级标题1
+                描述：这里是章节描述
             1.2.1.2 四级标题2
+                描述：这里是章节描述
             1.2.1.3 四级标题3
+                描述：这里是章节描述
             1.2.1.4 四级标题4
+                描述：这里是章节描述
 二、一级标题2
     2.1 二级标题1
         2.1.1 三级标题1
             2.1.1.1 四级标题1
+                描述：这里是章节描述
             2.1.1.2 四级标题2
+                描述：这里是章节描述
             2.1.1.3 四级标题3
+                描述：这里是章节描述
     2.2 二级标题2
         2.2.1 三级标题1
             2.2.1.1 四级标题1
-            2.2.1.2 四级标题2"""
+                描述：这里是章节描述
+            2.2.1.2 四级标题2
+                描述：这里是章节描述""",
+            5: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+    1.1 二级标题1
+        1.1.1 三级标题1
+            1.1.1.1 四级标题1
+                1.1.1.1.1 五级标题1
+                    描述：这里是章节描述
+                1.1.1.1.2 五级标题2
+                    描述：这里是章节描述
+            1.1.1.2 四级标题2
+                1.1.1.2.1 五级标题1
+                    描述：这里是章节描述
+                1.1.1.2.2 五级标题2
+                    描述：这里是章节描述
+        1.1.2 三级标题2
+            1.1.2.1 四级标题1
+                1.1.2.1.1 五级标题1
+                    描述：这里是章节描述
+                1.1.2.1.2 五级标题2
+                    描述：这里是章节描述
+            1.1.2.2 四级标题2
+                1.1.2.2.1 五级标题1
+                    描述：这里是章节描述
+                1.1.2.2.2 五级标题2
+                    描述：这里是章节描述
+    1.2 二级标题2
+        1.2.1 三级标题1
+            1.2.1.1 四级标题1
+                1.2.1.1.1 五级标题1
+                    描述：这里是章节描述
+                1.2.1.1.2 五级标题2
+                    描述：这里是章节描述
+            1.2.1.2 四级标题2
+                1.2.1.2.1 五级标题1
+                    描述：这里是章节描述
+                1.2.1.2.2 五级标题2
+                    描述：这里是章节描述
+            1.2.1.3 四级标题3
+                1.2.1.3.1 五级标题1
+                    描述：这里是章节描述
+                1.2.1.3.2 五级标题2
+                    描述：这里是章节描述
+二、一级标题2
+    2.1 二级标题1
+        2.1.1 三级标题1
+            2.1.1.1 四级标题1
+                2.1.1.1.1 五级标题1
+                    描述：这里是章节描述
+                2.1.1.1.2 五级标题2
+                    描述：这里是章节描述
+            2.1.1.2 四级标题2
+                2.1.1.2.1 五级标题1
+                    描述：这里是章节描述
+                2.1.1.2.2 五级标题2
+                    描述：这里是章节描述
+    2.2 二级标题2
+        2.2.1 三级标题1
+            2.2.1.1 四级标题1
+                2.2.1.1.1 五级标题1
+                    描述：这里是章节描述
+                2.2.1.1.2 五级标题2
+                    描述：这里是章节描述
+            2.2.1.2 四级标题2
+                2.2.1.2.1 五级标题1
+                    描述：这里是章节描述
+                2.2.1.2.2 五级标题2
+                    描述：这里是章节描述"""
         }
         
         format_example = format_examples.get(levels, format_examples[levels])
@@ -3763,54 +3864,138 @@ class OutlineGenerator:
 {format_example}
 
 要求：
-1. 只生成大纲结构，不要包含描述内容
-2. 确保层级结构清晰，逻辑合理
-3. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
-4. 确保每个章节的内容都与主题相关
-5. 确保大纲结构自然，不要机械地固定章节数量
-6. 每个层级都必须使用正确的标题格式：
+1. 生成大纲结构，每个最终层级子章节需要包含描述
+2. 描述以"描述："开头，放在最终层级子章节标题下面另起一行
+3. 确保层级结构清晰，逻辑合理
+4. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
+5. 确保每个章节的内容都与主题相关
+6. 确保大纲结构自然，不要机械地固定章节数量
+7. 每个层级都必须使用正确的标题格式：
     - 一级标题使用中文数字（如：一、二、三、四、五、六、七、八、九、十等）
     - 二级标题使用"1.1、1.2、"等数字格式
     - 三级标题使用"1.1.1、1.1.2、"等数字格式
     - 四级标题使用"1.1.1.1、1.1.1.2、"等数字格式
-7. 确保每个层级的缩进正确（每级缩进4个空格）
-8. 确保大纲结构完整，包含所有必要的章节
-9. 必须严格按照{levels}级层级生成，不要少层级
+    - 五级标题使用"1.1.1.1.1、1.1.1.1.2、"等数字格式
+8. 确保每个层级的缩进正确（每级缩进4个空格）
+9. 确保大纲结构完整，包含所有必要的章节
+10. 必须严格按照{levels}级层级生成，不要少层级
 
 只返回大纲结构，不要包含额外的说明。"""
 
             messages = f"System: {system_prompt}\n\nUser: {structure_prompt}"
             
             # 调用LLM生成大纲结构
-            structure_outline = self.llm.invoke(messages).content
-            update_task_progress(task_id, db_session, 50, f"已生成 {levels} 级大纲，开始补充章节描述...")
-            logger.info(structure_outline)
+            outline = self.llm.invoke(messages).content
+            update_task_progress(task_id, db_session, 50, f"已生成 {levels} 级大纲")
+            logger.info(outline)
             
-            if not structure_outline:
+            if not outline:
                 retry_count += 1
                 continue
             
             # 检查大纲层级是否符合要求
-            if self._check_outline_levels(structure_outline, levels) or self._check_outline_description_titles(structure_outline):
+            if self._check_outline_levels(outline, levels) or self._check_outline_description_titles(outline):
                 break
             else:
                 logger.info(f"生成的大纲层级或子标题不符合要求，正在尝试重新生成...")
                 update_task_progress(task_id, db_session, 55, "生成的大纲层级或子标题不符合要求，正在尝试重新生成...")
                 retry_count += 1
                 time.sleep(1)  # 添加短暂延迟
-        
-        # 第二步：分批补充描述
-        sections = self._split_outline_into_sections(structure_outline)
-        all_sections = [sections[0]]
-        batch_size = 1  # 每批处理章节数
-        
-        for i in range(1, len(sections), batch_size):
-            update_task_progress(task_id, db_session, 60 + i * 2, f"正在补充【{i}:{i+batch_size}】章节描述...")
-            batch = sections[i:i + batch_size]
-            batch_text = "\n".join(batch)
+
+        ext_num = self._get_extension_number(word_count)
+
+        if ext_num > 0:
+            sections = self._split_outline_into_sections(outline)
+            all_sections = [sections[0]]
+            batch_size = 4  # 每批处理数量
+
+            for i in range(1, len(sections), batch_size):
+                update_task_progress(task_id, db_session, 50 + i, f"正在扩展【{i}:{i+batch_size}】子章节...")
+                batch = sections[i:i + batch_size]
+                batch_text = "\n".join(batch)
+
+                # 构建补充子章节的提示词
+                ext_prompt = f"""请为以下给定的大纲章节扩展同级子章节："
+
+{batch_text}
+
+要求：
+1. 严格限制在给定章节范围内进行扩展，不要生成或修改其他章节
+2. 严格保持原有层级结构，禁止增加新的层级
+3. 对于每个已有的父章节，在其现有子章节的基础上额外新增{ext_num}个平级子章节
+4. 新增的子章节必须与已有子章节保持相同的层级
+5. 示例说明：
+   如果原有结构是：
+   一、项目概况
+       1.1 工程背景
+           1.1.1 区域现状
+               描述：这里是章节描述
+           1.1.2 能行能力评估
+               描述：这里是章节描述
+       1.2 建设目标
+           1.2.1 目标一
+               描述：这里是章节描述
+           1.2.2 目标二
+               描述：这里是章节描述
+   
+   扩展后应该是：
+   一、项目概况
+       1.1 工程背景
+           1.1.1 区域现状
+               描述：这里是章节描述
+           1.1.2 能行能力评估
+               描述：这里是章节描述
+           1.1.3 背景三         # 新增的第1个子章节
+               描述：这里是章节描述
+           1.1.4 背景四         # 新增的第2个子章节
+               描述：这里是章节描述
+       1.2 建设目标
+           1.2.1 目标一
+               描述：这里是章节描述
+           1.2.2 目标二
+               描述：这里是章节描述
+           1.2.3 目标三         # 新增的第1个子章节
+               描述：这里是章节描述
+           1.2.4 目标四         # 新增的第2个子章节
+               描述：这里是章节描述
+
+6. 新增子章节要与原主题"{topic}"密切相关，并与其所属父章节主题保持一致
+7. 保持原有编号格式，新增子章节按顺序编号
+8. 保持原有的缩进格式（每级缩进4个空格）
+9. 确保扩展后的结构清晰、逻辑合理
+
+只返回扩展后的大纲内容，不要包含额外的说明。"""
+
+                messages = f"System: {system_prompt}\n\nUser: {ext_prompt}"
             
-            # 构建补充描述的提示词
-            description_prompt = f"""请为以下大纲章节补充详细的描述内容。原始主题是："{topic}"
+                # 调用LLM生成大纲结构
+                batch_with_sub_title = self.llm.invoke(messages).content
+                logger.info(batch_with_sub_title)
+                
+                if batch_with_sub_title:
+                    all_sections.append(batch_with_sub_title)
+                
+                # 添加短暂延迟，避免API限制
+                if i < len(sections) - batch_size:  # 如果不是最后一批
+                    time.sleep(1)
+            
+            # 合并所有章节
+            outline = '\n'.join(all_sections)
+
+
+        if fill_desc:
+            # 第二步：分批补充描述
+            sections = self._split_outline_into_sections(outline)
+            all_sections = [sections[0]]
+            batch_size = 1  # 每批处理章节数
+            
+            for i in range(1, len(sections), batch_size):
+                update_task_progress(task_id, db_session, 60 + i * 2, f"正在补充【{i}:{i+batch_size}】章节描述...")
+                batch = sections[i:i + batch_size]
+                batch_text = "\n".join(batch)
+                
+                # 构建补充描述的提示词
+                description_prompt = f"""请为以下大纲章节补充详细的描述内容。原始主题是："{topic}"
 
 {batch_text}
 
@@ -3830,23 +4015,39 @@ class OutlineGenerator:
 
 只返回补充描述后的大纲内容，不要包含额外的说明。"""
 
-            messages = f"System: {system_prompt}\n\nUser: {description_prompt}"
+                messages = f"System: {system_prompt}\n\nUser: {description_prompt}"
+                
+                # 调用LLM补充描述
+                batch_with_descriptions = self.llm.invoke(messages).content
+                logger.info(batch_with_descriptions)
+                
+                if batch_with_descriptions:
+                    all_sections.append(batch_with_descriptions)
+                
+                # 添加短暂延迟，避免API限制
+                if i < len(sections) - batch_size:  # 如果不是最后一批
+                    time.sleep(1)
             
-            # 调用LLM补充描述
-            batch_with_descriptions = self.llm.invoke(messages).content
-            logger.info(batch_with_descriptions)
+            # 合并所有章节
+            outline = '\n'.join(all_sections)
             
-            if batch_with_descriptions:
-                all_sections.append(batch_with_descriptions)
-            
-            # 添加短暂延迟，避免API限制
-            if i < len(sections) - batch_size:  # 如果不是最后一批
-                time.sleep(1)
-        
-        # 合并所有章节
-        outline = '\n'.join(all_sections)
-            
-        return outline    
+        return outline
+    
+    def _get_extension_number(self, target_size):
+        """根据目标大小确定需要扩展的子章节数量"""
+        # 定义扩展范围
+        EXTENSION_THRESHOLDS = [
+            (100000, 1),
+            (150000, 2),
+            (200000, 3),
+            (250000, 4)
+        ]
+
+        for threshold, num in EXTENSION_THRESHOLDS:
+            if target_size < threshold:
+                return num - 1
+        return 4 if target_size >= EXTENSION_THRESHOLDS[-1][0] else 0
+    
     def _parse_outline_to_json(self, outline_text, topic):
         """将大纲文本解析为指定的JSON结构"""
         try:
@@ -3899,6 +4100,12 @@ class OutlineGenerator:
                 elif re.match(r'^\d+\.\d+\.\d+\.\d+$', content.split()[0]):  # 匹配 1.1.1.1, 1.1.1.2 等
                     is_title = True
                     level = 3
+                elif re.match(r'^\d+\.\d+\.\d+\.\d+\.\d+$', content.split()[0]):  # 匹配 1.1.1.1.1, 1.1.1.1.2 等
+                    is_title = True
+                    level = 4
+                elif re.match(r'^\d+\.\d+\.\d+\.\d+\.\d+.\d+$', content.split()[0]):  # 匹配 1.1.1.1.1, 1.1.1.1.2 等
+                    is_title = True
+                    level = 5
                 
                 if not is_title:
                     # 如果不是标题，则作为描述
