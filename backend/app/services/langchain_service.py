@@ -1,44 +1,35 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser
-from typing import List, Dict, Any, Optional, Tuple, Callable, Union
+from typing import List, Dict, Any, Optional
 from app.config import settings
 import logging
 import re
 import markdown
-import concurrent.futures
 import json
 import time
 import uuid
 from datetime import datetime
 import traceback
-import random
-import math
-from concurrent.futures import ThreadPoolExecutor
-import html
 
-from fastapi import HTTPException
-import numpy as np
-from langchain.vectorstores.chroma import Chroma
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.schema.output_parser import OutputParserException
-from langchain.schema.runnable import RunnableConfig
-from langchain.memory import ConversationBufferMemory
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable
-from langchain.schema import HumanMessage, SystemMessage
 
-from app.utils.outline import build_paragraph_key, build_paragraph_data
+from app.utils.outline import  build_paragraph_data
 from app.models.outline import SubParagraph, Outline
 from app.rag.rag_api import rag_api
 from app.models.document import Document
 from app.models.task import Task, TaskStatus
 from app.utils.web_search import baidu_search
 from app.config import settings
+from app.models.outline import CountStyle
+from app.database import get_db
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+
 
 logger = logging.getLogger(__name__)
 
-def update_task_progress(task_id: Optional[str], db_session, progress: int, detail: str, log: str = ""):
+def update_task_progress(task_id: Optional[str], db_session: Session, progress: int, detail: str, log: str = ""):
     """更新任务进度"""
     if not task_id:
         return
@@ -512,32 +503,13 @@ class OutlineGenerator:
         if not word_count and page_count:
             word_count = page_count * settings.WRITING_PER_PAGE_WORD_COUNT
             logger.info(f"根据页数({page_count}页)计算字数要求: {word_count}字")
-        predefined_chapters = user_requirements.get("predefined_chapters", [])
         logger.info(f"要求层级：{required_level} 级")
-        
-        # 处理文件内容
-        file_context = ""
-        if file_contents and len(file_contents) > 0:
-            file_context = "参考以下文件内容:\n" + "\n".join(file_contents)
-            logger.info(f"使用参考文件内容 [files_count={len(file_contents)}]")
-        else:
-            file_context = "没有提供参考文件内容。"
-            logger.info("无参考文件内容")
         
         # 更新任务进度 - 处理参考资料
         update_task_progress(task_id, db_session, 20, "处理参考资料", f"参考文件数量: {len(file_contents) if file_contents else 0}")
         
         # 获取RAG搜索结果（如果启用）
         update_task_progress(task_id, db_session, 25, "正在检索RAG知识库")
-        rag_context = ""
-        # if self.use_rag:
-        #     rag_prompt = f"关于主题：{prompt}，请提供参考内容"
-        #     rag_context = self._get_rag_context(
-        #         question=rag_prompt,
-        #         user_id=user_id,
-        #         kb_ids=kb_ids,
-        #         context_msg="生成大纲"
-        #     )
 
         update_task_progress(task_id, db_session, 30, "检索RAG知识库完成", f"")
         
@@ -838,7 +810,6 @@ class OutlineGenerator:
                     for i, chapter in enumerate(enhanced_outline["sub_paragraphs"]):
                         if i < len(outline_data["sub_paragraphs"]):
                             # 保留原有标题，更新描述和篇幅风格
-                            original_title = outline_data["sub_paragraphs"][i]["title"]
                             outline_data["sub_paragraphs"][i]["description"] = chapter.get("description", "")
                             outline_data["sub_paragraphs"][i]["count_style"] = chapter.get("count_style", "medium")
                 
@@ -1826,9 +1797,6 @@ class OutlineGenerator:
         Returns:
             Dict: 保存后的大纲数据
         """
-        from app.models.outline import CountStyle, ReferenceStatus
-        from sqlalchemy.orm import Session
-        import uuid
         
         logger.info(f"开始保存大纲到数据库 [outline_id={outline_id}, user_id={user_id}]")
         
@@ -2434,8 +2402,9 @@ class OutlineGenerator:
             # 进度范围从40%到95%，留5%给最后的处理
             progress = 40 + int((global_context["generated_paragraph_count"] / global_context["total_paragraphs"]) * 55)
             progress = min(95, progress)  # 确保不超过95%，留给最后的完成步骤
+            logger.info(f"当前进度: {progress}, 已生成 {global_context['generated_paragraph_count']}/{global_context['total_paragraphs']} 个段落, 当前总内容长度: {global_context['total_content_length']} 字符, 预期字数: {paragraph.expected_word_count}")
             update_task_progress(task_id, db_session, progress, f"已生成 {global_context['generated_paragraph_count']}/{global_context['total_paragraphs']} 个段落", 
-                                f"生成段落ID: {paragraph.id}, 标题: {paragraph.title}, 当前总内容长度: {global_context['total_content_length']} 字符")
+                                f"生成段落ID: {paragraph.id}, 标题: {paragraph.title}, 当前总内容长度: {global_context['total_content_length']} 字符, ")
         
         # 合并所有内容
         final_content = "\n".join(markdown_content)
@@ -2627,7 +2596,6 @@ class OutlineGenerator:
             
             # 检查生成的内容与已有内容的相似度
             content_too_similar = False
-            similar_content = None
             similar_title = None
             
             for pid, content_info in global_context["generated_contents"].items():
@@ -2640,7 +2608,6 @@ class OutlineGenerator:
                     
                     if similarity > 0.7:  # 相似度阈值
                         content_too_similar = True
-                        similar_content = existing_content
                         similar_title = existing_title
                         logger.warning(f"生成的内容与已有内容 '{existing_title}' 相似度过高 ({similarity:.2f})，尝试重新生成")
                         break
@@ -2740,7 +2707,6 @@ class OutlineGenerator:
         outline_content: str = "", 
         user_prompt: str = "",
         context_info: dict = {},
-        max_length: int = 3000,
         expected_word_count: Optional[int] = None
     ) -> str:
         """生成段落内容，包含上下文信息"""
@@ -2959,12 +2925,9 @@ class OutlineGenerator:
                     content = content.strip()
             
             # 记录生成完成
-            logger.info(f"段落内容生成完成 [段落ID={paragraph.id}, 内容长度={len(content)}字符]")
+            logger.info(f"段落内容生成完成 [段落ID={paragraph.id}, 内容长度={len(content)}字符, 预期字数={expected_word_count}]")
             
             # 限制内容长度
-            if len(content) > max_length:
-                logger.warning(f"生成的内容超过最大长度限制，进行截断 [原长度={len(content)}, 最大长度={max_length}]")
-                content = content[:max_length]
             
             return content
             
@@ -3382,9 +3345,6 @@ class OutlineGenerator:
         task_id = None
         if doc_id:
             # 查找相关任务ID
-            from sqlalchemy.orm import Session
-            from sqlalchemy.sql import func
-            from app.database import get_db
             
             try:
                 db_session = next(get_db())
@@ -3520,9 +3480,6 @@ class OutlineGenerator:
         
         # 更新文档标题和初始HTML（如果提供了文档ID）
         if doc_id:
-            from sqlalchemy.orm import Session
-            from sqlalchemy.sql import func
-            from app.database import get_db
             
             try:
                 db_session = next(get_db())
@@ -3882,8 +3839,7 @@ class OutlineGenerator:
         # 合并所有章节
         outline = '\n'.join(all_sections)
             
-        return outline
-    
+        return outline    
     def _parse_outline_to_json(self, outline_text, topic):
         """将大纲文本解析为指定的JSON结构"""
         try:
