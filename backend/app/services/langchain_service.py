@@ -2789,6 +2789,17 @@ class OutlineGenerator:
             subsection_num = paragraph_id_str[-1] if len(paragraph_id_str) >= 1 else "1"
             chapter_position_str = f"这是{section_num}.{subsection_num}小节。"
         
+        # 确保expected_word_count不为None，避免None与float相乘的错误
+        if expected_word_count is None:
+            # 根据count_style设置默认字数
+            count_style_word_counts = {
+                "short": 400,
+                "medium": 800,
+                "long": 1200
+            }
+            expected_word_count = count_style_word_counts.get(count_style, 800)
+            logger.warning(f"段落 [ID={paragraph.id}] 没有设置预期字数，根据count_style='{count_style}'使用默认值 {expected_word_count}")
+        
         # 构建提示模板
         template = f"""
 # 角色
