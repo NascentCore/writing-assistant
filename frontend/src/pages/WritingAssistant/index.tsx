@@ -92,13 +92,9 @@ const Home: React.FC = () => {
         setError(null);
         try {
           const data: any = await fetch(
-            process?.env.NODE_ENV === 'development'
-              ? `https://zzlj-jl-dev.01road.com/api/app/v1/ai-prompt-template/list?types=${
-                  (window as any).templateType
-                }`
-              : `https://zzlj-jl.01road.com/api/app/v1/ai-prompt-template/list?types=${
-                  (window as any).templateType
-                }`,
+            `https://zzlj-jl-dev.01road.com/api/app/v1/ai-prompt-template/list?types=${
+              (window as any).templateType
+            }`,
             { method: 'GET' },
           );
 
