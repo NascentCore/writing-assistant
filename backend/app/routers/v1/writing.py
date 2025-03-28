@@ -739,13 +739,10 @@ async def update_outline(
     # 查找大纲
     outline = db.query(Outline).filter(
         Outline.id == outline_id,
-        # Outline.user_id == current_user.user_id
+        Outline.user_id == current_user.user_id
     ).first()
     if not outline:
         return APIResponse.error(message=f"未找到ID为{outline_id}的大纲")
-
-    if outline.user_id != current_user.user_id and current_user.admin != UserRole.SYS_ADMIN:
-        return APIResponse.error(message="无权访问")
     
     # 更新大纲标题
     outline.title = request.title
@@ -960,7 +957,7 @@ async def get_outline(
         return APIResponse.error(message=f"未找到ID为{outline_id}的大纲")
     
     # 校验权限：只能访问自己的大纲或系统预留的大纲
-    if outline.user_id is not None and outline.user_id != current_user.user_id:
+    if outline.user_id is not None and outline.user_id != current_user.user_id and current_user.admin != UserRole.SYS_ADMIN:
         return APIResponse.error(message="您没有权限访问该大纲")
     
     # 一次性获取所有段落

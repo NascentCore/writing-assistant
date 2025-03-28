@@ -1296,8 +1296,10 @@ class OutlineGenerator:
                 # 只计算有描述或是最深层级的段落
                 if para.get("description") or is_deepest_level:
                     total_paragraphs += 1
-                    if para.get("children"):
-                        total_paragraphs += count_paragraphs(para["children"])
+                
+                # 无论当前段落是否计入，都递归计算子段落
+                if para.get("children"):
+                    total_paragraphs += count_paragraphs(para["children"])
             return total_paragraphs
             
         total_paragraphs = count_paragraphs(outline_data["sub_paragraphs"])
@@ -1518,6 +1520,39 @@ class OutlineGenerator:
         if not children:
             return
             
+        # 计算权重函数定义
+        def calculate_weight(paragraph):
+            # 判断是否为最深层级段落（没有子段落）
+            is_deepest_level = not paragraph.get("children") or not paragraph["children"]
+            
+            # 只计算有描述或是最深层级段落的权重
+            if not (paragraph.get("description") or is_deepest_level):
+                return 0  # 没有描述且不是最深层级的段落权重为0
+                
+            # 默认权重为1
+            weight = 1
+            
+            # 根据段落级别调整权重
+            level = paragraph.get("level", 1)
+            if level == 1:
+                weight = 2.0  # 一级标题权重最高
+            elif level == 2:
+                weight = 1.5  # 二级标题权重次之
+            elif level == 3:
+                weight = 1.2  # 三级标题权重再次之
+            else:
+                weight = 1.0  # 其他级别权重为1
+            
+            # 如果有描述，增加权重
+            if paragraph.get("description"):
+                weight *= 1.2
+            
+            # 如果是叶子节点（最深层级），增加权重
+            if is_deepest_level:
+                weight *= 1.1
+                
+            return weight
+        
         # 计算子段落权重
         total_weight = 0
         for child in children:
@@ -2379,11 +2414,6 @@ class OutlineGenerator:
         for i, paragraph in enumerate(root_paragraphs):
             logger.info(f"处理顶级段落 [{i+1}/{len(root_paragraphs)}] [ID={paragraph.id}, 标题='{paragraph.title}']")
             
-            # 检查总内容长度是否超过限制
-            if global_context["total_content_length"] >= global_context["max_total_length"]:
-                logger.warning(f"内容总长度已达到限制({global_context['total_content_length']}字符)，停止生成")
-                break
-            
             # 生成段落内容
             self._generate_paragraph_with_context(
                 paragraph,
@@ -2575,11 +2605,6 @@ class OutlineGenerator:
                                ", ".join([f"'{title}'" for title in list(global_context.get("generated_titles", set()))[-5:]])
         }
         
-        # 检查总内容长度是否超过限制
-        if global_context["total_content_length"] >= global_context["max_total_length"]:
-            logger.warning(f"内容总长度已达到限制({global_context['total_content_length']}字符)，停止生成")
-            return
-        
         # 生成段落内容
         logger.info(f"生成段落内容 [标题='{title}', 级别={level}, ID={paragraph.id}]")
 
@@ -2597,7 +2622,7 @@ class OutlineGenerator:
                 outline_content=outline_content,
                 user_prompt=user_prompt,
                 context_info=context_info,
-                expect_word_count=paragraph.expect_word_count
+                expected_word_count=paragraph.expected_word_count
             )
             
             # 检查生成的内容与已有内容的相似度
@@ -2636,7 +2661,7 @@ class OutlineGenerator:
                     outline_content=outline_content,
                     user_prompt=user_prompt,
                     context_info=context_info,
-                    expect_word_count=paragraph.expect_word_count
+                    expected_word_count=paragraph.expected_word_count
                 )
 
         else:
@@ -2716,15 +2741,15 @@ class OutlineGenerator:
         user_prompt: str = "",
         context_info: dict = {},
         max_length: int = 3000,
-        expect_word_count: Optional[int] = None
+        expected_word_count: Optional[int] = None
     ) -> str:
         """生成段落内容，包含上下文信息"""
         # 记录开始生成段落内容
-        logger.info(f"开始生成段落内容 [段落ID={paragraph.id}, 标题='{paragraph.title}', 字数范围={count_style}]")
+        logger.info(f"开始生成段落内容 [段落ID={paragraph.id}, 标题='{paragraph.title}', 字数范围={count_style}, 预期字数={expected_word_count}]")
         
-        # 根据expect_word_count或count_style确定字数范围
-        if expect_word_count is not None:
-            word_count_range = f"{expect_word_count}-{expect_word_count + 100}"
+        # 根据expected_word_count或count_style确定字数范围
+        if expected_word_count is not None:
+            word_count_range = f"{expected_word_count}-{expected_word_count + 100}"
         else:
             word_count_range = {
                 "short": "300-500",
