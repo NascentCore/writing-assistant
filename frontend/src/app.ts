@@ -21,9 +21,12 @@ if (window.self !== window.top) {
   const query = new URLSearchParams(location.search);
   const token = query.get('token');
   const admin = query.get('admin');
+
   localStorage.setItem('token', token?.split(' ')?.['1'] as string);
   localStorage.setItem('admin', admin as string);
   (window as any).isIframe = true;
+  (window as any).createChatId = !!query.get('createChatId'); //是否需要通知外部保存创建的chatId
+  (window as any).templateType = query.get('templateType'); //获取自定义模版类型
 } else {
   (window as any).isIframe = false;
 }

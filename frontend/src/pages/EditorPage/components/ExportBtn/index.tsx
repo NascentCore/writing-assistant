@@ -1,5 +1,3 @@
-import { saveAsPdf } from '@/utils/utils'; // 引入导出函数
-import { useModel } from '@umijs/max';
 import { AiEditor } from 'aieditor';
 import { Button, Dropdown, Menu } from 'antd';
 import React from 'react';
@@ -11,8 +9,6 @@ interface ExportBtnGroupProps {
 }
 
 const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
-  const { document } = useModel('EditorPage.model');
-
   // 处理导出逻辑
   const handleExport = async (format: string) => {
     if (!editorRef.current) return;
@@ -22,20 +18,16 @@ const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
     );
     if (!currentDocId) return;
 
-    const docTitle = document.title;
-
     try {
       if (format === 'pdf') {
-        saveAsPdf();
+        downloadFile(
+          `${API_BASE_URL}/api/v1/documents/${currentDocId}/export/pdf`,
+          'pdf',
+        );
       } else if (format === 'docx') {
-        const content = editorRef.current.getHtml();
-        // saveAsDocx(content, docTitle);
-        console.log(1313, currentDocId);
-        // window.open(
-        //   `${API_BASE_URL}/api/v1/documents/${currentDocId}/export/docx`,
-        // );
         downloadFile(
           `${API_BASE_URL}/api/v1/documents/${currentDocId}/export/docx`,
+          'docx',
         );
       }
     } catch (error) {
@@ -47,14 +39,14 @@ const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
   // 定义下拉菜单内容，保留按钮原先的处理函数调用
   const menu = (
     <Menu>
-      {/* <Menu.Item
+      <Menu.Item
         key="pdf"
         onClick={() => {
           handleExport('pdf');
         }}
       >
         导出为 PDF
-      </Menu.Item> */}
+      </Menu.Item>
       <Menu.Item
         key="docx"
         onClick={() => {
