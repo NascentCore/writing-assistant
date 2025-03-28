@@ -1289,11 +1289,16 @@ class OutlineGenerator:
             
         # 计算当前大纲段落数量和能够生成的最大字数
         def count_paragraphs(paragraphs):
-            count = len(paragraphs)
+            total_paragraphs = 0
             for para in paragraphs:
-                if "children" in para and para["children"]:
-                    count += count_paragraphs(para["children"])
-            return count
+                # 判断是否为最深层级段落（没有子段落）
+                is_deepest_level = not para.get("children") or not para["children"]
+                # 只计算有描述或是最深层级的段落
+                if para.get("description") or is_deepest_level:
+                    total_paragraphs += 1
+                    if para.get("children"):
+                        total_paragraphs += count_paragraphs(para["children"])
+            return total_paragraphs
             
         total_paragraphs = count_paragraphs(outline_data["sub_paragraphs"])
         max_possible_words = total_paragraphs * WRITING_MAX_WORD_COUNT_PER_GENERATION
@@ -1415,24 +1420,34 @@ class OutlineGenerator:
         
         # 第一步：创建权重映射并计算段落权重
         def calculate_weight(paragraph):
+            # 判断是否为最深层级段落（没有子段落）
+            is_deepest_level = not paragraph.get("children") or not paragraph["children"]
+            
+            # 只计算有描述或是最深层级段落的权重
+            if not (paragraph.get("description") or is_deepest_level):
+                return 0  # 没有描述且不是最深层级的段落权重为0
+                
             # 默认权重为1
             weight = 1
             
-            # 根据篇幅风格调整权重
-            count_style = paragraph.get("count_style", "medium").lower()
-            if count_style == "short":
-                weight = 0.5
-            elif count_style == "medium":
-                weight = 1
-            elif count_style == "long":
-                weight = 2
-                
-            # 如果段落有子段落，考虑子段落的复杂度
-            children = paragraph.get("children", [])
-            if children:
-                # 子段落数量会增加权重
-                child_factor = 1 + 0.1 * len(children)
-                weight *= child_factor
+            # 根据段落级别调整权重
+            level = paragraph.get("level", 1)
+            if level == 1:
+                weight = 2.0  # 一级标题权重最高
+            elif level == 2:
+                weight = 1.5  # 二级标题权重次之
+            elif level == 3:
+                weight = 1.2  # 三级标题权重再次之
+            else:
+                weight = 1.0  # 其他级别权重为1
+            
+            # 如果有描述，增加权重
+            if paragraph.get("description"):
+                weight *= 1.2
+            
+            # 如果是叶子节点（最深层级），增加权重
+            if is_deepest_level:
+                weight *= 1.1
                 
             return weight
         
@@ -1494,47 +1509,49 @@ class OutlineGenerator:
     
     def _distribute_word_count_to_children(self, children: List[Dict[str, Any]], parent_word_count: int) -> None:
         """
-        递归地为子段落分配字数
+        递归分配字数给子段落
         
         Args:
             children: 子段落列表
-            parent_word_count: 父段落字数
+            parent_word_count: 父段落的总字数
         """
-        if not children or parent_word_count <= 0:
+        if not children:
             return
             
-        # 计算每个子段落的权重
+        # 计算子段落权重
         total_weight = 0
         for child in children:
-            # 默认每个子段落权重相同
-            child["_weight"] = 1
-            
-            # 考虑子段落的深度
-            if child.get("children", []):
-                # 有子段落的段落权重略高
-                child["_weight"] *= 1.2
-                
-            total_weight += child["_weight"]
+            # 判断是否为最深层级段落（没有子段落）
+            is_deepest_level = not child.get("children") or not child["children"]
+            # 只计算有描述或是最深层级段落的权重
+            if child.get("description") or is_deepest_level:
+                child["_weight"] = calculate_weight(child)
+                total_weight += child["_weight"]
+            else:
+                child["_weight"] = 0
+        
+        # 如果没有需要生成内容的段落，将字数分配给第一个子段落
+        if total_weight == 0:
+            if children:
+                children[0]["expected_word_count"] = parent_word_count
+                logger.info(f"没有需要生成内容的子段落，将 {parent_word_count} 字分配给第一个子段落 '{children[0].get('title', '无标题')}'")
+            return
         
         # 根据权重分配字数
-        remaining_words = parent_word_count
-        for i, child in enumerate(children):
-            # 最后一个子段落分配所有剩余字数，确保总和等于父段落字数
-            if i == len(children) - 1:
-                child["expected_word_count"] = remaining_words
-            else:
-                weight_ratio = child["_weight"] / total_weight if total_weight > 0 else 1 / len(children)
+        for child in children:
+            # 只给需要生成内容的段落分配字数
+            if child.get("_weight", 0) > 0:
+                weight_ratio = child["_weight"] / total_weight
                 child_word_count = int(parent_word_count * weight_ratio)
                 child["expected_word_count"] = child_word_count
-                remaining_words -= child_word_count
-            
-            # 递归处理子段落的子段落
-            if child.get("children", []):
-                self._distribute_word_count_to_children(child["children"], child["expected_word_count"])
-            
-            # 清理临时权重数据
-            if "_weight" in child:
-                del child["_weight"]
+                logger.info(f"子段落 '{child.get('title', '无标题')}' 分配 {child_word_count} 字")
+                
+                # 递归分配子段落字数
+                if child.get("children"):
+                    self._distribute_word_count_to_children(child["children"], child_word_count)
+            else:
+                child["expected_word_count"] = 0
+                logger.info(f"子段落 '{child.get('title', '无标题')}' 不需要生成内容，分配 0 字")
 
     def _validate_and_fix_outline(self, outline_data: Dict[str, Any]) -> None:
         """
@@ -2147,6 +2164,10 @@ class OutlineGenerator:
         # 从用户提示中提取字数要求
         requirements = self._extract_required_level_from_prompt(user_prompt)
         word_count = requirements.get("word_count")
+        page_count = requirements.get("page_count")
+        if page_count and not word_count:
+            word_count = page_count * settings.WRITING_WORD_COUNT_PER_PAGE
+        
         
         # 如果用户指定了字数，则进行分配
         if word_count:
@@ -2312,12 +2333,6 @@ class OutlineGenerator:
             # 没有RAG检索
             update_task_progress(task_id, db_session, 30, "准备生成内容", "不使用RAG检索")
         
-        # 生成文章标题
-        # article_title = self._generate_article_title(
-        #     user_prompt=user_prompt,
-        #     outline_title=outline.title,
-        #     outline_content=outline_content
-        # )
         article_title = outline.title
         logger.info(f"生成文章标题: {article_title}")
         
@@ -2349,8 +2364,6 @@ class OutlineGenerator:
             "chapter_summaries": {},  # 已生成章节的摘要，格式为 {章节标题: 摘要内容}
             "generated_contents": {},  # 已生成段落的内容，格式为 {段落ID: {title: 标题, content: 内容}}
             "total_content_length": len(f"# {article_title}\n"),  # 当前已生成内容的总长度
-            "max_total_length": 200000,  # 内容总长度限制
-            "max_chapter_length": 10000,  # 单个章节长度限制
             "duplicate_titles": set(),  # 记录重复的标题
             "generated_titles": set(),  # 记录已生成的标题
             "doc_id": doc_id,  # 文档ID，用于更新HTML内容
@@ -2562,18 +2575,6 @@ class OutlineGenerator:
                                ", ".join([f"'{title}'" for title in list(global_context.get("generated_titles", set()))[-5:]])
         }
         
-        # 计算当前段落的最大长度
-        max_length = global_context["max_chapter_length"]
-        if level == 1:
-            # 一级标题段落长度可以更长
-            max_length = min(global_context["max_chapter_length"] * 1.5, 7500)
-        elif level == 2:
-            # 二级标题段落长度适中
-            max_length = min(global_context["max_chapter_length"], 5000)
-        else:
-            # 更深层级的段落长度更短
-            max_length = min(global_context["max_chapter_length"] * 0.7, 3500)
-        
         # 检查总内容长度是否超过限制
         if global_context["total_content_length"] >= global_context["max_total_length"]:
             logger.warning(f"内容总长度已达到限制({global_context['total_content_length']}字符)，停止生成")
@@ -2582,7 +2583,11 @@ class OutlineGenerator:
         # 生成段落内容
         logger.info(f"生成段落内容 [标题='{title}', 级别={level}, ID={paragraph.id}]")
 
-        if description:
+        # 判断是否为最深层级段落（没有子段落）
+        is_deepest_level = not hasattr(paragraph, 'children') or not paragraph.children
+        logger.info(f"段落层级信息 [标题='{title}', 级别={level}, 是否有子段落={not is_deepest_level}]")
+
+        if description or is_deepest_level:
             content = self._generate_paragraph_content_with_context(
                 article_title=article_title,
                 paragraph=paragraph,
@@ -2592,7 +2597,7 @@ class OutlineGenerator:
                 outline_content=outline_content,
                 user_prompt=user_prompt,
                 context_info=context_info,
-                max_length=max_length
+                expect_word_count=paragraph.expect_word_count
             )
             
             # 检查生成的内容与已有内容的相似度
@@ -2631,7 +2636,7 @@ class OutlineGenerator:
                     outline_content=outline_content,
                     user_prompt=user_prompt,
                     context_info=context_info,
-                    max_length=max_length
+                    expect_word_count=paragraph.expect_word_count
                 )
 
         else:
@@ -2710,18 +2715,22 @@ class OutlineGenerator:
         outline_content: str = "", 
         user_prompt: str = "",
         context_info: dict = {},
-        max_length: int = 3000
+        max_length: int = 3000,
+        expect_word_count: Optional[int] = None
     ) -> str:
         """生成段落内容，包含上下文信息"""
         # 记录开始生成段落内容
         logger.info(f"开始生成段落内容 [段落ID={paragraph.id}, 标题='{paragraph.title}', 字数范围={count_style}]")
         
-        # 根据count_style确定字数范围
-        word_count_range = {
-            "short": "300-500",
-            "medium": "500-1000",
-            "long": "1000-1500"
-        }.get(count_style, "500-1000")
+        # 根据expect_word_count或count_style确定字数范围
+        if expect_word_count is not None:
+            word_count_range = f"{expect_word_count}-{expect_word_count + 100}"
+        else:
+            word_count_range = {
+                "short": "300-500",
+                "medium": "500-1000",
+                "long": "1000-1500"
+            }.get(count_style, "500-1000")
         
         # 清理标题中的编号
         clean_title = clean_numbering_from_title(paragraph.title)
