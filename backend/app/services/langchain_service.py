@@ -286,8 +286,9 @@ class OutlineGenerator:
         Args:
             readable_model_name: 模型名称
             use_rag: 是否使用RAG API，默认为True
+            use_web: 是否使用WEB搜索，默认为False
         """
-        logger.info(f"初始化OutlineGenerator [model={readable_model_name or 'default'}, use_rag={use_rag}]")
+        logger.info(f"初始化OutlineGenerator [model={readable_model_name or 'default'}, use_rag={use_rag}, use_web={use_web}]")
         
         # 初始化LLM
         if readable_model_name:
@@ -627,7 +628,13 @@ class OutlineGenerator:
             
             # 解析JSON响应
             try:
-                requirements = json.loads(response.content)
+                content = response.content
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+
+                requirements = json.loads(content)
                 # 验证返回值的合法性
                 requirements["required_level"] = int(requirements.get("required_level", 3))
                 if requirements["required_level"] < 1 or requirements["required_level"] > 4:
@@ -2404,7 +2411,15 @@ class OutlineGenerator:
         logger.info(summary_log)
         
         # 将markdown转换为HTML
-        html_content = markdown.markdown(final_content)
+        html_content = markdown.markdown(final_content, extensions=[
+            'markdown.extensions.extra',
+            'markdown.extensions.toc',
+            'markdown.extensions.sane_lists',
+            'markdown.extensions.smarty',
+            'markdown.extensions.tables',
+            'markdown.extensions.fenced_code',
+            'markdown.extensions.codehilite'
+        ])
         
         # 更新文档HTML内容
         html_log = ""
@@ -2423,21 +2438,6 @@ class OutlineGenerator:
         # 最终进度100%
         final_log = f"{summary_log}\n{duplicate_log}\n{html_log}".strip()
         update_task_progress(task_id, db_session, 100, "内容生成完成", final_log)
-        
-        # 如果优化失败，返回原始内容
-        # 这里不需要再次转换HTML，因为已经在上面转换过了
-        # html_content = markdown.markdown(final_content)
-        
-        # 更新最终完整的文档HTML内容 - 这部分代码是重复的，可以删除
-        # if doc_id:
-        #     try:
-        #         document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
-        #         if document:
-        #             document.content = html_content
-        #             db_session.commit()
-        #             logger.info(f"更新文档最终完整HTML内容 [doc_id={doc_id}]")
-        #     except Exception as e:
-        #         logger.error(f"更新文档最终HTML内容时出错: {str(e)}")
         
         return {
             "title": article_title,
@@ -2665,7 +2665,13 @@ class OutlineGenerator:
             try:
                 # 合并到目前为止生成的内容
                 current_content = "\n".join(markdown_content)
-                current_html = markdown.markdown(current_content)
+                current_html = markdown.markdown(current_content,extensions=[
+                    'markdown.extensions.extra',
+                    'markdown.extensions.toc',
+                    'markdown.extensions.sane_lists',
+                    'markdown.extensions.smarty',
+                    'markdown.extensions.tables',
+                    ])
                 
                 # 更新文档HTML内容
                 document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
@@ -3684,13 +3690,12 @@ class OutlineGenerator:
 2. 结构清晰，层次分明
 3. 逻辑性强，各部分衔接自然
 4. 内容全面，覆盖主题的各个方面
-5. 每个最底层的子章节都必须包含详细的描述
-6. 使用统一的格式和编号系统
-7. 严格按照指定的层级深度生成大纲
-8. 每个章节的子章节数量必须不同，不要使用固定数量
-9. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
-10. 避免机械地固定章节数量，保持内容的自然性
-11. 确保每个章节的子章节数量都不同，体现内容的差异性
+5. 使用统一的格式和编号系统
+6. 严格按照指定的层级深度生成大纲
+7. 每个章节的子章节数量必须不同，不要使用固定数量
+8. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
+9. 避免机械地固定章节数量，保持内容的自然性
+10. 确保每个章节的子章节数量都不同，体现内容的差异性
 """
 
         # 根据层级深度构建示例格式
@@ -3704,84 +3709,58 @@ class OutlineGenerator:
             2: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
 一、一级标题1
     1.1 二级标题1
-        描述：这里是描述1
     1.2 二级标题2
-        描述：这里是描述2
 二、一级标题2
     2.1 二级标题1
-        描述：这里是描述1
     2.2 二级标题2
-        描述：这里是描述2
-    2.3 二级标题3
-        描述：这里是描述3""",
+    2.3 二级标题3""",
             3: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
 一、一级标题1
     1.1 二级标题1
         1.1.1 三级标题1
-            描述：这里是描述1
         1.1.2 三级标题2
-            描述：这里是描述2
     1.2 二级标题2
         1.2.1 三级标题1
-            描述：这里是描述1
         1.2.2 三级标题2
-            描述：这里是描述2
 二、一级标题2
     2.1 二级标题1
         2.1.1 三级标题1
-            描述：这里是描述1
-        2.1.2 三级标题2
-            描述：这里是描述2""",
+        2.1.2 三级标题2""",
             4: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
 一、一级标题1
     1.1 二级标题1
         1.1.1 三级标题1
             1.1.1.1 四级标题1
-                描述：这里是描述1
             1.1.1.2 四级标题2
-                描述：这里是描述2
         1.1.2 三级标题2
             1.1.2.1 四级标题1
-                描述：这里是描述1
             1.1.2.2 四级标题2
-                描述：这里是描述2
     1.2 二级标题2
         1.2.1 三级标题1
             1.2.1.1 四级标题1
-                描述：这里是描述1
             1.2.1.2 四级标题2
-                描述：这里是描述2
             1.2.1.3 四级标题3
-                描述：这里是描述3
             1.2.1.4 四级标题4
-                描述：这里是描述4
 二、一级标题2
     2.1 二级标题1
         2.1.1 三级标题1
             2.1.1.1 四级标题1
-                描述：这里是描述1
             2.1.1.2 四级标题2
-                描述：这里是描述2
             2.1.1.3 四级标题3
-                描述：这里是描述3
     2.2 二级标题2
         2.2.1 三级标题1
             2.2.1.1 四级标题1
-                描述：这里是描述1
-            2.2.1.2 四级标题2
-                描述：这里是描述2"""
+            2.2.1.2 四级标题2"""
         }
         
         format_example = format_examples.get(levels, format_examples[levels])
 
-        # 如果是3级或4级大纲，分两步生成
-        if levels in [3, 4]:
-            max_retries = 3  # 最大重试次数
-            retry_count = 0
-            
-            while retry_count < max_retries:
-                # 第一步：生成完整大纲结构（不含描述）
-                structure_prompt = f"""请为主题"{topic}"生成一个完整的{levels}级大纲结构。
+        max_retries = 3  # 最大重试次数
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            # 第一步：生成完整大纲结构（不含描述）
+            structure_prompt = f"""请为主题"{topic}"生成一个完整的{levels}级大纲结构。
 使用以下格式：
 {format_example}
 
@@ -3792,119 +3771,84 @@ class OutlineGenerator:
 4. 确保每个章节的内容都与主题相关
 5. 确保大纲结构自然，不要机械地固定章节数量
 6. 每个层级都必须使用正确的标题格式：
-   - 一级标题使用中文数字（如：一、二、三、四、五、六、七、八、九、十等）
-   - 二级标题使用"1.1、1.2、"等数字格式
-   - 三级标题使用"1.1.1、1.1.2、"等数字格式
-   - 四级标题使用"1.1.1.1、1.1.1.2、"等数字格式
+    - 一级标题使用中文数字（如：一、二、三、四、五、六、七、八、九、十等）
+    - 二级标题使用"1.1、1.2、"等数字格式
+    - 三级标题使用"1.1.1、1.1.2、"等数字格式
+    - 四级标题使用"1.1.1.1、1.1.1.2、"等数字格式
 7. 确保每个层级的缩进正确（每级缩进4个空格）
 8. 确保大纲结构完整，包含所有必要的章节
 9. 必须严格按照{levels}级层级生成，不要少层级
 
 只返回大纲结构，不要包含额外的说明。"""
 
-                messages = f"System: {system_prompt}\n\nUser: {structure_prompt}"
-                
-                # 调用LLM生成大纲结构
-                structure_outline = self.llm.invoke(messages).content
-                update_task_progress(task_id, db_session, 50, f"已生成 {levels} 级大纲，开始补充章节描述...")
-                
-                if not structure_outline:
-                    retry_count += 1
-                    continue
-                
-                # 检查大纲层级是否符合要求
-                if self._check_outline_levels(structure_outline, levels):
-                    break
-                else:
-                    logger.info(f"生成的大纲层级不符合要求，正在尝试重新生成...")
-                    update_task_progress(task_id, db_session, 55, "生成的大纲层级不符合要求，正在尝试重新生成...")
-                    retry_count += 1
-                    time.sleep(1)  # 添加短暂延迟
+            messages = f"System: {system_prompt}\n\nUser: {structure_prompt}"
             
-            # 第二步：分批补充描述
-            sections = self._split_outline_into_sections(structure_outline)
-            all_sections = []
-            batch_size = 4  # 每批处理4个章节
+            # 调用LLM生成大纲结构
+            structure_outline = self.llm.invoke(messages).content
+            update_task_progress(task_id, db_session, 50, f"已生成 {levels} 级大纲，开始补充章节描述...")
+            logger.info(structure_outline)
             
-            for i in range(0, len(sections), batch_size):
-                update_task_progress(task_id, db_session, 60 + i + 5, f"正在补充【{i+1}:{i+batch_size}】章节描述...")
-                batch = sections[i:i + batch_size]
-                batch_text = "\n".join(batch)
-                
-                # 构建补充描述的提示词
-                description_prompt = f"""请为以下大纲章节补充详细的描述内容。原始主题是："{topic}"
+            if not structure_outline:
+                retry_count += 1
+                continue
+            
+            # 检查大纲层级是否符合要求
+            if self._check_outline_levels(structure_outline, levels) or self._check_outline_description_titles(structure_outline):
+                break
+            else:
+                logger.info(f"生成的大纲层级或子标题不符合要求，正在尝试重新生成...")
+                update_task_progress(task_id, db_session, 55, "生成的大纲层级或子标题不符合要求，正在尝试重新生成...")
+                retry_count += 1
+                time.sleep(1)  # 添加短暂延迟
+        
+        # 第二步：分批补充描述
+        sections = self._split_outline_into_sections(structure_outline)
+        all_sections = [sections[0]]
+        batch_size = 1  # 每批处理章节数
+        
+        for i in range(1, len(sections), batch_size):
+            update_task_progress(task_id, db_session, 60 + i * 2, f"正在补充【{i}:{i+batch_size}】章节描述...")
+            batch = sections[i:i + batch_size]
+            batch_text = "\n".join(batch)
+            
+            # 构建补充描述的提示词
+            description_prompt = f"""请为以下大纲章节补充详细的描述内容。原始主题是："{topic}"
 
 {batch_text}
 
 要求：
 1. 为每个最底层的子章节添加详细的描述
 2. 描述内容必须以"描述："开头
-3. 描述要具体、专业、有实质性内容，包含：
-   - 具体的工作内容和方法
-   - 关键的技术参数和标准
-   - 重要的注意事项和要求
-   - 相关的规范和标准引用
+3. 描述要具有可执行性，能够作为后续生成详细文档的指导，可以是：
+    - 具体的工作内容和方法
+    - 关键的技术参数和标准
+    - 重要的注意事项和要求
+    - 相关的规范和标准引用
 4. 保持原有的层级结构和编号格式不变
 5. 只添加描述内容，不要修改或添加新的章节
 6. 确保描述内容与原始主题"{topic}"密切相关
 7. 描述要符合专业文档的要求，使用准确的专业术语
-8. 描述要具有可执行性，能够作为后续生成详细文档的指导
-9. 描述要包含必要的技术细节，但不要过于冗长
-10. 描述要突出重要性和关键点，便于后续展开
+9. 描述包含必要的信息，突出重要性和关键点即可，便于后续展开
 
 只返回补充描述后的大纲内容，不要包含额外的说明。"""
 
-                messages = f"System: {system_prompt}\n\nUser: {description_prompt}"
-                
-                # 调用LLM补充描述
-                batch_with_descriptions = self.llm.invoke(messages).content
-                
-                if batch_with_descriptions:
-                    all_sections.append(batch_with_descriptions)
-                
-                # 添加短暂延迟，避免API限制
-                if i < len(sections) - batch_size:  # 如果不是最后一批
-                    time.sleep(1)
+            messages = f"System: {system_prompt}\n\nUser: {description_prompt}"
             
-            # 合并所有章节
-            outline = '\n'.join(all_sections)
-                
-            return outline
-        else:
-            # 非3级或4级大纲，直接生成
-            user_prompt = f"""请为主题"{topic}"大纲，要求大纲层级为{levels}级。
-使用以下格式：
-{format_example}
-
-要求：
-1. 每个最底层的子章节必须有描述
-2. 确保层级结构清晰，逻辑合理
-3. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
-4. 确保每个章节的内容都与主题相关
-5. 确保大纲结构自然，不要机械地固定章节数量
-6. 每个层级都必须使用正确的标题格式：
-   - 一级标题使用"一、二、三、"等中文数字
-   - 二级标题使用"1.1、1.2、"等数字格式
-   - 三级标题使用"1.1.1、1.1.2、"等数字格式
-   - 四级标题使用"1.1.1.1、1.1.1.2、"等数字格式
-7. 描述内容必须以"描述："开头，描述要具体、专业、有实质性内容，包含：
-   - 具体的工作内容和方法
-   - 关键的技术参数和标准
-   - 重要的注意事项和要求
-   - 相关的规范和标准引用
-8. 确保每个层级的缩进正确（每级缩进4个空格）
-9. 描述要具有可执行性，能够作为后续生成详细文档的指导
-10. 描述要包含必要的技术细节，但不要过于冗长
-11. 描述要突出重要性和关键点，便于后续展开
-
-只返回大纲内容，不要包含额外的说明。"""
-
-            messages = f"System: {system_prompt}\n\nUser: {user_prompt}"
+            # 调用LLM补充描述
+            batch_with_descriptions = self.llm.invoke(messages).content
+            logger.info(batch_with_descriptions)
             
-            # 调用LLM生成大纲
-            outline = self.llm.invoke(messages).content
-                
-            return outline
+            if batch_with_descriptions:
+                all_sections.append(batch_with_descriptions)
+            
+            # 添加短暂延迟，避免API限制
+            if i < len(sections) - batch_size:  # 如果不是最后一批
+                time.sleep(1)
+        
+        # 合并所有章节
+        outline = '\n'.join(all_sections)
+            
+        return outline
     
     def _parse_outline_to_json(self, outline_text, topic):
         """将大纲文本解析为指定的JSON结构"""
@@ -4025,3 +3969,30 @@ class OutlineGenerator:
         
         return sections
 
+    def _check_outline_description_titles(self, outline_text: str) -> bool:
+        """
+        检查大纲文本中的子标题是否包含"描述："
+        子标题判断标准：以数字序号（如1.1、1.1.1等）开头
+        只要任何子标题包含"描述："就返回False
+        
+        Args:
+            outline_text: 大纲文本字符串
+            
+        Returns:
+            bool: True 表示大纲格式正确，False 表示存在不合格的描述标题
+        """
+        lines = outline_text.split('\n')
+        
+        for line in lines:
+            # 跳过空行
+            line = line.strip()
+            if not line:
+                continue
+                
+            # 检查是否以数字序号开头（如1.、1.1.、1.1.1.等）
+            if re.match(r'^\s*\d+(\.\d+)*\s', line):
+                # 是子标题，检查是否包含"描述："
+                if "描述：" in line:
+                    return False
+        
+        return True
