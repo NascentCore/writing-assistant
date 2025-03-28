@@ -1046,8 +1046,7 @@ class OutlineGenerator:
             # 调用LLM
             response = self.llm.invoke(
                 template.format(**input_variables),
-                temperature=0.7,
-                max_tokens=2500
+                temperature=0.7
             )
             
             # 尝试提取和解析JSON
