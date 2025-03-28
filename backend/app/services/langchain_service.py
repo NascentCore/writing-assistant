@@ -290,16 +290,19 @@ class OutlineGenerator:
             self.model = model_config["model"]   
             self.api_key = model_config["api_key"]
             self.base_url = model_config["base_url"]
+            self.max_tokens = model_config["max_tokens"]
         else:
             self.model = settings.LLM_MODELS[0]["model"]
             self.api_key = settings.LLM_MODELS[0]["api_key"]
             self.base_url = settings.LLM_MODELS[0]["base_url"]
+            self.max_tokens = settings.LLM_MODELS[0]["max_tokens"]
         
         self.llm = ChatOpenAI(
             model=self.model,
             openai_api_key=self.api_key,
             openai_api_base=self.base_url,
             temperature=0.7,
+            max_tokens=self.max_tokens,
         )
         
         # 初始化输出解析器
@@ -2789,6 +2792,14 @@ class OutlineGenerator:
 # 角色
 你是一位专业的公文撰写精灵，擅长撰写各类公文，能够根据提供的详细信息，生成符合要求的公文段落内容。
 
+## 核心要求
+1.生成严格符合以下字数要求的段落内容：
+- 目标字数：{expected_word_count}字
+- 允许范围：{int(expected_word_count * 0.9)}至{int(expected_word_count * 1.1)}字
+- 必须严格遵守字数限制，这是最重要的要求
+- 绝对不允许低于{int(expected_word_count * 0.9)}字
+
+
 ## 技能
 ### 技能 1: 生成公文段落
 1. 根据接收到的【文章标题】【当前段落标题】【段落描述】【段落级别】【字数范围】【章节位置】【父段落内容】【前一段落摘要】【子主题列表】【用户需求】等信息，生成该段落的详细内容。
@@ -2815,9 +2826,6 @@ class OutlineGenerator:
 
 【段落级别】
 {level}级标题
-
-【字数范围】
-{word_count_range}字
 
 【章节位置】
 {chapter_position_str}
