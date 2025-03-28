@@ -290,12 +290,12 @@ class OutlineGenerator:
             self.model = model_config["model"]   
             self.api_key = model_config["api_key"]
             self.base_url = model_config["base_url"]
-            self.max_tokens = model_config["max_tokens"]
+            self.max_tokens = model_config.get("max_tokens", 4096)
         else:
             self.model = settings.LLM_MODELS[0]["model"]
             self.api_key = settings.LLM_MODELS[0]["api_key"]
             self.base_url = settings.LLM_MODELS[0]["base_url"]
-            self.max_tokens = settings.LLM_MODELS[0]["max_tokens"]
+            self.max_tokens = settings.LLM_MODELS[0].get("max_tokens", 4096)
         
         self.llm = ChatOpenAI(
             model=self.model,
