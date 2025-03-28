@@ -2412,11 +2412,6 @@ class OutlineGenerator:
         for i, paragraph in enumerate(root_paragraphs):
             logger.info(f"处理顶级段落 [{i+1}/{len(root_paragraphs)}] [ID={paragraph.id}, 标题='{paragraph.title}']")
             
-            # 检查总内容长度是否超过限制
-            if global_context["total_content_length"] >= global_context["max_total_length"]:
-                logger.warning(f"内容总长度已达到限制({global_context['total_content_length']}字符)，停止生成")
-                break
-            
             # 生成段落内容
             self._generate_paragraph_with_context(
                 paragraph,
@@ -2607,11 +2602,6 @@ class OutlineGenerator:
             "duplicate_warning": "请确保生成的内容与已生成的章节不重复，特别是避免与以下章节内容重复: " + 
                                ", ".join([f"'{title}'" for title in list(global_context.get("generated_titles", set()))[-5:]])
         }
-        
-        # 检查总内容长度是否超过限制
-        if global_context["total_content_length"] >= global_context["max_total_length"]:
-            logger.warning(f"内容总长度已达到限制({global_context['total_content_length']}字符)，停止生成")
-            return
         
         # 生成段落内容
         logger.info(f"生成段落内容 [标题='{title}', 级别={level}, ID={paragraph.id}]")
