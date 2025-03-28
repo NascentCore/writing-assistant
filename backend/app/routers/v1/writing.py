@@ -35,7 +35,7 @@ from app.models.chat import ChatSession, ChatMessage, ChatSessionType, ContentTy
 from app.config import Settings, settings
 from app.parser import DocxParser, MarkdownParser
 from app.auth import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.utils.outline import build_paragraph_key, build_paragraph_response
 from app.models.task import Task, TaskStatus, TaskType
 from app.models.document import Document, DocumentVersion
@@ -739,10 +739,13 @@ async def update_outline(
     # 查找大纲
     outline = db.query(Outline).filter(
         Outline.id == outline_id,
-        Outline.user_id == current_user.user_id
+        # Outline.user_id == current_user.user_id
     ).first()
     if not outline:
         return APIResponse.error(message=f"未找到ID为{outline_id}的大纲")
+
+    if outline.user_id != current_user.user_id and current_user.admin != UserRole.SYS_ADMIN:
+        return APIResponse.error(message="无权访问")
     
     # 更新大纲标题
     outline.title = request.title
@@ -1730,12 +1733,15 @@ async def get_chat_session_detail(
         # 验证会话是否存在且属于当前用户
         session = db.query(ChatSession).filter(
             ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.user_id,
+            # ChatSession.user_id == current_user.user_id,
             ChatSession.session_type == ChatSessionType.WRITING,
             ChatSession.is_deleted == False
         ).first()
         if not session:
-            return APIResponse.error(message="会话不存在或无权访问")
+            return APIResponse.error(message="会话不存在")
+
+        if session.user_id != current_user.user_id and current_user.admin != UserRole.SYS_ADMIN:
+            return APIResponse.error(message="无权访问")
         
         # 查询消息
         query = db.query(ChatMessage).filter(
