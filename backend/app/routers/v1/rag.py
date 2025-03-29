@@ -229,7 +229,7 @@ async def get_files(
             kb_ids.add(get_system_kb(db))
             kb_ids.add(get_user_shared_kb(db))
             kb_ids.add(get_user_kb(current_user, db))
-            departments = get_departments(current_user, db)
+            departments =  get_all_departments(current_user, db)
             dept_map = {dept.department_id: dept for dept in departments}
             dept_kb_ids, kb_dept_map = get_department_kbs([dept.department_id for dept in departments], db)
             kb_ids.update(dept_kb_ids)
@@ -627,7 +627,7 @@ async def chat(
         # 用户私有知识库
         kb_ids.add(get_user_kb(current_user, db))
         # 部门知识库
-        departments = get_departments(current_user, db)
+        departments = get_all_departments(current_user, db)
         dept_kb_ids, dept_kb_owners = get_department_kbs([dept.department_id for dept in departments], db)
         kb_ids.update(dept_kb_ids)
         
