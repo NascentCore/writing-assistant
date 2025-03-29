@@ -502,8 +502,8 @@ class OutlineGenerator:
         # 使用LLM提取用户需求
         user_requirements = self._extract_requirements_with_llm(prompt)
         required_level = user_requirements.get("required_level", 2)  # 默认为2级
-        word_count = user_requirements.get("word_count", 5000)
-        page_count = user_requirements.get("page_count", 5)
+        word_count = user_requirements.get("word_count") if user_requirements.get("word_count") else 5000
+        page_count = user_requirements.get("page_count") if user_requirements.get("page_count") else 5
         if not word_count and page_count:
             word_count = page_count * settings.WRITING_PER_PAGE_WORD_COUNT
             logger.info(f"根据页数({page_count}页)计算字数要求: {word_count}字")
