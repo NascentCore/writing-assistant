@@ -100,12 +100,12 @@ const Home: React.FC = () => {
           if (finalData?.data) {
             setTemplates(
               finalData?.data.map(
-                ({ backgroundUrl, hasSteps, showName, ...res }: any = {}) => {
+                ({ backgroundUrl, hasSteps, typeName, ...res }: any = {}) => {
                   return {
                     ...res,
                     background_url: backgroundUrl,
                     has_steps: hasSteps,
-                    show_name: showName,
+                    show_name: typeName,
                   };
                 },
               ),
