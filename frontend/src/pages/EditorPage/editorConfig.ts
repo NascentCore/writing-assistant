@@ -57,7 +57,7 @@ export const toolbarKeys = [
   'align',
   'line-height',
   '|',
-  // 'image',
+  'image',
   // 'video',
   // 'attachment',
   'table',
