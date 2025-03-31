@@ -19,6 +19,7 @@ export default defineConfig({
     antd: true, // 启用 antd 国际化
     baseNavigator: true, // 开启浏览器语言检测
   },
+  favicons: ['/logo.png'],
 
   routes,
   npmClient: 'pnpm',
