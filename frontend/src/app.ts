@@ -26,7 +26,7 @@ if (window.self !== window.top) {
   localStorage.setItem('admin', admin as string);
   (window as any).isIframe = true;
   (window as any).createChatId = !!query.get('createChatId'); //是否需要通知外部保存创建的chatId
-  (window as any).templateType = query.get('templateType'); //获取自定义模版类型
+  (window as any).templateUrl = query.get('templateUrl'); //获取自定义模版url
 } else {
   (window as any).isIframe = false;
 }
