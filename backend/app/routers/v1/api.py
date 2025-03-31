@@ -143,7 +143,7 @@ async def completions(
             doc = db.query(Document).filter(Document.doc_id == request.doc_id).first()
             if not doc:
                 return APIResponse.error(message="引用的文档不存在")
-            doc_content = doc.content
+            doc_content = doc.content[:settings.LLM_COMPLETION_DOC_MAX_LENGTH]
         
         # 处理文件引用
         reference_files = []

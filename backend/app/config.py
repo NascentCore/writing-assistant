@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     }]
     LLM_REQUEST_TIMEOUT: float = yaml_config.get("request_timeout", 300.0)
     LLM_CHAT_MAX_TOKENS: int = yaml_config.get("chat_max_tokens", 200)
+    LLM_COMPLETION_DOC_MAX_LENGTH: int = yaml_config.get("completion_doc_max_length", 10000)
     # 向后兼容的默认模型配置
     LLM_BASE_URL: str = LLM_MODELS[0]["base_url"]
     LLM_MODEL: str = LLM_MODELS[0]["model"]
