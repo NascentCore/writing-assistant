@@ -61,30 +61,73 @@ const Home: React.FC = () => {
 
   // 获取模板列表
   useEffect(() => {
-    const fetchTemplates = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // fetchWithAuthNew 直接返回 data 部分
-        const data = await fetchWithAuthNew<TemplateResponse>(
-          '/api/v1/writing/templates?page=1&page_size=10',
-        );
-        if (data && 'templates' in data) {
-          setTemplates(data.templates);
-        } else {
-          setError('获取模板数据格式错误');
-          message.error('获取模板数据格式错误');
+    if (!(window as any).isIframe) {
+      const fetchTemplates = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          // fetchWithAuthNew 直接返回 data 部分
+          const data = await fetchWithAuthNew<TemplateResponse>(
+            '/api/v1/writing/templates?page=1&page_size=10',
+          );
+          if (data && 'templates' in data) {
+            setTemplates(data.templates);
+          } else {
+            setError('获取模板数据格式错误');
+            message.error('获取模板数据格式错误');
+          }
+        } catch (error) {
+          console.error('获取模板列表失败:', error);
+          setError('获取模板列表失败');
+          message.error('获取模板列表失败，请稍后重试');
+        } finally {
+          setLoading(false);
         }
-      } catch (error) {
-        console.error('获取模板列表失败:', error);
-        setError('获取模板列表失败');
-        message.error('获取模板列表失败，请稍后重试');
-      } finally {
-        setLoading(false);
-      }
-    };
+      };
 
-    fetchTemplates();
+      fetchTemplates();
+    } else {
+      const fetchTemplates = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const data: any = await fetch(
+            `https://zzlj-jl-dev.01road.com/api/app/v1/ai-prompt-template/list?types=${
+              (window as any).templateType
+            }`,
+            { method: 'GET' },
+          );
+
+          const finalData = await data.json();
+
+          if (finalData?.data) {
+            setTemplates(
+              finalData?.data.map(
+                ({ backgroundUrl, hasSteps, showName, ...res }: any = {}) => {
+                  return {
+                    ...res,
+                    background_url: backgroundUrl,
+                    has_steps: hasSteps,
+                    show_name: showName,
+                  };
+                },
+              ),
+            );
+          } else {
+            setError('获取模板数据格式错误');
+            message.error('获取模板数据格式错误');
+          }
+        } catch (error) {
+          console.error('获取模板列表失败:', error);
+          setError('获取模板列表失败');
+          message.error('获取模板列表失败，请稍后重试');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchTemplates();
+    }
   }, []);
 
   // 将模板数据转换为卡片格式
@@ -129,15 +172,17 @@ const Home: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      <div>
-        <Button
-          style={{ float: 'right' }}
-          icon={<FieldTimeOutlined style={{ fontSize: 18 }} />}
-          onClick={async () => {
-            history.push('/WritingHistory');
-          }}
-        />
-      </div>
+      {!(window as any).isIframe && (
+        <div>
+          <Button
+            style={{ float: 'right' }}
+            icon={<FieldTimeOutlined style={{ fontSize: 18 }} />}
+            onClick={async () => {
+              history.push('/WritingHistory');
+            }}
+          />
+        </div>
+      )}
       {/* <Tabs defaultActiveKey="0" className={styles.tabs}>
         {tabs.map((tab, index) => (
           <TabPane tab={tab} key={index} />

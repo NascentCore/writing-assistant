@@ -309,7 +309,7 @@ function App() {
                       window.parent.postMessage(
                         {
                           type: 'onUpdate',
-                          value: editorRef.current.getHtml(),
+                          value: currentDocId,
                         },
                         '*',
                       );

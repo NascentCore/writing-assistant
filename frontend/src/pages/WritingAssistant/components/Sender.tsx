@@ -285,6 +285,17 @@ const Sender = forwardRef<any, SenderProps>(
           method: 'POST',
           data: requestData,
         });
+        //向外部页面通知创建session_id
+        if ((window as any).createChatId) {
+          window.parent.postMessage(
+            {
+              type: 'onCreateChatId',
+              value: response.session_id,
+            },
+            '*',
+          );
+        }
+
         history.push(
           `/WritingHistory?task_id=${response.task_id}&id=${response.session_id}`,
         );

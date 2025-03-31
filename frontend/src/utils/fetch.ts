@@ -148,7 +148,7 @@ export const fetchWithAuthStream = async (
   }
 };
 
-export const downloadFile = async (url: string) => {
+export const downloadFile = async (url: string, type: string) => {
   const token = localStorage.getItem('token');
   const fullUrl =
     url.startsWith('http://') || url.startsWith('https://')
@@ -165,6 +165,10 @@ export const downloadFile = async (url: string) => {
   const contentDisposition = res.headers.get('Content-Disposition');
 
   let filename = '未命名文件.docx'; // 兜底
+
+  if (type === 'pdf') {
+    filename = '未命名文件.pdf'; // 兜底
+  }
   if (contentDisposition) {
     const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
     if (fileNameMatch && fileNameMatch[1]) {

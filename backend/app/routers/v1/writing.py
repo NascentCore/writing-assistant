@@ -1225,20 +1225,12 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
             kb = db.query(RagKnowledgeBase).filter(RagKnowledgeBase.kb_type == RagKnowledgeBaseType.USER, RagKnowledgeBase.user_id == user_id, RagKnowledgeBase.is_deleted == False).first()
             if kb:
                 kb_ids.append(kb.kb_id)
-            # 查询部门知识库
-            department_ids = []
-            user_departments = db.query(UserDepartment).filter(
-                UserDepartment.user_id == user_id,
-            ).all()
-            if user_departments:
-                department_ids = [department.department_id for department in user_departments]
-                if department_ids:
-                    department_kbs = db.query(RagKnowledgeBase).filter(
-                        RagKnowledgeBase.kb_type == RagKnowledgeBaseType.DEPARTMENT,
-                        RagKnowledgeBase.owner_id.in_(department_ids), 
-                        RagKnowledgeBase.is_deleted == False).all()
-                    if department_kbs:
-                        kb_ids.extend([kb.kb_id for kb in department_kbs])
+            # 查询所有部门知识库
+            department_kbs = db.query(RagKnowledgeBase).filter(
+                RagKnowledgeBase.kb_type == RagKnowledgeBaseType.DEPARTMENT,
+                RagKnowledgeBase.is_deleted == False).all()
+            if department_kbs:
+                kb_ids.extend([kb.kb_id for kb in department_kbs])
             
             # 生成内容
             full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids, session_id, doc_id)
