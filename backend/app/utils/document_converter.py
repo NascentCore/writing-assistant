@@ -169,7 +169,7 @@ def fix_document_numbering(doc):
             # 设置字体
             font = run.font
             font.size = Pt(12)
-            font.color.rgb = RGBColor(0, 64, 128)
+            # font.color.rgb = RGBColor(0, 64, 128)
             run.bold = True
             
             # 设置对齐方式
@@ -195,7 +195,7 @@ def fix_document_numbering(doc):
             # 设置字体
             font = run.font
             font.size = Pt(13)
-            font.color.rgb = RGBColor(0, 64, 128)
+            # font.color.rgb = RGBColor(0, 64, 128)
             run.bold = True
             
             # 设置对齐方式
@@ -220,7 +220,7 @@ def fix_document_numbering(doc):
                 
                 font = run.font
                 font.size = Pt(13)
-                font.color.rgb = RGBColor(0, 64, 128)
+                # font.color.rgb = RGBColor(0, 64, 128)
                 run.bold = True
                 
                 para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
@@ -239,7 +239,7 @@ def fix_document_numbering(doc):
             
             font = run.font
             font.size = Pt(13)
-            font.color.rgb = RGBColor(0, 64, 128)
+            # font.color.rgb = RGBColor(0, 64, 128)
             run.bold = True
             
             para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
@@ -282,18 +282,15 @@ def process_table(table_element, doc):
         for j, cell in enumerate(cells):
             if j >= cols:  # 跳过超出列数的单元格
                 continue
-                
-            # 获取单元格内容
-            cell_text = cell.get_text().strip()
+            
+            # 设置单元格内容
+            word_cell = table.cell(i, j)
+            paragraph = word_cell.paragraphs[0]
             
             # 获取单元格样式
             is_header = cell.name == 'th'
             bg_color = cell.get('bgcolor', '')
             align = cell.get('align', 'left')
-            
-            # 设置单元格内容
-            word_cell = table.cell(i, j)
-            paragraph = word_cell.paragraphs[0]
             
             # 设置单元格对齐方式
             if align == 'center':
@@ -302,47 +299,125 @@ def process_table(table_element, doc):
                 paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
             else:
                 paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-            
-            # 添加文本
-            run = paragraph.add_run(cell_text)
-            
-            # 设置字体
-            font = run.font
-            font.size = Pt(10.5)
-            
-            # 如果是表头，加粗
-            if is_header:
-                run.bold = True
-                # 设置表头背景色
-                if bg_color:
+
+            # 处理单元格中的内容
+            def process_cell_content(element, current_paragraph):
+                if isinstance(element, str):
+                    text = element.strip()
+                    if text:
+                        run = current_paragraph.add_run(text)
+                        font = run.font
+                        font.size = Pt(10.5)
+                        if is_header:
+                            run.bold = True
+                    return
+                
+                if element.name == 'img':
                     try:
-                        # 处理颜色值（支持十六进制和颜色名）
-                        if bg_color.startswith('#'):
-                            color = bg_color[1:]
-                            r = int(color[0:2], 16)
-                            g = int(color[2:4], 16)
-                            b = int(color[4:6], 16)
-                        else:
-                            # 这里可以添加颜色名到RGB的映射
-                            color_map = {
-                                'gray': (128, 128, 128),
-                                'lightgray': (192, 192, 192),
-                                'darkgray': (64, 64, 64),
-                                'black': (0, 0, 0),
-                                'white': (255, 255, 255),
-                                'red': (255, 0, 0),
-                                'green': (0, 255, 0),
-                                'blue': (0, 0, 255),
-                                'yellow': (255, 255, 0),
-                                'cyan': (0, 255, 255),
-                                'magenta': (255, 0, 255)
-                            }
-                            r, g, b = color_map.get(bg_color.lower(), (255, 255, 255))
-                        
-                        # 设置单元格背景色
-                        word_cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:fill="{bg_color}"/>'))
-                    except:
-                        pass  # 如果颜色处理失败，使用默认背景色
+                        src = element.get('src', '')
+                        if src:
+                            # 获取页面宽度（单位：英寸）
+                            section = doc.sections[0]
+                            page_width = float(section.page_width.inches)
+                            margin_left = float(section.left_margin.inches)
+                            margin_right = float(section.right_margin.inches)
+                            
+                            # 计算可用宽度（页面宽度减去左右页边距）
+                            available_width = page_width - margin_left - margin_right
+                            
+                            # 设置单元格中图片的最大宽度（可用宽度的30%）
+                            max_width = available_width * 0.3
+                            
+                            if src.startswith('data:image'):
+                                # 处理base64编码的图片
+                                import base64
+                                import io
+                                header, encoded = src.split(',', 1)
+                                image_data = base64.b64decode(encoded)
+                                image_stream = io.BytesIO(image_data)
+                                current_paragraph.add_run().add_picture(image_stream, width=Inches(max_width))
+                            elif src.startswith(('http://', 'https://')):
+                                # 处理网络图片
+                                import requests
+                                response = requests.get(src)
+                                image_stream = io.BytesIO(response.content)
+                                current_paragraph.add_run().add_picture(image_stream, width=Inches(max_width))
+                            else:
+                                # 处理本地图片
+                                current_paragraph.add_run().add_picture(src, width=Inches(max_width))
+                            
+                            # 如果图片有标题，添加标题
+                            if element.get('alt'):
+                                caption_paragraph = word_cell.add_paragraph()
+                                caption_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                                caption_run = caption_paragraph.add_run(element.get('alt'))
+                                caption_run.italic = True
+                                caption_run.font.size = Pt(9)
+                    except Exception as e:
+                        import logging
+                        logging.error(f"处理表格中的图片失败: {str(e)}")
+                    return
+                
+                if element.name == 'p':
+                    # 为段落内容创建新的段落
+                    new_paragraph = word_cell.add_paragraph()
+                    new_paragraph.alignment = paragraph.alignment
+                    for child in element.children:
+                        process_cell_content(child, new_paragraph)
+                    return
+                
+                if element.name in ['strong', 'b']:
+                    run = current_paragraph.add_run(element.get_text().strip())
+                    run.bold = True
+                    return
+                
+                if element.name in ['em', 'i']:
+                    run = current_paragraph.add_run(element.get_text().strip())
+                    run.italic = True
+                    return
+                
+                if element.name == 'br':
+                    current_paragraph.add_run('\n')
+                    return
+                
+                # 处理其他元素的子元素
+                for child in element.children:
+                    process_cell_content(child, current_paragraph)
+
+            # 清除默认段落
+            paragraph.clear()
+            
+            # 处理单元格中的内容
+            for content in cell.children:
+                process_cell_content(content, paragraph)
+            
+            # 设置单元格背景色
+            if is_header and bg_color:
+                try:
+                    if bg_color.startswith('#'):
+                        color = bg_color[1:]
+                        r = int(color[0:2], 16)
+                        g = int(color[2:4], 16)
+                        b = int(color[4:6], 16)
+                    else:
+                        color_map = {
+                            'gray': (128, 128, 128),
+                            'lightgray': (192, 192, 192),
+                            'darkgray': (64, 64, 64),
+                            'black': (0, 0, 0),
+                            'white': (255, 255, 255),
+                            'red': (255, 0, 0),
+                            'green': (0, 255, 0),
+                            'blue': (0, 0, 255),
+                            'yellow': (255, 255, 0),
+                            'cyan': (0, 255, 255),
+                            'magenta': (255, 0, 255)
+                        }
+                        r, g, b = color_map.get(bg_color.lower(), (255, 255, 255))
+                    
+                    word_cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:fill="{bg_color}"/>'))
+                except:
+                    pass
             
             # 设置单元格垂直对齐
             word_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
@@ -376,7 +451,7 @@ def process_image(img_element, doc):
         if src.startswith('data:image'):
             # 处理base64编码的图片
             import base64
-            import io
+            import iof
             # 提取base64数据
             header, encoded = src.split(',', 1)
             image_data = base64.b64decode(encoded)
@@ -434,6 +509,13 @@ def html_to_docx(
     """
     # 将 HTML 内容转换为 DOCX 文件
     doc = Document()
+
+    # 修改标题样式的默认颜色为黑色
+    for i in range(1, 10):  # 处理 Heading 1 到 Heading 9
+        style_name = f'Heading {i}'
+        if style_name in doc.styles:
+            style = doc.styles[style_name]
+            style.font.color.rgb = RGBColor(0, 0, 0)  # 设置为黑色
     
     # 预处理HTML，合并列表项后的内容
     def preprocess_html(html_text):
@@ -471,7 +553,7 @@ def html_to_docx(
         heading = doc.add_heading(title, 0)
         heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         for run in heading.runs:
-            run.font.color.rgb = RGBColor(0, 0, 128)
+            # run.font.color.rgb = RGBColor(0, 0, 128)
             run.font.size = Pt(16)
     
     # 收集所有标题信息
@@ -580,10 +662,10 @@ def html_to_docx(
             font.size = Pt(16 - level)
             
             if level == 1:
-                font.color.rgb = RGBColor(0, 0, 128)
+                # font.color.rgb = RGBColor(0, 0, 128)
                 p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
             elif level == 2:
-                font.color.rgb = RGBColor(0, 64, 128)
+                # font.color.rgb = RGBColor(0, 64, 128)
                 p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
             else:
                 p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
@@ -612,10 +694,10 @@ def html_to_docx(
                 font.size = Pt(16 - level)
                 
                 if level == 1:
-                    font.color.rgb = RGBColor(0, 0, 128)
+                    # font.color.rgb = RGBColor(0, 0, 128)
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                 elif level == 2:
-                    font.color.rgb = RGBColor(0, 64, 128)
+                    # font.color.rgb = RGBColor(0, 64, 128)
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
                 else:
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
@@ -832,7 +914,7 @@ def html_to_pdf(
         
         # 如果没有h1标题，添加传入的title作为文档标题
         if not has_h1_title and title:
-            title_html = f"<h1 style='text-align:center;color:#000080;font-size:16pt;'>{title}</h1>"
+            title_html = f"<h1 style='text-align:center;color:#000000;font-size:16pt;'>{title}</h1>"
             html_text_with_numbers = title_html + html_text_with_numbers
         
         # 添加版本历史（如果需要）
@@ -857,35 +939,35 @@ def html_to_pdf(
         }
         h1 {
             font-size: 16pt;
-            color: #000080;
+            color: #000000;
             text-align: center;
             margin-top: 24pt;
             margin-bottom: 12pt;
         }
         h2 {
             font-size: 14pt;
-            color: #004080;
+            color: #000000;
             margin-top: 18pt;
             margin-bottom: 9pt;
             text-align: left;
         }
         h3 {
             font-size: 13pt;
-            color: #004080;
+            color: #000000;
             margin-top: 12pt;
             margin-bottom: 6pt;
             text-align: left;
         }
         h4 {
             font-size: 12pt;
-            color: #004080;
+            color: #000000;
             margin-top: 12pt;
             margin-bottom: 6pt;
             text-align: left;
         }
         h5, h6 {
             font-size: 11pt;
-            color: #004080;
+            color: #000000;
             margin-top: 12pt;
             margin-bottom: 6pt;
             text-align: left;
