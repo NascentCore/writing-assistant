@@ -42,12 +42,7 @@ const RegisterPage: React.FC = () => {
       <div className="auth-container">
         <div className="auth-box">
           <h2>注册</h2>
-          <Form
-            form={form}
-            onFinish={handleSubmit}
-            layout="vertical"
-            requiredMark={false}
-          >
+          <Form form={form} onFinish={handleSubmit} layout="vertical">
             <Form.Item
               label="用户名"
               name="username"
@@ -59,10 +54,7 @@ const RegisterPage: React.FC = () => {
             <Form.Item
               label="邮箱"
               name="email"
-              rules={[
-                { required: true, message: '请输入邮箱' },
-                { type: 'email', message: '请输入有效的邮箱地址' },
-              ]}
+              rules={[{ type: 'email', message: '请输入有效的邮箱地址' }]}
             >
               <Input placeholder="请输入邮箱" size="large" />
             </Form.Item>
