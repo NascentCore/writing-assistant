@@ -91,12 +91,9 @@ const Home: React.FC = () => {
         setLoading(true);
         setError(null);
         try {
-          const data: any = await fetch(
-            `https://zzlj-jl-dev.01road.com/api/app/v1/ai-prompt-template/list?types=${
-              (window as any).templateType
-            }`,
-            { method: 'GET' },
-          );
+          const data: any = await fetch((window as any).templateUrl, {
+            method: 'GET',
+          });
 
           const finalData = await data.json();
 
