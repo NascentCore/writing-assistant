@@ -347,6 +347,71 @@ def process_table(table_element, doc):
             # 设置单元格垂直对齐
             word_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
+def process_image(img_element, doc):
+    """
+    处理HTML图片元素，将其添加到Word文档中
+    
+    Args:
+        img_element: BeautifulSoup的图片元素
+        doc: Word文档对象
+    """
+    src = img_element.get('src', '')
+    if not src:
+        return
+    
+    try:
+        # 获取页面宽度（单位：英寸）
+        section = doc.sections[0]
+        page_width = float(section.page_width.inches)
+        margin_left = float(section.left_margin.inches)
+        margin_right = float(section.right_margin.inches)
+        
+        # 计算可用宽度（页面宽度减去左右页边距）
+        available_width = page_width - margin_left - margin_right
+        
+        # 设置最大宽度为可用宽度的90%
+        max_width = available_width * 0.9
+        
+        # 处理不同类型的图片源
+        if src.startswith('data:image'):
+            # 处理base64编码的图片
+            import base64
+            import io
+            # 提取base64数据
+            header, encoded = src.split(',', 1)
+            image_data = base64.b64decode(encoded)
+            image_stream = io.BytesIO(image_data)
+            
+            # 添加图片到文档并控制大小
+            doc.add_picture(image_stream, width=Inches(max_width))
+            
+        elif src.startswith(('http://', 'https://')):
+            # 处理网络图片
+            import requests
+            response = requests.get(src)
+            image_stream = io.BytesIO(response.content)
+            
+            # 添加图片到文档并控制大小
+            doc.add_picture(image_stream, width=Inches(max_width))
+            
+        else:
+            # 处理本地图片
+            doc.add_picture(src, width=Inches(max_width))
+        
+        # 获取最后添加的段落（图片所在段落）
+        last_paragraph = doc.paragraphs[-1]
+        last_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        
+        # 如果图片有标题，添加标题
+        if img_element.get('alt'):
+            caption = doc.add_paragraph()
+            caption.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            caption.add_run(img_element.get('alt')).italic = True
+            
+    except Exception as e:
+        import logging
+        logging.error(f"处理图片失败: {str(e)}")
+
 def html_to_docx(
     html_content: str, 
     title: str = "Document", 
@@ -496,6 +561,11 @@ def html_to_docx(
         # 处理表格
         if element.name == 'table':
             process_table(element, doc)
+            return
+        
+        # 处理图片
+        if element.name == 'img':
+            process_image(element, doc)
             return
         
         # 处理标题
@@ -722,6 +792,31 @@ def html_to_pdf(
             
             return str(soup)
         
+        def process_images_for_pdf(soup):
+            """处理HTML中的图片元素，确保它们在PDF中正确显示"""
+            for img in soup.find_all('img'):
+                src = img.get('src', '')
+                if src.startswith('data:image'):
+                    # base64图片可以直接使用
+                    continue
+                elif src.startswith(('http://', 'https://')):
+                    try:
+                        import requests
+                        response = requests.get(src)
+                        import base64
+                        img_data = base64.b64encode(response.content).decode()
+                        content_type = response.headers.get('content-type', 'image/jpeg')
+                        img['src'] = f'data:{content_type};base64,{img_data}'
+                    except Exception as e:
+                        logging.error(f"处理网络图片失败: {str(e)}")
+                
+                # 添加图片标题
+                if img.get('alt'):
+                    caption_div = soup.new_tag('div')
+                    caption_div['class'] = 'image-caption'
+                    caption_div.string = img['alt']
+                    img.insert_after(caption_div)
+        
         # 预处理HTML
         preprocessed_html = preprocess_html(html_content)
         
@@ -863,10 +958,27 @@ def html_to_pdf(
             text-indent: 0;
             margin: 0;
         }
+
+        /* 图片样式 */
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 10pt auto;
+        }
+        
+        .image-caption {
+            text-align: center;
+            font-style: italic;
+            margin-top: 5pt;
+            margin-bottom: 10pt;
+        }
         """
         
         # 处理列表项的样式
         soup = BeautifulSoup(html_text_with_numbers, 'html.parser')
+        process_images_for_pdf(soup)
+        html_text_with_numbers = str(soup)
         
         # 处理数字列表项
         def is_numbered_list_item(text):
