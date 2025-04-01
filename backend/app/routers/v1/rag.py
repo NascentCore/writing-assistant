@@ -40,6 +40,7 @@ class ChatRequest(BaseModel):
     model_name: Optional[str] = Field(default="deepseek-v3", description="模型名称")
     session_id: str = Field(description="会话ID")
     web_search: Optional[bool] = Field(default=False, description="是否使用web搜索")
+    enhanced_search: Optional[bool] = Field(default=False, description="是否使用增强检索")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
     stream: Optional[bool] = Field(default=True, description="是否使用流式返回")
@@ -51,6 +52,7 @@ class ChatRequest(BaseModel):
                 "model_name": "deepseek-v3",
                 "session_id": "chat-1234567890",
                 "web_search": False,
+                "enhanced_search": False,
                 "file_ids": ["file-1234567890", "file-1234567891"],
                 "files": [],
                 "stream": True
@@ -703,6 +705,12 @@ async def chat(
         db.add(user_question)
         db.commit()
 
+        rerank = False
+        hybrid_search = False
+        if request.enhanced_search:
+            rerank = True
+            hybrid_search = True
+
         logger.info(json.dumps({
             "session_id": session_id,
             "message_id": question_message_id,
@@ -714,9 +722,9 @@ async def chat(
             "streaming": request.stream,
             "networking": request.web_search,
             "product_source": settings.RAG_CHAT_PRODUCT_SOURCE,
-            "rerank": settings.RAG_CHAT_RERANK,
+            "rerank": rerank,
             "only_need_search_results": settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
-            "hybrid_search": settings.RAG_CHAT_HYBRID_SEARCH,
+            "hybrid_search": hybrid_search,
             "max_token": settings.RAG_CHAT_MAX_TOKENS,
             "api_base": model['base_url'],
             "api_key": model['api_key'],
@@ -738,9 +746,9 @@ async def chat(
             streaming=streaming,
             networking=request.web_search,
             product_source=settings.RAG_CHAT_PRODUCT_SOURCE,
-            rerank=settings.RAG_CHAT_RERANK,
+            rerank=rerank,
             only_need_search_results=settings.RAG_CHAT_ONLY_NEED_SEARCH_RESULTS,
-            hybrid_search=settings.RAG_CHAT_HYBRID_SEARCH,
+            hybrid_search=hybrid_search,
             max_token=settings.RAG_CHAT_MAX_TOKENS,
             api_base=model["base_url"],
             api_key=model["api_key"],
