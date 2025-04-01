@@ -247,6 +247,7 @@ const Sender = forwardRef<any, SenderProps>(
           outline_id?: number;
           save_to_kb: boolean;
           web_search?: boolean;
+          files?: FileItem[];
         } = {
           model_name: selectedModel,
           file_ids: selectedFiles
@@ -259,6 +260,7 @@ const Sender = forwardRef<any, SenderProps>(
             .map((file) => file.file_id),
           prompt: value,
           save_to_kb: saveToKb,
+          files: selectedFiles.length > 0 ? selectedFiles : undefined,
         };
 
         // 如果是内容生成接口，添加web_search参数
