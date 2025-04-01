@@ -22,6 +22,10 @@ yaml_config = load_yaml_config()
 MYSQL_HOST = yaml_config.get("mysql", {}).get("host", "localhost")
 MYSQL_PORT = int(yaml_config.get("mysql", {}).get("port", 3306))
 MYSQL_USER = yaml_config.get("mysql", {}).get("user", "root")
+MYSQL_POOL_SIZE = int(yaml_config.get("mysql", {}).get("pool_size", 300))
+MYSQL_MAX_OVERFLOW = int(yaml_config.get("mysql", {}).get("max_overflow", 200))
+MYSQL_POOL_PRE_PING = yaml_config.get("mysql", {}).get("pool_pre_ping", True)
+MYSQL_POOL_RECYCLE = int(yaml_config.get("mysql", {}).get("pool_recycle", 3600))
 MYSQL_PASSWORD = yaml_config.get("mysql", {}).get("password", "")
 MYSQL_DATABASE = yaml_config.get("mysql", {}).get("database", "aieditor")
 DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
@@ -45,6 +49,10 @@ class Settings(BaseSettings):
     MYSQL_HOST: str = MYSQL_HOST
     MYSQL_PORT: int = MYSQL_PORT
     MYSQL_USER: str = MYSQL_USER
+    MYSQL_POOL_SIZE: int = MYSQL_POOL_SIZE
+    MYSQL_MAX_OVERFLOW: int = MYSQL_MAX_OVERFLOW
+    MYSQL_POOL_PRE_PING: bool = MYSQL_POOL_PRE_PING
+    MYSQL_POOL_RECYCLE: int = MYSQL_POOL_RECYCLE
     MYSQL_PASSWORD: str = MYSQL_PASSWORD
     MYSQL_DATABASE: str = MYSQL_DATABASE
     

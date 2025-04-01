@@ -14,10 +14,10 @@ logging.getLogger('sqlalchemy.dialects').setLevel(logging.ERROR)
 # 创建同步引擎
 sync_engine = create_engine(
     settings.DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    pool_recycle=3600,
+    pool_size=settings.MYSQL_POOL_SIZE,
+    max_overflow=settings.MYSQL_MAX_OVERFLOW,
+    pool_pre_ping=settings.MYSQL_POOL_PRE_PING,
+    pool_recycle=settings.MYSQL_POOL_RECYCLE,
 )
 
 # 创建同步会话
