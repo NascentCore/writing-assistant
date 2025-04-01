@@ -536,7 +536,7 @@ class OutlineGenerator:
 
             # 根据字数要求，重新分配大纲中各章节和段落的字数
             if word_count:
-                self._distribute_word_outline(complete_outline, word_count)
+                self._distribute_word_outline(complete_outline, word_count // 0.7)
 
             
             # 更新任务进度 - 完成
@@ -2210,7 +2210,7 @@ class OutlineGenerator:
             outline_data["sub_paragraphs"] = build_paragraph_tree(root_paragraphs)
             
             # 分配字数
-            self._distribute_word_outline(outline_data, word_count)
+            self._distribute_word_outline(outline_data, word_count // 0.7)
             
             # 将分配好的字数更新到段落中
             def update_word_counts(json_paragraphs, db_paragraphs_dict):
