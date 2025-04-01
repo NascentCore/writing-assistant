@@ -1,3 +1,7 @@
+import FilePreview from '@/components/FilePreview';
+import PreviewableFileCard from '@/components/PreviewableFileCard';
+import useFilePreview from '@/hooks/useFilePreview';
+import type { FileItem } from '@/types/common';
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
   CloudUploadOutlined,
@@ -77,15 +81,6 @@ interface Model {
 
 // 定义可用的模型类型
 type ModelType = string;
-
-interface FileItem {
-  file_id: string;
-  name: string;
-  size: number;
-  type: string;
-  status: number;
-  created_at: string;
-}
 
 // 用于转换消息格式的辅助函数
 const createMessage = (
@@ -191,6 +186,10 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   });
   const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
   const treeWrapperRef = useRef(null);
+
+  // 添加文件预览相关的 hooks
+  const { previewState, showPreview, hidePreview, fetchPreviewFile } =
+    useFilePreview();
 
   // 获取模型列表
   useEffect(() => {
@@ -896,15 +895,10 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                 </Typography.Text>
                                 <Flex wrap="wrap" gap="small">
                                   {currentMessage.files.map((file) => (
-                                    <Attachments.FileCard
+                                    <PreviewableFileCard
                                       key={file.file_id}
-                                      item={{
-                                        uid: file.file_id,
-                                        name: file.name,
-                                        size: file.size,
-                                        type: file.type,
-                                        status: 'done',
-                                      }}
+                                      file={file}
+                                      onPreview={showPreview}
                                     />
                                   ))}
                                 </Flex>
@@ -1082,6 +1076,14 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
             </div>
           </Flex>
         </Flex>
+
+        {/* 添加文件预览组件 */}
+        <FilePreview
+          open={previewState.visible}
+          onCancel={hidePreview}
+          fileName={previewState.fileName}
+          fetchFile={fetchPreviewFile}
+        />
       </XProvider>
     </div>
   );
