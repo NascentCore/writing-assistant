@@ -79,6 +79,7 @@ class GenerateOutlineRequest(BaseModel):
     outline_id: Optional[str] = Field(None, description="大纲ID，如果提供则直接返回对应大纲")
     prompt: Optional[str] = Field(None, description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
+    files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
     model_name: Optional[str] = Field(None, description="模型")
     web_search: Optional[bool] = Field(False, description="是否进行网页搜索")
 
@@ -322,6 +323,7 @@ async def generate_outline(
             role="user",
             content=request.prompt or f"获取大纲: {outline.title}",
             content_type=ContentType.TEXT,
+            meta=json.dumps({"files": request.files})
         )
         db.add(user_message)
         
@@ -392,6 +394,7 @@ async def generate_outline(
         role="user",
         content=request.prompt,
         content_type=ContentType.TEXT,
+        meta=json.dumps({"files": request.files})
     )
     db.add(user_message)
 
@@ -1029,6 +1032,7 @@ class GenerateFullContentRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="会话ID")
     prompt: Optional[str] = Field(None, description="直接生成模式下的写作提示")
     file_ids: Optional[List[str]] = Field(None, description="直接生成模式下的参考文件ID列表")
+    files: Optional[List[Dict[str, Any]]] = Field(default=[], description="直接生成模式下的参考文件内容")
     model_name: Optional[str] = Field(None, description="模型")
     web_search: Optional[bool] = Field(False, description="是否进行网页搜索")
 
@@ -1115,6 +1119,7 @@ async def generate_content(
         role="user",
         content=message_content,
         content_type=ContentType.TEXT,
+        meta=json.dumps({"files": request.files}),
         outline_id=outline_id
     )
     db.add(chat_message)
