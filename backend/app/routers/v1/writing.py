@@ -2235,7 +2235,7 @@ def refresh_writing_tasks_status():
     # 定义锁ID和过期时间
     lock_name = "writing_tasks_refresh_lock"
     lock_timeout = 300  # 5分钟，单位秒
-    heartbeat_interval = 60  # 1分钟，单位秒
+    heartbeat_interval = 30  # 30秒，单位秒
     instance_id = f"instance-{shortuuid.uuid()}"
     lock_acquired = False
     last_heartbeat = None
@@ -2261,6 +2261,20 @@ def refresh_writing_tasks_status():
                     lock_expire_time = datetime.fromisoformat(lock_data.get("expire_time"))
                     last_heartbeat_time = datetime.fromisoformat(lock_data.get("last_heartbeat", current_time.isoformat()))
                     
+                    # 检查是否有正在运行的任务
+                    running_instance_id = lock_data.get("instance_id")
+                    if running_instance_id:
+                        # 检查是否有该实例正在运行的任务
+                        running_tasks = db.query(Task).filter(
+                            Task.status.in_([TaskStatus.PROCESSING]),
+                            Task.type.in_([TaskType.GENERATE_OUTLINE, TaskType.GENERATE_CONTENT])
+                        ).all()
+                        
+                        # 如果存在正在运行的任务，且最后心跳时间在合理范围内，则认为锁仍然有效
+                        if running_tasks and (current_time - last_heartbeat_time) < timedelta(seconds=heartbeat_interval * 2):
+                            logger.info(f"发现实例 {running_instance_id} 有正在运行的任务，且心跳正常，跳过执行")
+                            return
+                    
                     # 检查心跳是否正常（如果最后心跳时间超过过期时间的一半，认为锁已失效）
                     if current_time > lock_expire_time or (current_time - last_heartbeat_time) > timedelta(seconds=lock_timeout/2):
                         # 锁已过期或心跳异常，可以获取
@@ -2269,7 +2283,8 @@ def refresh_writing_tasks_status():
                             "instance_id": instance_id,
                             "acquire_time": current_time.isoformat(),
                             "expire_time": expire_time.isoformat(),
-                            "last_heartbeat": current_time.isoformat()
+                            "last_heartbeat": current_time.isoformat(),
+                            "running_tasks": []  # 记录当前实例正在运行的任务
                         })
                         lock_acquired = True
                     else:
@@ -2284,7 +2299,8 @@ def refresh_writing_tasks_status():
                             "instance_id": instance_id,
                             "acquire_time": current_time.isoformat(),
                             "expire_time": expire_time.isoformat(),
-                            "last_heartbeat": current_time.isoformat()
+                            "last_heartbeat": current_time.isoformat(),
+                            "running_tasks": []  # 记录当前实例正在运行的任务
                         }),
                         description="任务恢复分布式锁"
                     )
@@ -2325,7 +2341,7 @@ def refresh_writing_tasks_status():
         
         for task in unfinished_tasks:
             try:
-                # 更新心跳
+                # 更新心跳和运行任务列表
                 if last_heartbeat and (datetime.now() - last_heartbeat).total_seconds() >= heartbeat_interval:
                     try:
                         with db.begin():
@@ -2339,10 +2355,17 @@ def refresh_writing_tasks_status():
                                     current_time = datetime.now()
                                     lock_data["last_heartbeat"] = current_time.isoformat()
                                     lock_data["expire_time"] = (current_time + timedelta(seconds=lock_timeout)).isoformat()
+                                    
+                                    # 更新正在运行的任务列表
+                                    running_tasks = []
+                                    with task_lock:
+                                        running_tasks = list(running_tasks)
+                                    lock_data["running_tasks"] = running_tasks
+                                    
                                     lock_record.value = json.dumps(lock_data)
                                     db.commit()
                                     last_heartbeat = current_time
-                                    logger.debug(f"更新锁心跳 [instance_id={instance_id}]")
+                                    logger.debug(f"更新锁心跳和运行任务列表 [instance_id={instance_id}]")
                     except Exception as e:
                         logger.error(f"更新锁心跳时出错: {str(e)}")
                 
