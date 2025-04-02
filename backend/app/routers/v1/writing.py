@@ -2239,6 +2239,39 @@ def refresh_writing_tasks_status():
     instance_id = f"instance-{shortuuid.uuid()}"
     lock_acquired = False
     last_heartbeat = None
+    heartbeat_thread = None
+    should_stop_heartbeat = False
+    
+    def update_heartbeat():
+        """心跳更新线程函数"""
+        while not should_stop_heartbeat:
+            try:
+                with next(get_db()) as heartbeat_db:
+                    lock_record = heartbeat_db.query(SystemConfig).filter(
+                        SystemConfig.key == f"lock:{lock_name}"
+                    ).first()
+                    
+                    if lock_record:
+                        lock_data = json.loads(lock_record.value)
+                        if lock_data.get("instance_id") == instance_id:
+                            current_time = datetime.now()
+                            lock_data["last_heartbeat"] = current_time.isoformat()
+                            lock_data["expire_time"] = (current_time + timedelta(seconds=lock_timeout)).isoformat()
+                            
+                            # 更新正在运行的任务列表
+                            running_tasks_list = []
+                            with task_lock:
+                                running_tasks_list = list(running_tasks)
+                            lock_data["running_tasks"] = running_tasks_list
+                            
+                            lock_record.value = json.dumps(lock_data)
+                            heartbeat_db.commit()
+                            logger.debug(f"更新锁心跳和运行任务列表 [instance_id={instance_id}]")
+            except Exception as e:
+                logger.error(f"更新锁心跳时出错: {str(e)}")
+            
+            # 等待下一次心跳
+            time.sleep(heartbeat_interval)
     
     try:
         # 尝试获取分布式锁
@@ -2313,6 +2346,9 @@ def refresh_writing_tasks_status():
                 if lock_acquired:
                     logger.info(f"实例 {instance_id} 成功获取任务恢复锁")
                     last_heartbeat = current_time
+                    # 启动心跳更新线程
+                    heartbeat_thread = threading.Thread(target=update_heartbeat, daemon=True)
+                    heartbeat_thread.start()
                 
         except Exception as e:
             # 发生错误，回滚事务
@@ -2341,34 +2377,6 @@ def refresh_writing_tasks_status():
         
         for task in unfinished_tasks:
             try:
-                # 更新心跳和运行任务列表
-                if last_heartbeat and (datetime.now() - last_heartbeat).total_seconds() >= heartbeat_interval:
-                    try:
-                        with db.begin():
-                            lock_record = db.query(SystemConfig).filter(
-                                SystemConfig.key == f"lock:{lock_name}"
-                            ).first()
-                            
-                            if lock_record:
-                                lock_data = json.loads(lock_record.value)
-                                if lock_data.get("instance_id") == instance_id:
-                                    current_time = datetime.now()
-                                    lock_data["last_heartbeat"] = current_time.isoformat()
-                                    lock_data["expire_time"] = (current_time + timedelta(seconds=lock_timeout)).isoformat()
-                                    
-                                    # 更新正在运行的任务列表
-                                    running_tasks = []
-                                    with task_lock:
-                                        running_tasks = list(running_tasks)
-                                    lock_data["running_tasks"] = running_tasks
-                                    
-                                    lock_record.value = json.dumps(lock_data)
-                                    db.commit()
-                                    last_heartbeat = current_time
-                                    logger.debug(f"更新锁心跳和运行任务列表 [instance_id={instance_id}]")
-                    except Exception as e:
-                        logger.error(f"更新锁心跳时出错: {str(e)}")
-                
                 # 获取任务参数
                 params = task.params
                 task_id = task.id
@@ -2517,6 +2525,11 @@ def refresh_writing_tasks_status():
     except Exception as e:
         logger.error(f"刷新写作任务状态时出错: {str(e)}")
     finally:
+        # 停止心跳更新线程
+        if heartbeat_thread and heartbeat_thread.is_alive():
+            should_stop_heartbeat = True
+            heartbeat_thread.join(timeout=5)
+        
         # 释放锁 - 仅当我们获取了锁时才需要释放
         if lock_acquired:
             try:
