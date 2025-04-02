@@ -2800,6 +2800,7 @@ class OutlineGenerator:
             expected_word_count = count_style_word_counts.get(count_style, 800)
             logger.warning(f"段落 [ID={paragraph.id}] 没有设置预期字数，根据count_style='{count_style}'使用默认值 {expected_word_count}")
         
+        expected_word_count = expected_word_count // 0.7
         # 构建提示模板
         template = f"""
 # 角色
@@ -2808,9 +2809,9 @@ class OutlineGenerator:
 ## 核心要求
 1.生成严格符合以下字数要求的段落内容：
 - 目标字数：{expected_word_count}字
-- 允许范围：{int(expected_word_count * 0.9)}至{int(expected_word_count * 1.1)}字
+- 允许范围：{int(expected_word_count * 1.1)}至{int(expected_word_count * 1.2)}字
 - 必须严格遵守字数限制，这是最重要的要求
-- 绝对不允许低于{int(expected_word_count * 0.9)}字
+- 绝对不允许低于{int(expected_word_count * 1.1)}字
 
 
 ## 技能
