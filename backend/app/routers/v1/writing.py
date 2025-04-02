@@ -2242,6 +2242,11 @@ def refresh_writing_tasks_status():
     heartbeat_thread = None
     should_stop_heartbeat = False
     
+    # 确保running_tasks是集合而不是列表
+    global running_tasks
+    if not isinstance(running_tasks, set):
+        running_tasks = set()
+    
     def update_heartbeat():
         """心跳更新线程函数"""
         while not should_stop_heartbeat:
@@ -2258,10 +2263,12 @@ def refresh_writing_tasks_status():
                             lock_data["last_heartbeat"] = current_time.isoformat()
                             lock_data["expire_time"] = (current_time + timedelta(seconds=lock_timeout)).isoformat()
                             
-                            # 更新正在运行的任务列表，只保存任务ID
+                            # 更新正在运行的任务列表，只保存任务ID字符串
+                            task_ids = []
                             with task_lock:
-                                running_tasks_list = list(running_tasks)  # running_tasks 集合中已经只存储任务ID
-                            lock_data["running_tasks"] = running_tasks_list
+                                # 确保只存储字符串ID，不存储Task对象
+                                task_ids = [str(task_id) for task_id in running_tasks]
+                            lock_data["running_tasks"] = task_ids
                             
                             lock_record.value = json.dumps(lock_data)
                             heartbeat_db.commit()
@@ -2297,13 +2304,13 @@ def refresh_writing_tasks_status():
                     running_instance_id = lock_data.get("instance_id")
                     if running_instance_id:
                         # 检查是否有该实例正在运行的任务
-                        running_tasks = db.query(Task).filter(
+                        running_tasks_list = db.query(Task).filter(
                             Task.status.in_([TaskStatus.PROCESSING]),
                             Task.type.in_([TaskType.GENERATE_OUTLINE, TaskType.GENERATE_CONTENT])
                         ).all()
                         
                         # 如果存在正在运行的任务，且最后心跳时间在合理范围内，则认为锁仍然有效
-                        if running_tasks and (current_time - last_heartbeat_time) < timedelta(seconds=heartbeat_interval * 2):
+                        if running_tasks_list and (current_time - last_heartbeat_time) < timedelta(seconds=heartbeat_interval * 2):
                             logger.info(f"发现实例 {running_instance_id} 有正在运行的任务，且心跳正常，跳过执行")
                             return
                     
@@ -2316,7 +2323,7 @@ def refresh_writing_tasks_status():
                             "acquire_time": current_time.isoformat(),
                             "expire_time": expire_time.isoformat(),
                             "last_heartbeat": current_time.isoformat(),
-                            "running_tasks": []  # 记录当前实例正在运行的任务
+                            "running_tasks": []  # 记录当前实例正在运行的任务ID列表
                         })
                         lock_acquired = True
                     else:
@@ -2332,7 +2339,7 @@ def refresh_writing_tasks_status():
                             "acquire_time": current_time.isoformat(),
                             "expire_time": expire_time.isoformat(),
                             "last_heartbeat": current_time.isoformat(),
-                            "running_tasks": []  # 记录当前实例正在运行的任务
+                            "running_tasks": []  # 记录当前实例正在运行的任务ID列表
                         }),
                         description="任务恢复分布式锁"
                     )
@@ -2465,7 +2472,8 @@ def refresh_writing_tasks_status():
                     if task_id in running_tasks:
                         logger.info(f"任务 {task_id} 已经在处理中，跳过")
                         continue
-                    running_tasks.add(task_id)
+                    # 将task_id作为字符串添加到running_tasks集合中
+                    running_tasks.add(str(task_id))
                 
                 # 首先提交当前的数据库更改
                 db.commit()
