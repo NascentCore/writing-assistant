@@ -2227,6 +2227,7 @@ def refresh_writing_tasks_status():
     3. 对于其他任务，重新启动任务处理
     
     使用数据库作为分布式锁，确保在多实例环境中只有一个实例执行任务恢复
+    通过心跳机制和锁的自动续期，确保正在运行的实例不会被新实例打断
     """
     logger.info("开始刷新写作任务状态...")
     db = next(get_db())
@@ -2234,70 +2235,71 @@ def refresh_writing_tasks_status():
     # 定义锁ID和过期时间
     lock_name = "writing_tasks_refresh_lock"
     lock_timeout = 300  # 5分钟，单位秒
+    heartbeat_interval = 60  # 1分钟，单位秒
     instance_id = f"instance-{shortuuid.uuid()}"
     lock_acquired = False
+    last_heartbeat = None
     
     try:
         # 尝试获取分布式锁
         try:
-            # 创建锁记录 - 使用原子操作
-            from sqlalchemy.exc import IntegrityError
-            
             # 获取当前时间和过期时间
             current_time = datetime.now()
             expire_time = current_time + timedelta(seconds=lock_timeout)
             
-            # 尝试创建或更新锁记录
-            # 首先查询现有锁
-            existing_lock = db.query(SystemConfig).filter(
-                SystemConfig.key == f"lock:{lock_name}"
-            ).with_for_update(nowait=True).first()
-            
-            if existing_lock:
-                # 检查锁是否过期
-                lock_data = json.loads(existing_lock.value)
-                lock_expire_time = datetime.fromisoformat(lock_data.get("expire_time"))
+            # 使用数据库事务和行级锁来确保原子性
+            with db.begin():
+                # 尝试创建或更新锁记录
+                # 首先查询现有锁，使用 FOR UPDATE SKIP LOCKED 来避免死锁
+                existing_lock = db.query(SystemConfig).filter(
+                    SystemConfig.key == f"lock:{lock_name}"
+                ).with_for_update(skip_locked=True).first()
                 
-                if current_time > lock_expire_time:
-                    # 锁已过期，可以获取
-                    logger.info(f"发现过期的锁，过期时间: {lock_expire_time}，当前时间: {current_time}")
-                    existing_lock.value = json.dumps({
-                        "instance_id": instance_id,
-                        "acquire_time": current_time.isoformat(),
-                        "expire_time": expire_time.isoformat()
-                    })
-                    lock_acquired = True
+                if existing_lock:
+                    # 检查锁是否过期
+                    lock_data = json.loads(existing_lock.value)
+                    lock_expire_time = datetime.fromisoformat(lock_data.get("expire_time"))
+                    last_heartbeat_time = datetime.fromisoformat(lock_data.get("last_heartbeat", current_time.isoformat()))
+                    
+                    # 检查心跳是否正常（如果最后心跳时间超过过期时间的一半，认为锁已失效）
+                    if current_time > lock_expire_time or (current_time - last_heartbeat_time) > timedelta(seconds=lock_timeout/2):
+                        # 锁已过期或心跳异常，可以获取
+                        logger.info(f"发现过期的锁，过期时间: {lock_expire_time}，最后心跳: {last_heartbeat_time}，当前时间: {current_time}")
+                        existing_lock.value = json.dumps({
+                            "instance_id": instance_id,
+                            "acquire_time": current_time.isoformat(),
+                            "expire_time": expire_time.isoformat(),
+                            "last_heartbeat": current_time.isoformat()
+                        })
+                        lock_acquired = True
+                    else:
+                        # 锁仍有效且心跳正常，不能获取
+                        logger.info(f"任务刷新已被实例 {lock_data.get('instance_id')} 锁定，心跳正常，跳过执行")
+                        return
                 else:
-                    # 锁仍有效，不能获取
-                    logger.info(f"任务刷新已被实例 {lock_data.get('instance_id')} 锁定，跳过执行")
-                    return
-            else:
-                # 不存在锁，创建新锁
-                new_lock = SystemConfig(
-                    key=f"lock:{lock_name}",
-                    value=json.dumps({
-                        "instance_id": instance_id,
-                        "acquire_time": current_time.isoformat(),
-                        "expire_time": expire_time.isoformat()
-                    }),
-                    description="任务恢复分布式锁"
-                )
-                db.add(new_lock)
-                lock_acquired = True
-            
-            # 提交事务
-            db.commit()
-            
-            if lock_acquired:
-                logger.info(f"实例 {instance_id} 成功获取任务恢复锁")
-            
-        except IntegrityError:
-            # 冲突发生，锁已被其他实例获取
-            db.rollback()
-            logger.info("无法获取任务恢复锁，可能已被其他实例获取")
-            return
+                    # 不存在锁，创建新锁
+                    new_lock = SystemConfig(
+                        key=f"lock:{lock_name}",
+                        value=json.dumps({
+                            "instance_id": instance_id,
+                            "acquire_time": current_time.isoformat(),
+                            "expire_time": expire_time.isoformat(),
+                            "last_heartbeat": current_time.isoformat()
+                        }),
+                        description="任务恢复分布式锁"
+                    )
+                    db.add(new_lock)
+                    lock_acquired = True
+                
+                # 提交事务
+                db.commit()
+                
+                if lock_acquired:
+                    logger.info(f"实例 {instance_id} 成功获取任务恢复锁")
+                    last_heartbeat = current_time
+                
         except Exception as e:
-            # 发生其他错误
+            # 发生错误，回滚事务
             db.rollback()
             logger.error(f"获取任务恢复锁时发生错误: {str(e)}")
             return
@@ -2323,6 +2325,27 @@ def refresh_writing_tasks_status():
         
         for task in unfinished_tasks:
             try:
+                # 更新心跳
+                if last_heartbeat and (datetime.now() - last_heartbeat).total_seconds() >= heartbeat_interval:
+                    try:
+                        with db.begin():
+                            lock_record = db.query(SystemConfig).filter(
+                                SystemConfig.key == f"lock:{lock_name}"
+                            ).first()
+                            
+                            if lock_record:
+                                lock_data = json.loads(lock_record.value)
+                                if lock_data.get("instance_id") == instance_id:
+                                    current_time = datetime.now()
+                                    lock_data["last_heartbeat"] = current_time.isoformat()
+                                    lock_data["expire_time"] = (current_time + timedelta(seconds=lock_timeout)).isoformat()
+                                    lock_record.value = json.dumps(lock_data)
+                                    db.commit()
+                                    last_heartbeat = current_time
+                                    logger.debug(f"更新锁心跳 [instance_id={instance_id}]")
+                    except Exception as e:
+                        logger.error(f"更新锁心跳时出错: {str(e)}")
+                
                 # 获取任务参数
                 params = task.params
                 task_id = task.id
@@ -2330,7 +2353,7 @@ def refresh_writing_tasks_status():
                 session_id = task.session_id
                 
                 # 检查任务创建时间是否超过一天
-                task_created_time = task.created_at  # 假设Task模型有created_at字段
+                task_created_time = task.created_at
                 time_diff = current_time - task_created_time
                 
                 # 对于创建时间超过一天的任务，直接标记为失败
