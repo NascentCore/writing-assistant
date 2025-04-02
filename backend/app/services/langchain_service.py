@@ -11,6 +11,7 @@ import time
 import uuid
 from datetime import datetime
 import traceback
+import math
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -502,8 +503,8 @@ class OutlineGenerator:
         # 使用LLM提取用户需求
         user_requirements = self._extract_requirements_with_llm(prompt)
         required_level = user_requirements.get("required_level", 2)  # 默认为2级
-        word_count = user_requirements.get("word_count") if user_requirements.get("word_count") else 5000
-        page_count = user_requirements.get("page_count") if user_requirements.get("page_count") else 5
+        word_count = user_requirements.get("word_count") if user_requirements.get("word_count") else 10000
+        page_count = user_requirements.get("page_count") if user_requirements.get("page_count") else 10
         if not word_count and page_count:
             word_count = page_count * settings.WRITING_PER_PAGE_WORD_COUNT
             logger.info(f"根据页数({page_count}页)计算字数要求: {word_count}字")
@@ -536,7 +537,7 @@ class OutlineGenerator:
 
             # 根据字数要求，重新分配大纲中各章节和段落的字数
             if word_count:
-                self._distribute_word_outline(complete_outline, word_count // 0.7)
+                self._distribute_word_outline(complete_outline, word_count)
 
             
             # 更新任务进度 - 完成
@@ -614,9 +615,9 @@ class OutlineGenerator:
 
                 requirements = json.loads(content)
                 # 验证返回值的合法性
-                requirements["required_level"] = int(requirements.get("required_level", 3))
+                requirements["required_level"] = int(requirements.get("required_level", 2))
                 if requirements["required_level"] < 1 or requirements["required_level"] > 5:
-                    requirements["required_level"] = 3  # 如果不在合理范围内，使用默认值
+                    requirements["required_level"] = 2  # 如果不在合理范围内，使用默认值
                 
                 if "word_count" in requirements and requirements["word_count"] is not None:
                     requirements["word_count"] = int(requirements["word_count"])
@@ -632,7 +633,7 @@ class OutlineGenerator:
                 # 如果解析失败，返回默认值
                 logger.error(f"Failed to parse requirements from LLM response: {response}")
                 return {
-                    "required_level": 3,
+                    "required_level": 2,
                     "word_count": None,
                     "page_count": None,
                     "predefined_chapters": []
@@ -641,7 +642,7 @@ class OutlineGenerator:
             logger.error(f"Error calling LLM for requirement extraction: {str(e)}")
             # 出错时返回默认值
             return {
-                "required_level": 3,
+                "required_level": 2,
                 "word_count": None,
                 "page_count": None,
                 "predefined_chapters": []
@@ -2210,7 +2211,7 @@ class OutlineGenerator:
             outline_data["sub_paragraphs"] = build_paragraph_tree(root_paragraphs)
             
             # 分配字数
-            self._distribute_word_outline(outline_data, word_count // 0.7)
+            self._distribute_word_outline(outline_data, word_count)
             
             # 将分配好的字数更新到段落中
             def update_word_counts(json_paragraphs, db_paragraphs_dict):
@@ -2800,7 +2801,6 @@ class OutlineGenerator:
             expected_word_count = count_style_word_counts.get(count_style, 800)
             logger.warning(f"段落 [ID={paragraph.id}] 没有设置预期字数，根据count_style='{count_style}'使用默认值 {expected_word_count}")
         
-        expected_word_count = expected_word_count // 0.7
         # 构建提示模板
         template = f"""
 # 角色
@@ -2809,9 +2809,7 @@ class OutlineGenerator:
 ## 核心要求
 1.生成严格符合以下字数要求的段落内容：
 - 目标字数：{expected_word_count}字
-- 允许范围：{int(expected_word_count * 1.1)}至{int(expected_word_count * 1.2)}字
 - 必须严格遵守字数限制，这是最重要的要求
-- 绝对不允许低于{int(expected_word_count * 1.1)}字
 
 
 ## 技能
@@ -3815,6 +3813,11 @@ class OutlineGenerator:
         
         format_example = format_examples.get(levels, format_examples[levels])
 
+        # 计算所需的子章节数
+        words_per_section = 500  # 每个最底层章节预期平均500字
+        target_sections = math.ceil(word_count / words_per_section)
+        logger.info(f"预期生成最终子章节数：{target_sections} 个")
+
         max_retries = 3  # 最大重试次数
         retry_count = 0
         
@@ -3827,6 +3830,7 @@ class OutlineGenerator:
 要求：
 1. 生成大纲结构，不要包含描述
 2. 确保层级结构清晰，逻辑合理
+3. 请将最终层级的子章节数量控制在{target_sections}个
 3. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
 4. 确保每个章节的内容都与主题相关
 5. 确保大纲结构自然，不要机械地固定章节数量
@@ -3863,6 +3867,7 @@ class OutlineGenerator:
                 time.sleep(1)  # 添加短暂延迟
 
         ext_num = self._get_extension_number(word_count, outline, levels)
+        logger.info(f"要求字数：{word_count}，扩展子章节数: {ext_num}")
 
         if ext_num > 0:
             sections = self._split_outline_into_sections(outline)
@@ -3989,33 +3994,34 @@ class OutlineGenerator:
         chapter_count = len(re.findall(pattern, outline))
 
         # 根据目标字数和子章节数量综合判断
-        if target_size < 100000:
+        if target_size >= 50000 and target_size < 100000:
             # 小型文章
-            if chapter_count < 50:
+            if chapter_count < 60:
                 return 2
-            elif chapter_count < 100:
+            elif chapter_count < 120:
                 return 1
             return 0
-        elif target_size < 200000:
+        elif target_size >= 100000 and target_size < 200000:
             # 中型文章
-            if chapter_count < 50:
+            if chapter_count < 80:
                 return 3
-            elif chapter_count < 100:
+            elif chapter_count < 120:
                 return 2
-            elif chapter_count < 150:
+            elif chapter_count < 180:
                 return 1
             return 0
-        else:
+        elif target_size >= 200000:
             # 大型文章
-            if chapter_count < 50:
+            if chapter_count < 100:
                 return 4
-            elif chapter_count < 100:
-                return 3
             elif chapter_count < 150:
+                return 3
+            elif chapter_count < 180:
                 return 2
-            elif chapter_count < 200:
+            elif chapter_count < 220:
                 return 1
             return 0
+        return 0
     
     def _parse_outline_to_json(self, outline_text, topic):
         """将大纲文本解析为指定的JSON结构"""
