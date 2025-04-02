@@ -1040,3 +1040,64 @@ async def download_file(
         logger.error(f"下载文件失败: {str(e)}")
         return APIResponse.error(message=f"下载文件失败: {str(e)}")
 
+@router.get("/files/{file_id}/markdown", summary="获取文件markdown格式内容")
+async def get_file_markdown(
+    file_id: str = Path(..., description="文件ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 查询文件
+        file = db.query(RagFile).filter(
+            RagFile.file_id == file_id,
+            RagFile.status == RagFileStatus.DONE,
+            RagFile.kb_id != '',
+            RagFile.is_deleted == False
+        ).first()
+        
+        if not file:
+            return APIResponse.error(message="文件不存在或已被删除")
+        
+        # 循环获取所有分页内容
+        all_content = []
+        page_id = 1
+        page_limit = 100
+        
+        while True:
+            response = await rag_api_async.get_doc_completed(
+                kb_id=file.kb_id,
+                file_id=file.kb_file_id,
+                page_id=page_id,
+                page_limit=page_limit
+            )
+            
+            if not response:
+                break
+                
+            chunks = response.get("chunks",[])
+            for chunk in chunks:
+                content = chunk.get("page_content", "")
+                # 使用正则表达式移除开头的 [headers] 部分
+                content = re.sub(r'^\[headers\]\(\{.*?\}\)\n', '', content)
+                all_content.append(content)
+            page_id += 1
+
+            if response.get("total_count", 0) <= page_id * page_limit:
+                break
+            
+        # 合并所有内容
+        full_content = "\n\n".join(all_content)
+            
+        # 返回markdown格式内容
+        return APIResponse.success(
+            message="获取文件markdown格式内容成功",
+            data={
+                "file_id": file.file_id,
+                "file_name": file.file_name,
+                "content": full_content
+            }
+        )
+    except Exception as e:
+        logger.error(f"获取文件markdown格式内容失败: {str(e)}")
+        return APIResponse.error(message=f"获取文件markdown格式内容失败: {str(e)}")
+
