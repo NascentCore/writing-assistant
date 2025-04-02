@@ -300,5 +300,36 @@ class RagAPIAsync:
         else:
             return await self._make_request("POST", endpoint, json=data)
 
+    async def get_doc_completed(
+        self,
+        kb_id: str,
+        file_id: str,
+        page_id: int = 1,
+        page_limit: int = 5,
+        user_id: str = "zzp"
+    ) -> Dict[str, Any]:
+        """
+        获取文档完成状态
+        
+        Args:
+            kb_id: 知识库ID
+            file_id: 文件ID
+            page_id: 页码，从1开始
+            page_limit: 每页显示的数量
+            user_id: 用户ID
+            
+        Returns:
+            Dict: 文档完成状态信息
+        """
+        endpoint = "/local_doc_qa/get_doc_completed"
+        data = {
+            "user_id": user_id,
+            "kb_id": kb_id,
+            "file_id": file_id,
+            "page_id": page_id,
+            "page_limit": page_limit
+        }
+        return await self._make_request("POST", endpoint, json=data)
+
 # 创建全局实例
 rag_api_async = RagAPIAsync()
