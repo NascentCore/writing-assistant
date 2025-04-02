@@ -2258,10 +2258,9 @@ def refresh_writing_tasks_status():
                             lock_data["last_heartbeat"] = current_time.isoformat()
                             lock_data["expire_time"] = (current_time + timedelta(seconds=lock_timeout)).isoformat()
                             
-                            # 更新正在运行的任务列表
-                            running_tasks_list = []
+                            # 更新正在运行的任务列表，只保存任务ID
                             with task_lock:
-                                running_tasks_list = list(running_tasks)
+                                running_tasks_list = list(running_tasks)  # running_tasks 集合中已经只存储任务ID
                             lock_data["running_tasks"] = running_tasks_list
                             
                             lock_record.value = json.dumps(lock_data)
