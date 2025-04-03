@@ -30,6 +30,55 @@ from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
+from dataclasses import dataclass
+from typing import List, Optional
+
+@dataclass
+class Paragraph:
+    title: str
+    id: str
+    sort_index: int
+    description: str
+    count_style: str
+    expected_word_count: int
+    level: int
+    children: List['Paragraph']
+
+def convert_outline_to_object(outline_dict: dict) -> Paragraph:
+    def convert_paragraphs(paragraphs_data: List[dict], parent_id: str = '') -> List[Paragraph]:
+        result = []
+        for index, para in enumerate(paragraphs_data):
+            # 计算当前段落的id和sort_index
+            current_sort_index = index + 1
+            current_id = f"{parent_id}.{current_sort_index}" if parent_id else str(current_sort_index)
+            
+            # 创建新的 Paragraph 对象
+            paragraph = Paragraph(
+                title=para['title'],
+                id=current_id,
+                sort_index=current_sort_index,
+                expected_word_count=400,
+                description=para.get('description', ''),
+                count_style=para.get('count_style', 'medium'),
+                level=para.get('level', 1),
+                children=convert_paragraphs(para.get('children', []), current_id)  # 递归处理子段落，传入当前id作为父id
+            )
+            result.append(paragraph)
+        return result
+
+    # 处理根节点
+    root = Paragraph(
+        title=outline_dict['title'],
+        id='0',  # 根节点id为'0'
+        sort_index=0,  # 根节点sort_index为0
+        expected_word_count=0,
+        description='',
+        count_style='medium',
+        level=0,
+        children=convert_paragraphs(outline_dict.get('sub_paragraphs', []), '0')  # 传入'0'作为父id
+    )
+    return root
+
 def update_task_progress(task_id: Optional[str], db_session: Session, progress: int, detail: str, log: str = ""):
     """更新任务进度"""
     if not task_id:
@@ -3360,6 +3409,16 @@ class OutlineGenerator:
         """
         start_time = time.time()
         logger.info(f"开始直接生成内容 [prompt={prompt}]")
+
+        # 使用LLM提取用户需求
+        user_requirements = self._extract_requirements_with_llm(prompt)
+        required_level = user_requirements.get("required_level", 2)  # 默认为2级
+        word_count = user_requirements.get("word_count") if user_requirements.get("word_count") else 10000
+        page_count = user_requirements.get("page_count") if user_requirements.get("page_count") else 10
+        if not word_count and page_count:
+            word_count = page_count * settings.WRITING_PER_PAGE_WORD_COUNT
+            logger.info(f"根据页数({page_count}页)计算字数要求: {word_count}字")
+        logger.info(f"要求层级：{required_level} 级, 要求字数：{word_count}")
         
         # 获取任务ID用于更新任务进度
         task_id = None
@@ -3497,116 +3556,302 @@ class OutlineGenerator:
         else:
             # 没有RAG检索
             update_task_progress(task_id, db_session, 30, "准备生成内容", "不使用RAG检索")
+
+        # 构建提示词
+        system_prompt = """你是一个专业的大纲生成助手。你需要根据用户给出的主题，生成一个结构清晰的大纲。
+请确保大纲：
+1. 第一行必须是文章标题，不要带"大纲"字样
+2. 结构清晰，层次分明
+3. 逻辑性强，各部分衔接自然
+4. 内容全面，覆盖主题的各个方面
+5. 使用统一的格式和编号系统
+6. 严格按照指定的层级深度生成大纲
+7. 每个章节的子章节数量必须不同，不要使用固定数量
+8. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
+9. 避免机械地固定章节数量，保持内容的自然性
+10. 确保每个章节的子章节数量都不同，体现内容的差异性
+"""
+
+        # 根据层级深度构建示例格式
+        format_examples = {
+            1: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+二、一级标题2
+三、一级标题3
+四、一级标题4
+五、一级标题5""",
+            2: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+    1.1 二级标题1
+    1.2 二级标题2
+二、一级标题2
+    2.1 二级标题1
+    2.2 二级标题2
+    2.3 二级标题3""",
+            3: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+    1.1 二级标题1
+        1.1.1 三级标题1
+        1.1.2 三级标题2
+    1.2 二级标题2
+        1.2.1 三级标题1
+        1.2.2 三级标题2
+二、一级标题2
+    2.1 二级标题1
+        2.1.1 三级标题1
+        2.1.2 三级标题2""",
+            4: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+    1.1 二级标题1
+        1.1.1 三级标题1
+            1.1.1.1 四级标题1
+            1.1.1.2 四级标题2
+        1.1.2 三级标题2
+            1.1.2.1 四级标题1
+            1.1.2.2 四级标题2
+    1.2 二级标题2
+        1.2.1 三级标题1
+            1.2.1.1 四级标题1
+            1.2.1.2 四级标题2
+            1.2.1.3 四级标题3
+            1.2.1.4 四级标题4
+二、一级标题2
+    2.1 二级标题1
+        2.1.1 三级标题1
+            2.1.1.1 四级标题1
+            2.1.1.2 四级标题2
+            2.1.1.3 四级标题3
+    2.2 二级标题2
+        2.2.1 三级标题1
+            2.2.1.1 四级标题1
+            2.2.1.2 四级标题2""",
+            5: """G212线关头坝大桥桥梁结构监测系统建设施工组织设计
+一、一级标题1
+    1.1 二级标题1
+        1.1.1 三级标题1
+            1.1.1.1 四级标题1
+                1.1.1.1.1 五级标题1
+                1.1.1.1.2 五级标题2
+            1.1.1.2 四级标题2
+                1.1.1.2.1 五级标题1
+                1.1.1.2.2 五级标题2
+        1.1.2 三级标题2
+            1.1.2.1 四级标题1
+                1.1.2.1.1 五级标题1
+                1.1.2.1.2 五级标题2
+            1.1.2.2 四级标题2
+                1.1.2.2.1 五级标题1
+                1.1.2.2.2 五级标题2
+    1.2 二级标题2
+        1.2.1 三级标题1
+            1.2.1.1 四级标题1
+                1.2.1.1.1 五级标题1
+                1.2.1.1.2 五级标题2
+            1.2.1.2 四级标题2
+                1.2.1.2.1 五级标题1
+                1.2.1.2.2 五级标题2
+            1.2.1.3 四级标题3
+                1.2.1.3.1 五级标题1
+                1.2.1.3.2 五级标题2
+二、一级标题2
+    2.1 二级标题1
+        2.1.1 三级标题1
+            2.1.1.1 四级标题1
+                2.1.1.1.1 五级标题1
+                2.1.1.1.2 五级标题2
+            2.1.1.2 四级标题2
+                2.1.1.2.1 五级标题1
+                2.1.1.2.2 五级标题2
+    2.2 二级标题2
+        2.2.1 三级标题1
+            2.2.1.1 四级标题1
+                2.2.1.1.1 五级标题1
+                2.2.1.1.2 五级标题2
+            2.2.1.2 四级标题2
+                2.2.1.2.1 五级标题1
+                2.2.1.2.2 五级标题2"""
+        }
         
-        # 更新文档标题和初始HTML（如果提供了文档ID）
-        if doc_id:
-            
-            try:
-                db_session = next(get_db())
-                document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
-                if document:
-                    initial_title = "文章生成中..."
-                    document.title = initial_title
-                    initial_html = markdown.markdown(f"# {initial_title}\n\n*内容生成中，请稍候...*")
-                    document.content = initial_html
-                    document.updated_at = func.now()
-                    db_session.commit()
-                    doc_log = f"更新文档初始HTML [doc_id={doc_id}]"
-                    logger.info(doc_log)
-                    update_task_progress(task_id, db_session, 30, "文档初始化完成", doc_log)
-            except Exception as e:
-                doc_error = f"更新文档初始HTML时出错: {str(e)}"
-                logger.error(doc_error)
-                update_task_progress(task_id, db_session, 30, "文档初始化失败", doc_error)
-                if 'db_session' in locals():
-                    db_session.close()
+        format_example = format_examples.get(required_level, format_examples[required_level])
+
+        # 计算所需的子章节数
+        words_per_section = 400  # 每个最底层章节预期平均500字
+        target_sections = math.ceil(word_count / words_per_section)
+        logger.info(f"预期生成最终子章节数：{target_sections} 个")
         
-        try:
-            # 构建提示模板
-            template = DIRECT_CONTENT_GENERATION_TEMPLATE.format(
-                prompt=prompt,
-                file_context=file_context,
-                rag_context=rag_context
-            )
+        # 第一步：生成完整大纲结构（不含描述）
+        structure_prompt = f"""请为主题"{prompt}"生成一个完整的{required_level}级大纲结构。
+使用以下格式：
+{format_example}
+
+要求：
+1. 生成大纲结构，不要包含描述
+2. 确保层级结构清晰，逻辑合理
+3. 请将最终层级的子章节数量控制在{target_sections}个
+3. 根据主题的实际内容需求，灵活调整每个章节的子章节数量
+4. 确保每个章节的内容都与主题相关
+5. 确保大纲结构自然，不要机械地固定章节数量
+6. 每个层级都必须使用正确的标题格式：
+    - 一级标题使用中文数字（如：一、二、三、四、五、六、七、八、九、十等）
+    - 二级标题使用"1.1、1.2、"等数字格式
+    - 三级标题使用"1.1.1、1.1.2、"等数字格式
+    - 四级标题使用"1.1.1.1、1.1.1.2、"等数字格式
+    - 五级标题使用"1.1.1.1.1、1.1.1.1.2、"等数字格式
+7. 确保每个层级的缩进正确（每级缩进4个空格）
+8. 确保大纲结构完整，包含所有必要的章节
+9. 必须严格按照{required_level}级层级生成，不要少层级
+
+只返回大纲结构，不要包含额外的说明。"""
+
+        messages = f"System: {system_prompt}\n\nUser: {structure_prompt}"
+        
+        # 调用LLM生成大纲结构
+        outline_content = self.llm.invoke(messages).content
+        update_task_progress(task_id, db_session, 35, f"已生成 {required_level} 级大纲")
+        logger.info(outline_content)
+
+        outline = self._parse_outline_to_json(outline_content, prompt)
+        outline = convert_outline_to_object(outline)
+
+        def get_all_paragraphs(outline):
+            all_paragraphs = []
             
-            template_log = f"准备生成内容，提示模板长度: {len(template)} 字符"
-            logger.info(template_log)
-            update_task_progress(task_id, db_session, 35, "准备生成内容", template_log)
+            def collect_paragraphs(paragraphs):
+                for para in paragraphs:
+                    all_paragraphs.append(para)
+                    if hasattr(para, 'children') and para.children:
+                        collect_paragraphs(para.children)
             
-            # 开始生成
-            llm_start_time = time.time()
-            update_task_progress(task_id, db_session, 40, "开始生成文章内容", "调用LLM生成内容...")
+            # 从根节点的children开始收集
+            collect_paragraphs(outline.children)
+            return all_paragraphs
+        
+        all_paragraphs = get_all_paragraphs(outline)
+        # 获取顶级段落
+        root_paragraphs = [p for p in all_paragraphs if p.level == 1]
+
+        article_title = outline.title
+        logger.info(f"生成文章标题: {article_title}")
+        
+        # 更新任务进度到35%，标题生成完毕
+        update_task_progress(task_id, db_session, 36, "标题生成完毕", f"文章标题: {article_title}")
+        
+        try:         
+            update_task_progress(task_id, db_session, 38, "准备生成内容", "")
             
-            try:
-                result = self.llm.invoke(template)
-                content = result.content
-                
-                llm_time = time.time() - llm_start_time
-                llm_log = f"LLM生成完成，用时: {llm_time:.2f}秒, 生成内容长度: {len(content)} 字符"
-                logger.info(llm_log)
-                update_task_progress(task_id, db_session, 85, "文章内容生成完毕", llm_log)
-            except Exception as e:
-                llm_error = f"LLM调用失败: {str(e)}"
-                logger.error(llm_error)
-                update_task_progress(task_id, db_session, 85, "LLM调用失败", f"{llm_error}\n{traceback.format_exc()}")
-                raise
+            # 存储生成的内容
+            markdown_content = []
             
-            # 提取标题
-            title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
-            title = title_match.group(1) if title_match else "生成的文章"
+            # 添加文章标题
+            markdown_content.append(f"# {article_title}\n")
             
-            # 初始化html_content变量
-            html_content = ""
-            
-            # 将markdown转换为HTML
-            html_time_start = time.time()
-            try:
-                html_content = markdown.markdown(content)
-                html_time = time.time() - html_time_start
-                html_log = f"Markdown转HTML完成，用时: {html_time:.2f}秒, 提取标题: '{title}', HTML长度: {len(html_content)} 字符"
-                logger.info(html_log)
-                update_task_progress(task_id, db_session, 90, "正在优化格式", html_log)
-            except Exception as e:
-                html_error = f"Markdown转HTML失败: {str(e)}"
-                logger.error(html_error)
-                update_task_progress(task_id, db_session, 90, "格式转换失败", html_error)
-                # 在异常情况下，使用原始内容
-                html_content = f"<pre>{content}</pre>"
-            
-            # 更新文档最终HTML内容（如果提供了文档ID）
-            doc_update_log = ""
+            # 更新文档标题和初始HTML（如果提供了文档ID）
             if doc_id:
                 try:
-                    db_session = next(get_db())
                     document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
                     if document:
-                        document.title = title
-                        document.content = html_content
-                        document.updated_at = func.now()
+                        document.title = article_title
+                        initial_html = markdown.markdown(f"# {article_title}\n\n*文档生成中...*")
+                        document.content = initial_html
                         db_session.commit()
-                        doc_update_log = f"更新文档最终HTML内容成功 [doc_id={doc_id}, 标题='{title}']"
-                        logger.info(doc_update_log)
+                        logger.info(f"更新文档标题和初始HTML [doc_id={doc_id}]")
                 except Exception as e:
-                    doc_update_log = f"更新文档最终HTML内容时出错: {str(e)}"
-                    logger.error(doc_update_log)
-                finally:
-                    if 'db_session' in locals():
-                        db_session.close()
+                    logger.error(f"更新文档标题时出错: {str(e)}")
             
-            # 计算总耗时
-            total_time = time.time() - start_time
+            # 初始化全局上下文对象，用于在段落间传递信息
+            global_context = {
+                "previous_content_summary": "",  # 前一段落的内容摘要
+                "chapter_summaries": {},  # 已生成章节的摘要，格式为 {章节标题: 摘要内容}
+                "generated_contents": {},  # 已生成段落的内容，格式为 {段落ID: {title: 标题, content: 内容}}
+                "total_content_length": len(f"# {article_title}\n"),  # 当前已生成内容的总长度
+                "duplicate_titles": set(),  # 记录重复的标题
+                "generated_titles": set(),  # 记录已生成的标题
+                "doc_id": doc_id,  # 文档ID，用于更新HTML内容
+                "task_id": task_id,  # 任务ID，用于更新进度
+                "total_paragraphs": len(all_paragraphs),  # 段落总数
+                "generated_paragraph_count": 0  # 已生成段落数
+            }
+            
+            logger.info(f"开始生成段落内容，共 {len(root_paragraphs)} 个顶级段落")
+            update_task_progress(task_id, db_session, 40, "开始生成段落内容", f"共 {len(root_paragraphs)} 个顶级段落, {len(all_paragraphs)} 个总段落")
+            
+            # 顺序生成每个顶级段落的内容
+            for i, paragraph in enumerate(root_paragraphs):
+                logger.info(f"处理顶级段落 [{i+1}/{len(root_paragraphs)}] 标题={paragraph.title}")
+                
+                # 生成段落内容
+                self._generate_paragraph_with_context(
+                    paragraph,
+                    global_context,
+                    markdown_content,
+                    article_title,
+                    rag_context,
+                    outline_content,
+                    prompt,
+                    is_root=True,
+                    parent_content="",
+                    chapter_index=i,
+                    total_chapters=len(root_paragraphs),
+                    db_session=db_session
+                )
+                
+                # 计算并更新当前进度
+                # 进度范围从40%到95%，留5%给最后的处理
+                progress = 40 + int((global_context["generated_paragraph_count"] / global_context["total_paragraphs"]) * 55)
+                progress = min(95, progress)  # 确保不超过95%，留给最后的完成步骤
+                logger.info(f"当前进度: {progress}, 已生成 {global_context['generated_paragraph_count']}/{global_context['total_paragraphs']} 个段落, 当前总内容长度: {global_context['total_content_length']} 字符")
+                update_task_progress(task_id, db_session, progress, f"已生成 {global_context['generated_paragraph_count']}/{global_context['total_paragraphs']} 个段落", 
+                                    f"生成段落标题: {paragraph.title}, 当前总内容长度: {global_context['total_content_length']} 字符, ")
+            
+            # 合并所有内容
+            final_content = "\n".join(markdown_content)
+            
+            # 记录生成的内容长度
+            logger.info(f"生成内容完成，总长度: {len(final_content)} 字符")
+            
+            # 记录重复标题情况
+            duplicate_log = ""
+            if global_context["duplicate_titles"]:
+                duplicate_log = f"检测到 {len(global_context['duplicate_titles'])} 个重复标题: {', '.join(global_context['duplicate_titles'])}"
+                logger.warning(duplicate_log)
+            
+            # 记录章节摘要数量
+            summary_log = f"生成了 {len(global_context['chapter_summaries'])} 个章节摘要, {len(global_context['generated_contents'])} 个段落内容, 总长度: {len(final_content)} 字符"
+            logger.info(summary_log)
+            
+            # 将markdown转换为HTML
+            html_content = markdown.markdown(final_content, extensions=[
+                'markdown.extensions.extra',
+                'markdown.extensions.toc',
+                'markdown.extensions.sane_lists',
+                'markdown.extensions.smarty',
+                'markdown.extensions.tables',
+                'markdown.extensions.fenced_code',
+                'markdown.extensions.codehilite'
+            ])
+            
+            # 更新文档HTML内容
+            html_log = ""
+            if doc_id:
+                try:
+                    document = db_session.query(Document).filter(Document.doc_id == doc_id).first()
+                    if document:
+                        document.content = html_content
+                        db_session.commit()
+                        html_log = f"更新文档最终完整HTML内容 [doc_id={doc_id}]"
+                        logger.info(html_log)
+                except Exception as e:
+                    html_log = f"更新文档最终HTML内容时出错: {str(e)}"
+                    logger.error(html_log)
             
             # 最终进度100%
-            final_log = f"标题: '{title}'\nMarkdown长度: {len(content)} 字符\nHTML长度: {len(html_content)} 字符\n总耗时: {total_time:.2f}秒"
-            if doc_update_log:
-                final_log += f"\n{doc_update_log}"
-                
+            final_log = f"{summary_log}\n{duplicate_log}\n{html_log}".strip()
             update_task_progress(task_id, db_session, 100, "内容生成完成", final_log)
             
             # 返回结果
             return {
-                "title": title,
-                "markdown": content,
+                "title": article_title,
+                "markdown": final_content,
                 "html": html_content
             }
             
