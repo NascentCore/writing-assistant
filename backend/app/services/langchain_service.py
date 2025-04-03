@@ -303,9 +303,9 @@ class OutlineGenerator:
             openai_api_key=self.api_key,
             openai_api_base=self.base_url,
             temperature=0.7,
-            max_tokens=12288 if readable_model_name != "doubao" else 4096
+            max_tokens=4096 if readable_model_name == 'doubao' else 8192 if readable_model_name == 'deepseek-r1-32b' else 12288
         )
-        logger.info(f"model: {readable_model_name}, max_tokens: {12288 if readable_model_name != 'doubao' else 4096}")
+        logger.info(f"model: {readable_model_name}, max_tokens: {4096 if readable_model_name == 'doubao' else 8192 if readable_model_name == 'deepseek-r1-32b' else 12288}")
         
         # 初始化输出解析器
         self.parser = JsonOutputParser()
