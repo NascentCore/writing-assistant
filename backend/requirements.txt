@@ -8,7 +8,7 @@ anyio==4.8.0
 async-timeout==4.0.3
 asyncmy==0.2.10
 attrs==25.1.0
-bcrypt==3.2.2
+bcrypt==4.1.2
 beautifulsoup4==4.13.3
 certifi==2025.1.31
 cffi==1.17.1
