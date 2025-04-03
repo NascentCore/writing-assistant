@@ -2713,3 +2713,82 @@ async def update_template(
         db.rollback()
         logger.error(f"更新模板失败: {str(e)}")
         return APIResponse.error(message=f"更新模板失败: {str(e)}")
+
+class OutlineListRequest(BaseModel):
+    page: int = Field(1, description="页码")
+    page_size: int = Field(10, description="每页数量")
+    keyword: Optional[str] = Field(None, description="搜索关键词")
+
+@router.get("/outlines")
+async def get_outlines(
+    page: int = 1,
+    page_size: int = 10,
+    keyword: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取大纲列表
+    
+    Args:
+        page: 页码
+        page_size: 每页数量
+        keyword: 搜索关键词（可选）
+        
+    Returns:
+        outlines: 大纲列表
+        total: 总数
+        page: 当前页码
+        page_size: 每页数量
+    """
+    try:
+        # 构建基础查询
+        query = db.query(Outline).filter(
+            Outline.user_id == current_user.user_id
+        )
+        
+        # 如果有搜索关键词，添加标题搜索条件
+        if keyword:
+            query = query.filter(Outline.title.ilike(f"%{keyword}%"))
+        
+        # 计算总数
+        total = query.count()
+        
+        # 分页查询
+        outlines = query.order_by(desc(Outline.created_at)) \
+                       .offset((page - 1) * page_size) \
+                       .limit(page_size) \
+                       .all()
+        
+        # 获取每个大纲的段落数量
+        outline_data = []
+        for outline in outlines:
+            # 获取段落数量
+            paragraph_count = db.query(SubParagraph).filter(
+                SubParagraph.outline_id == outline.id
+            ).count()
+            
+            # 获取最后更新时间
+            last_updated = db.query(SubParagraph).filter(
+                SubParagraph.outline_id == outline.id
+            ).order_by(desc(SubParagraph.updated_at)).first()
+            
+            outline_data.append({
+                "id": outline.id,
+                "title": outline.title,
+                "paragraph_count": paragraph_count,
+                "created_at": outline.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": last_updated.updated_at.strftime("%Y-%m-%d %H:%M:%S") if last_updated else outline.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "reference_status": outline.reference_status
+            })
+        
+        return APIResponse.success(message="获取大纲列表成功", data={
+            "outlines": outline_data,
+            "total": total,
+            "page": page,
+            "page_size": page_size
+        })
+        
+    except Exception as e:
+        logger.error(f"获取大纲列表失败: {str(e)}")
+        return APIResponse.error(message=f"获取大纲列表失败: {str(e)}")
