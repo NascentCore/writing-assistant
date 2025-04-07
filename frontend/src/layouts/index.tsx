@@ -42,6 +42,7 @@ const iconMap: Record<string, React.ReactNode> = {
   '/DepartKnowledge': <Icon type="DepartKn" />,
   '/DepartManage': <Icon type="DepartMana" />,
   '/KnowledgeSearch': <Icon type="KnSearch" />,
+  '/TemplateManage': <Icon type="TemplateManage" />,
 };
 
 // 将路由配置转换为菜单项
@@ -52,6 +53,9 @@ const convertRoutesToMenuItems = (routes: RouteItem[]): MenuItem[] => {
     .filter((route) => {
       // 如果不是管理员，过滤掉 SystemKnowledge 路由
       if (route.path === '/SystemKnowledge' && admin !== '2') {
+        return false;
+      }
+      if (route.path === '/TemplateManage' && admin !== '2') {
         return false;
       }
       if (route.path === '/DepartKnowledge' && admin === '0') {

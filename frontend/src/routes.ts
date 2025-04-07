@@ -72,6 +72,11 @@ export const routes = [
     hideInMenu: true,
   },
   {
+    name: '模板管理',
+    path: '/TemplateManage',
+    component: './TemplateManage',
+  },
+  {
     path: '/*',
     component: '@/pages/404',
     name: '404',

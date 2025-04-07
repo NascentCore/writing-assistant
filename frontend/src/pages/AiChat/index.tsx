@@ -1,12 +1,12 @@
 import FilePreview from '@/components/FilePreview';
 import PreviewableFileCard from '@/components/PreviewableFileCard';
+import ReferenceContentRenderer from '@/components/ReferenceContentRenderer';
 import useFilePreview from '@/hooks/useFilePreview';
 import type { FileItem } from '@/types/common';
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
   CloudUploadOutlined,
   CopyOutlined,
-  // PlusCircleOutlined,
   PaperClipOutlined,
   SwapOutlined,
   UserOutlined,
@@ -14,8 +14,7 @@ import {
 import type { AttachmentsProps } from '@ant-design/x';
 import { Attachments, Bubble, Sender, XProvider, XStream } from '@ant-design/x';
 import { history, useLocation } from '@umijs/max';
-import { Badge, Button, Flex, GetRef, Select, Typography, message } from 'antd';
-import markdownit from 'markdown-it';
+import { Badge, Button, Flex, GetRef, message, Select, Typography } from 'antd';
 import React, {
   forwardRef,
   useCallback,
@@ -26,20 +25,33 @@ import React, {
 } from 'react';
 import { CopyToClipboard } from 'react-copy-to-clipboard';
 import { API_BASE_URL } from '../../config';
-import ChatSessionList, { ChatMessage } from './components/ChatSessionList';
+import ChatSessionList, {
+  type ChatSessionListRef,
+} from './components/ChatSessionList';
 import styles from './index.module.less';
+import {
+  type AIChatProps,
+  type AIChatRef,
+  type ChatMessage,
+  type Model,
+} from './type';
 
-const md = markdownit({ html: true, breaks: true });
+// 扩展ChatMessage接口以添加reference_files属性
+declare module './components/ChatSessionList' {
+  interface ChatMessage {
+    reference_files?: {
+      file_id: string;
+      file_name: string;
+      file_path: string;
+      file_ext: string;
+      file_size: number;
+      content: string;
+    }[];
+  }
+}
 
 const MODEL_STORAGE_KEY = 'ai_chat_model';
 const SESSION_STORAGE_KEY = 'current_chat_session_id';
-
-// 定义模型接口类型
-interface Model {
-  id: string;
-  name: string;
-  description: string;
-}
 
 // 定义可用的模型类型
 type ModelType = string;
@@ -60,15 +72,7 @@ const createMessage = (
   files,
 });
 
-interface AIChatProps {
-  setShowAIChat: (show: boolean) => void;
-}
-
-interface AIChatRef {
-  addSelectedFile: (file: FileItem) => void;
-}
-
-const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
+const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
   // 获取当前路由信息
   const location = useLocation();
 
@@ -90,6 +94,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   const attachmentsRef = React.useRef<GetRef<typeof Attachments>>(null);
   const senderRef = React.useRef<GetRef<typeof Sender>>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const chatSessionListRef = useRef<ChatSessionListRef>(null);
 
   const [models, setModels] = useState<Model[]>([]);
   const [selectedModel, setSelectedModel] = useState<ModelType>(() => {
@@ -430,7 +435,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
           }
         } catch (error) {}
       }
-
+      if (currentSessionId && chatSessionListRef.current) {
+        await chatSessionListRef.current.loadSessionDetail(currentSessionId);
+      }
       // 确保在流处理结束后，如果消息仍然处于 loading 状态，则移除该状态
       setMessages((prev: ChatMessage[]) => {
         const newMessages = [...prev];
@@ -478,6 +485,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
       setItems([]);
     }
   };
+
   const handleSelectedModel = (selectedModel: string) => {
     if (models.length === 0) {
       return '';
@@ -490,12 +498,14 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
     }
     return models[0].name;
   };
+
   return (
     <div className={styles.container}>
       <XProvider>
         <Flex gap={20} style={{ height: 'calc(100vh - 60px)' }}>
           {/* 使用 ChatSessionList 组件 */}
           <ChatSessionList
+            ref={chatSessionListRef} // 传递 ref
             onSessionChange={handleSessionChange}
             onCreateNewSession={createNewSession}
             activeSessionId={activeSessionId}
@@ -593,7 +603,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                         </Flex>
                       ) : undefined,
                     messageRender: () => {
-                      // 使用 bubble.key 查找对应的消息
+                      // 找到对应的消息
                       const currentMessage = messages.find(
                         (msg) => msg.key === bubble.key,
                       );
@@ -602,10 +612,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                         <Flex vertical gap="small">
                           {/* 渲染消息内容 */}
                           <Typography>
-                            <div
-                              dangerouslySetInnerHTML={{
-                                __html: md.render(String(bubble.content || '')),
-                              }}
+                            <ReferenceContentRenderer
+                              content={String(bubble.content || '')}
+                              referenceFiles={currentMessage?.reference_files}
                             />
                           </Typography>
 

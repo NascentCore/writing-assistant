@@ -49,6 +49,7 @@ import { ReactComponent as KnSearch } from './assets/icon_kn_search.svg';
 import { ReactComponent as PersonalKnowledge } from './assets/icon_personal_knowledge.svg';
 import { ReactComponent as RecentChat } from './assets/icon_recent_chat.svg';
 import { ReactComponent as SystemKnowledge } from './assets/icon_system_knowledge.svg';
+import { ReactComponent as TemplateManage } from './assets/icon_template_manage.svg';
 import { ReactComponent as VideoDisplay } from './assets/icon_video_display.svg';
 import { ReactComponent as WritingAssistant } from './assets/icon_writing_assistant.svg';
 
@@ -99,7 +100,8 @@ type IconType =
   | 'DepartKn'
   | 'DepartMana'
   | 'RecentChat'
-  | 'AIChat';
+  | 'AIChat'
+  | 'TemplateManage';
 
 const RoadIcon: React.FC<{
   style?: React.CSSProperties;
@@ -205,6 +207,8 @@ const RoadIcon: React.FC<{
     IconComponent = DepartKn;
   } else if (type === 'DepartMana') {
     IconComponent = DepartMana;
+  } else if (type === 'TemplateManage') {
+    IconComponent = TemplateManage;
   }
 
   return <Icon style={{ fontSize: 24 }} component={IconComponent} {...rest} />;
