@@ -2,7 +2,7 @@ from enum import Enum
 import logging
 import shortuuid
 from typing import List, Optional, Tuple, Dict, Any
-from fastapi import APIRouter, Depends, Path, UploadFile as FastAPIUploadFile, File, Query
+from fastapi import APIRouter, Depends, Path, UploadFile as FastAPIUploadFile, File, Query, Body
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -1529,7 +1529,8 @@ async def get_templates(
 @router.post("/templates")
 async def create_template(
     template: TemplateCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     创建模板
@@ -1541,6 +1542,10 @@ async def create_template(
         id: 模板ID
     """
     try:
+        # 检查用户权限
+        if current_user.admin != UserRole.SYS_ADMIN:
+            return APIResponse.error(message="只有系统管理员才能创建模板")
+            
         # 创建模板
         new_template = WritingTemplate(
             id=shortuuid.uuid(),
@@ -2612,3 +2617,178 @@ def run_content_task(task_id, outline_id, prompt, file_ids, session_id, message_
         with task_lock:
             if task_id in running_tasks:
                 running_tasks.remove(task_id)
+
+@router.delete("/templates/{template_id}")
+async def delete_template(
+    template_id: str = Path(..., description="模板ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    删除模板
+    
+    Args:
+        template_id: 模板ID
+        
+    Returns:
+        success: 是否删除成功
+    """
+    try:
+        # 检查用户权限
+        if current_user.admin != UserRole.SYS_ADMIN:
+            return APIResponse.error(message="只有系统管理员才能删除模板")
+            
+        # 查找模板
+        template = db.query(WritingTemplate).filter(WritingTemplate.id == template_id).first()
+        if not template:
+            return APIResponse.error(message=f"未找到ID为{template_id}的模板")
+            
+        # 检查是否是默认模板
+        if template.is_default:
+            return APIResponse.error(message="不能删除默认模板")
+            
+        # 删除模板
+        db.delete(template)
+        db.commit()
+        
+        return APIResponse.success(message="删除模板成功")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"删除模板失败: {str(e)}")
+        return APIResponse.error(message=f"删除模板失败: {str(e)}")
+
+class TemplateUpdate(TemplateBase):
+    id: str = Field(..., description="模板ID")
+
+@router.put("/templates/{template_id}")
+async def update_template(
+    template_id: str = Path(..., description="模板ID"),
+    template: TemplateUpdate = Body(..., description="模板信息"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    全量更新模板
+    
+    Args:
+        template_id: 模板ID
+        template: 模板信息
+        
+    Returns:
+        success: 是否更新成功
+    """
+    try:
+        # 检查用户权限
+        if current_user.admin != UserRole.SYS_ADMIN:
+            return APIResponse.error(message="只有系统管理员才能更新模板")
+            
+        # 确保路径参数和请求体中的ID一致
+        if template_id != template.id:
+            return APIResponse.error(message="路径参数与请求体中的模板ID不一致")
+            
+        # 查找模板
+        existing_template = db.query(WritingTemplate).filter(WritingTemplate.id == template_id).first()
+        if not existing_template:
+            return APIResponse.error(message=f"未找到ID为{template_id}的模板")
+            
+        # 检查是否是默认模板
+        if existing_template.is_default and not template.is_default:
+            return APIResponse.error(message="不能将默认模板改为非默认模板")
+            
+        # 更新模板字段
+        existing_template.show_name = template.show_name
+        existing_template.value = template.value
+        existing_template.description = template.description
+        existing_template.has_steps = template.has_steps
+        existing_template.background_url = template.background_url
+        existing_template.template_type = template.template_type
+        existing_template.variables = template.variables
+        existing_template.default_outline_ids = template.outline_ids
+        
+        # 保存更改
+        db.commit()
+        
+        return APIResponse.success(message="更新模板成功")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"更新模板失败: {str(e)}")
+        return APIResponse.error(message=f"更新模板失败: {str(e)}")
+
+class OutlineListRequest(BaseModel):
+    page: int = Field(1, description="页码")
+    page_size: int = Field(10, description="每页数量")
+    keyword: Optional[str] = Field(None, description="搜索关键词")
+
+@router.get("/outlines")
+async def get_outlines(
+    page: int = 1,
+    page_size: int = 10,
+    keyword: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取大纲列表
+    
+    Args:
+        page: 页码
+        page_size: 每页数量
+        keyword: 搜索关键词（可选）
+        
+    Returns:
+        outlines: 大纲列表
+        total: 总数
+        page: 当前页码
+        page_size: 每页数量
+    """
+    try:
+        # 构建基础查询
+        query = db.query(Outline).filter(
+            Outline.user_id == current_user.user_id
+        )
+        
+        # 如果有搜索关键词，添加标题搜索条件
+        if keyword:
+            query = query.filter(Outline.title.ilike(f"%{keyword}%"))
+        
+        # 计算总数
+        total = query.count()
+        
+        # 分页查询
+        outlines = query.order_by(desc(Outline.created_at)) \
+                       .offset((page - 1) * page_size) \
+                       .limit(page_size) \
+                       .all()
+        
+        # 获取每个大纲的段落数量
+        outline_data = []
+        for outline in outlines:
+            # 获取段落数量
+            paragraph_count = db.query(SubParagraph).filter(
+                SubParagraph.outline_id == outline.id
+            ).count()
+            
+            # 获取最后更新时间
+            last_updated = db.query(SubParagraph).filter(
+                SubParagraph.outline_id == outline.id
+            ).order_by(desc(SubParagraph.updated_at)).first()
+            
+            outline_data.append({
+                "id": outline.id,
+                "title": outline.title,
+                "paragraph_count": paragraph_count,
+                "created_at": outline.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": last_updated.updated_at.strftime("%Y-%m-%d %H:%M:%S") if last_updated else outline.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "reference_status": outline.reference_status
+            })
+        
+        return APIResponse.success(message="获取大纲列表成功", data={
+            "outlines": outline_data,
+            "total": total,
+            "page": page,
+            "page_size": page_size
+        })
+        
+    except Exception as e:
+        logger.error(f"获取大纲列表失败: {str(e)}")
+        return APIResponse.error(message=f"获取大纲列表失败: {str(e)}")
