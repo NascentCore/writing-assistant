@@ -3,6 +3,29 @@ description:
 globs: 
 alwaysApply: true
 ---
+# 项目开发规范
+## 1. 组件目录结构
+- 创建组件时，除非明确要求为「全局组件」，否则一律放置于当前页面目录下的 components 文件夹中（如该文件夹不存在，应先创建）。
+- 禁止将页面组件放置于项目根目录的 components 文件夹中，以避免全局组件目录混乱。
 
-- The current project is built with umi Max, so when it comes to styles, the new styles should follow the cssModule specification, do not directly use the simple className, the existing content can continue to remain the original way
+## 2. TypeScript 类型文件管理
+- 在 .tsx 文件中避免直接声明类型。
+- pages 目录下的每个页面，需配备独立的 type.ts 文件，统一维护该页面的类型定义。若未存在，应立即创建。
+- components 目录下的每个组件，同理应维护对应的 type.ts 文件，集中存放该组件的类型签名。确保类型声明清晰、隔离、可维护。
 
+## 3. 文件大小与代码拆分
+- 任意单文件代码行数不得超过 500 行。
+- 需主动封装与拆分逻辑，遵循「单一职责」原则：
+  - 通用逻辑提取为 hook，并统一存放于当前目录下的 hook.ts 文件（如不存在，需创建）。
+  - 可复用的 UI 片段、功能块应拆分为独立组件，放入 components 文件夹。
+  - 禁止将所有逻辑堆砌于单一文件，确保代码结构清晰，维护成本可控。
+
+## 4. 有关于注释代码的问题
+- 禁止删除文件中的注释代码，因为这些代码日志日后还有用
+
+## 5. 当前包管理工具用的是 pnpm
+
+## 6. 开发的时候要充分利用 antd v5 的组件，不要重复造轮子
+
+## 7. 所有表格都用 @ant-design/pro-components 中的 ProTable
+## 8.当前项目是基于 umi Max 构建的，所以在涉及样式方面，新样式应遵循 cssModule 规范，请勿直接使用简单的 className，现有内容可继续保持原样。
