@@ -1643,17 +1643,23 @@ async def parse_outline(
 async def get_chat_sessions(
     page: int = 1,
     page_size: int = 10,
+    global_search: Optional[bool] = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
+        if global_search and current_user.admin != UserRole.SYS_ADMIN:
+            return APIResponse.error(message="无权查询全局会话")
+
         # 构建基础查询
         query = db.query(ChatSession).filter(
-            ChatSession.user_id == current_user.user_id,
             ChatSession.session_type == ChatSessionType.WRITING,
             ChatSession.is_deleted == False
         )
         
+        if not global_search:
+            query = query.filter(ChatSession.user_id == current_user.user_id)
+
         # 获取总记录数
         total = query.count()
         pages = (total + page_size - 1) // page_size
@@ -1683,6 +1689,9 @@ async def get_chat_sessions(
                 )\
                 .order_by(ChatMessage.id)\
                 .first()
+
+            # 查询用户信息
+            user = db.query(User).filter(User.user_id == session.user_id).first()
             
             # 查询未完成的任务
             unfinished_tasks = db.query(Task).filter(
@@ -1700,6 +1709,8 @@ async def get_chat_sessions(
                 "last_message_time": last_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if last_message else None,
                 "first_message": first_message.content if first_message else None,
                 "first_message_time": first_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if first_message else None,
+                "user_id": session.user_id,
+                "username": user.username if user else None,
                 "created_at": session.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "updated_at": session.updated_at.strftime("%Y-%m-%d %H:%M:%S") if session.updated_at else None,
                 "unfinished_task_ids": unfinished_task_ids
