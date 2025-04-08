@@ -191,7 +191,22 @@ const Home: React.FC = () => {
           <p className={styles.subtitle}>
             请告诉我你的具体需求，让我来帮你完成吧~
           </p>
-          <Alert message="最佳实践" type="info" />
+          <Alert
+            message={
+              <div style={{ textAlign: 'left' }}>
+                <div>
+                  1.字数5万字以下，提示词指定字数，不指定大纲层级（默认2级大纲）
+                </div>
+                <div>2.字数5-15万，提示词指定字数，指定3级大纲</div>
+                <div>3.字数15-25万，提示词指定字数，指定4级大纲</div>
+                <div>4.字数25万以上，提示词指定字数，指定5级大纲</div>
+                <div>
+                  5.不分步骤的长文写作也可以指定字数和大纲层级，但不太适合要求10万字以上的场景
+                </div>
+              </div>
+            }
+            type="info"
+          />
         </div>
         <Spin spinning={loading} tip="加载模板中...">
           <div className={styles.cardGrid}>
