@@ -294,14 +294,16 @@ const FilePreview: React.FC<FilePreviewProps> = ({
       setPageInputValue(newPage.toString());
 
       // 滚动到指定页面
-      if (pdfContainerRef.current) {
-        const pageElement = pdfContainerRef.current.querySelector(
-          `[data-page-number="${newPage}"]`,
-        );
-        if (pageElement) {
-          pageElement.scrollIntoView({ behavior: 'smooth' });
+      setTimeout(() => {
+        if (pdfContainerRef.current) {
+          const pageElement = pdfContainerRef.current.querySelector(
+            `[data-page-number="${newPage}"]`,
+          );
+          if (pageElement) {
+            pageElement.scrollIntoView({ behavior: 'smooth' });
+          }
         }
-      }
+      }, 50);
     }
   };
 
@@ -544,6 +546,15 @@ const FilePreview: React.FC<FilePreviewProps> = ({
                     width={windowWidth > 1400 ? 1100 : windowWidth - 300}
                     renderTextLayer={true}
                     renderAnnotationLayer={true}
+                    inputRef={(ref) => {
+                      if (ref) {
+                        // 手动添加页码属性，确保可以被查询到
+                        ref.setAttribute(
+                          'data-page-number',
+                          (index + 1).toString(),
+                        );
+                      }
+                    }}
                   />
                 ))}
               </Document>
