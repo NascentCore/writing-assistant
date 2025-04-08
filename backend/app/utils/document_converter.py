@@ -50,11 +50,13 @@ def add_numbering_to_headers(html_text):
     h3_counters = {}  # 每个二级标题下的三级标题计数器
     h4_counters = {}  # 每个三级标题下的四级标题计数器
     h5_counters = {}  # 每个四级标题下的五级标题计数器
+    h6_counters = {}  # 每个五级标题下的六级标题计数器
     
     # 当前标题的父标题ID
     current_h2_id = None
     current_h3_id = None
     current_h4_id = None
+    current_h5_id = None
     
     # 为每个标题生成编号
     for i, (tag, level, text) in enumerate(all_headers):
@@ -124,9 +126,37 @@ def add_numbering_to_headers(html_text):
                 h5_counters[current_h4_id] = 0
             
             h5_counters[current_h4_id] += 1
+            current_h5_id = f"{current_h4_id}.{h5_counters[current_h4_id]}"
+            # 重置六级标题计数器
+            h6_counters[current_h5_id] = 0
             
             # 生成编号
             numbering = f'{current_h4_id}.{h5_counters[current_h4_id]}'
+            tag.clear()
+            tag.append(f"{numbering} {text}")
+            
+        elif level == 6:
+            # 六级标题：1.1.1.1.1, 1.1.1.1.2...
+            if current_h5_id is None:
+                if current_h4_id is None:
+                    if current_h3_id is None:
+                        if current_h2_id is None:
+                            current_h2_id = 1
+                            h3_counters[current_h2_id] = 0
+                        h3_counters[current_h2_id] += 1
+                        current_h3_id = f"{current_h2_id}.{h3_counters[current_h2_id]}"
+                        h4_counters[current_h3_id] = 0
+                    h4_counters[current_h3_id] += 1
+                    current_h4_id = f"{current_h3_id}.{h4_counters[current_h3_id]}"
+                    h5_counters[current_h4_id] = 0
+                h5_counters[current_h4_id] += 1
+                current_h5_id = f"{current_h4_id}.{h5_counters[current_h4_id]}"
+                h6_counters[current_h5_id] = 0
+            
+            h6_counters[current_h5_id] += 1
+            
+            # 生成编号
+            numbering = f'{current_h5_id}.{h6_counters[current_h5_id]}'
             tag.clear()
             tag.append(f"{numbering} {text}")
     
@@ -155,6 +185,31 @@ def fix_document_numbering(doc):
         # 获取标题文本
         text = para.text.strip()
         
+        # 检查是否是形如"1.1.1.1.1"的五级标题 (五个数字)
+        five_level_match = re.match(r'^(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)[\s\.]*(.*)$', text)
+        if five_level_match:
+            section, subsection, subsubsection, subsubsubsection, subsubsubsubsection, title_text = five_level_match.groups()
+            
+            # 清除段落内容
+            para.clear()
+            
+            # 添加标题文本
+            run = para.add_run(f"{section}.{subsection}.{subsubsection}.{subsubsubsection}.{subsubsubsubsection} {title_text}")
+            
+            # 设置字体
+            font = run.font
+            font.size = Pt(11)
+            run.bold = True
+            
+            # 设置对齐方式
+            para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+            
+            # 使用五级标题样式
+            para.style = 'Heading 5'
+            
+            fixed_count += 1
+            continue
+
         # 检查是否是形如"1.1.1.1"的四级标题 (四个数字)
         four_level_match = re.match(r'^(\d+)\.(\d+)\.(\d+)\.(\d+)[\s\.]*(.*)$', text)
         if four_level_match:
