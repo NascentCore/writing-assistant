@@ -26,37 +26,6 @@ import { FilePreviewProps, SupportedFileType } from './type';
 // 配置 PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-// 检查 docx-preview 是否正确导入
-console.log('docx-preview 可用方法:', Object.keys(docx || {}));
-
-// 添加一个测试文件响应的函数
-async function testFileResponse(url: string): Promise<void> {
-  try {
-    console.log('正在测试文件响应:', url);
-    const response = await fetch(url, { method: 'HEAD' });
-    console.log('文件响应状态:', response.status, response.statusText);
-    console.log('响应头:', [...response.headers.entries()]);
-
-    // 如果有跨域问题，尝试普通的 GET 请求
-    if (!response.ok) {
-      const fullResponse = await fetch(url);
-      console.log('完整 GET 响应状态:', fullResponse.status);
-      console.log('内容类型:', fullResponse.headers.get('content-type'));
-      console.log('响应大小可用:', fullResponse.headers.has('content-length'));
-
-      if (fullResponse.headers.has('content-length')) {
-        console.log(
-          '响应大小:',
-          fullResponse.headers.get('content-length'),
-          'bytes',
-        );
-      }
-    }
-  } catch (error) {
-    console.error('测试文件响应时出错:', error);
-  }
-}
-
 const FilePreview: React.FC<FilePreviewProps> = ({
   open,
   onCancel,
@@ -84,13 +53,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({
       setPageInputValue('1');
       fetchFile()
         .then((data) => {
-          console.log('获取到文件 URL:', data ? '成功' : '失败');
           setFileData(data);
-
-          // 如果有 URL，先测试一下
-          if (data) {
-            testFileResponse(data);
-          }
 
           setLoading(false);
         })
@@ -125,8 +88,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({
     if (!fileName) return 'other';
     const extension = fileName.split('.').pop()?.toLowerCase() || '';
 
-    console.log('文件名:', fileName, '扩展名:', extension);
-
     if (extension === 'pdf') return 'pdf';
     if (extension === 'docx') return 'docx';
     if (extension === 'doc') return 'doc';
@@ -141,38 +102,26 @@ const FilePreview: React.FC<FilePreviewProps> = ({
       fileData &&
       docxContainerRef.current
     ) {
-      console.log('开始处理 DOCX 文件预览，文件类型:', fileType);
-      console.log('文件 URL:', fileData);
-      console.log('容器引用存在:', !!docxContainerRef.current);
-
       // 清空容器
       if (docxContainerRef.current) {
         docxContainerRef.current.innerHTML = '';
-        console.log('已清空容器内容');
       }
 
       try {
         // 获取 Blob 对象
         fetch(fileData)
           .then((res) => {
-            console.log('Fetch 响应:', res.status, res.statusText);
-            console.log('响应头:', [...res.headers.entries()]);
-
             if (!res.ok) {
               throw new Error(`HTTP 错误: ${res.status}`);
             }
             return res.blob();
           })
           .then((blob) => {
-            console.log('获取到 Blob 数据:', blob.type, blob.size, 'bytes');
-
             if (!blob || blob.size === 0) {
               throw new Error('获取到的文件数据为空');
             }
 
             if (docxContainerRef.current) {
-              console.log('准备渲染 DOCX 文件到容器中');
-
               // 检查是否为有效的 docx 文件类型
               if (
                 blob.type &&
@@ -181,20 +130,19 @@ const FilePreview: React.FC<FilePreviewProps> = ({
                 ) &&
                 !blob.type.includes('application/octet-stream')
               ) {
-                console.warn('文件类型可能不是 DOCX:', blob.type);
               }
 
               const options = {
                 inWrapper: true,
-                ignoreWidth: true,
+                ignoreWidth: false,
                 ignoreHeight: false,
                 ignoreFonts: false,
                 debug: true,
                 experimental: false,
                 className: 'docx',
                 useBase64URL: true,
-                maxWidth: 1200,
-                breakPages: false,
+                maxWidth: undefined,
+                breakPages: true,
                 renderHeaders: true,
                 renderFooters: true,
                 renderFootnotes: true,
@@ -205,10 +153,14 @@ const FilePreview: React.FC<FilePreviewProps> = ({
                 backgroundStyle: {
                   background: 'white',
                 },
+                pageStyle: {
+                  margin: '20px auto',
+                  boxSizing: 'border-box',
+                  boxShadow: 'none',
+                  padding: '0',
+                  border: 'none',
+                },
               };
-
-              console.log('使用的渲染选项:', options);
-              console.log('docx 渲染方法:', typeof docx.renderAsync);
 
               // 渲染 docx
               if (typeof docx.renderAsync !== 'function') {
@@ -223,7 +175,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({
                   options,
                 )
                 .then(() => {
-                  console.log('DOCX: 渲染完成');
                   setError(null);
                 })
                 .catch((error) => {
@@ -321,7 +272,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({
   // PDF 加载完成的回调
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
-    console.log('PDF 加载成功，页数:', numPages);
   };
 
   // 添加窗口大小监听器
@@ -387,6 +337,11 @@ const FilePreview: React.FC<FilePreviewProps> = ({
           .requestFullscreen()
           .then(() => {
             setIsFullscreen(true);
+            // 确保全屏元素可滚动
+            if (document.fullscreenElement) {
+              (document.fullscreenElement as HTMLElement).style.overflow =
+                'auto';
+            }
           })
           .catch((err) => {
             console.error('全屏模式错误:', err);
@@ -450,6 +405,11 @@ const FilePreview: React.FC<FilePreviewProps> = ({
           .requestFullscreen()
           .then(() => {
             setIsFullscreen(true);
+            // 确保全屏元素可滚动
+            if (document.fullscreenElement) {
+              (document.fullscreenElement as HTMLElement).style.overflow =
+                'auto';
+            }
           })
           .catch((err) => {
             console.error('DOCX全屏模式错误:', err);
@@ -471,8 +431,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({
 
   // 根据文件类型渲染不同的预览组件
   const renderPreview = () => {
-    console.log('渲染预览组件，文件类型:', fileType);
-
     if (loading) {
       return (
         <div style={{ textAlign: 'center', marginTop: '20px' }}>
@@ -482,20 +440,23 @@ const FilePreview: React.FC<FilePreviewProps> = ({
     }
 
     if (!fileData) {
-      console.log('没有文件数据可用');
       return <div>没有文件数据</div>;
     }
 
     switch (fileType) {
       case 'pdf':
-        console.log('渲染 PDF 预览');
         return (
-          <div>
+          <div style={{ position: 'relative' }}>
             <div
               style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 10,
+                background: '#fff',
+                padding: '10px 0',
+                borderBottom: '1px solid #f0f0f0',
                 display: 'flex',
                 justifyContent: 'center',
-                margin: '10px 0',
               }}
             >
               <Space>
@@ -562,6 +523,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'flex-start',
+                overflow: 'auto',
+                height: isFullscreen ? '100vh' : 'auto',
               }}
             >
               <Document
@@ -589,14 +552,18 @@ const FilePreview: React.FC<FilePreviewProps> = ({
         );
       case 'docx':
       case 'doc':
-        console.log('渲染 DOCX/DOC 预览');
         return (
-          <div style={{ backgroundColor: 'white', padding: '10px' }}>
+          <div style={{ backgroundColor: 'white' }}>
             <div
               style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 10,
+                background: '#fff',
+                padding: '10px 0',
+                borderBottom: '1px solid #f0f0f0',
                 display: 'flex',
                 justifyContent: 'center',
-                margin: '10px 0',
               }}
             >
               <Space>
@@ -632,8 +599,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({
             <div
               ref={docxContainerRef}
               style={{
-                minWidth: '100%',
-                width: 'auto',
+                width: '100%',
                 padding: '20px',
                 minHeight: '300px',
                 background: '#fff',
@@ -641,6 +607,11 @@ const FilePreview: React.FC<FilePreviewProps> = ({
                 border: 'none',
                 borderRadius: '0',
                 boxShadow: 'none',
+                overflow: 'auto',
+                height: isFullscreen ? 'calc(100vh - 50px)' : 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
               }}
             />
             {error && (
@@ -649,12 +620,11 @@ const FilePreview: React.FC<FilePreviewProps> = ({
           </div>
         );
       default:
-        console.log('不支持的文件类型');
         return <div>无法预览该文件格式，请下载后查看</div>;
     }
   };
 
-  // 添加自定义样式，修复 DOCX 背景问题和缩放效果，移除 box-shadow
+  // 添加自定义样式，优化 DOCX 文档显示效果
   useEffect(() => {
     // 添加全局样式来确保表格完整显示和背景颜色正确
     const styleElement = document.createElement('style');
@@ -671,14 +641,19 @@ const FilePreview: React.FC<FilePreviewProps> = ({
       .docx {
         background: white !important;
         transition: transform 0.3s ease;
-        transform-origin: top left;
+        transform-origin: top center;
         box-shadow: none !important;
+        margin: 0 auto !important;
       }
       .docx-wrapper {
         background: white !important;
         padding: 0 !important;
-        margin: 0 !important;
+        margin: 0 auto !important;
         box-shadow: none !important;
+        width: auto !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
       }
       .docx-wrapper::before,
       .docx-wrapper::after {
@@ -688,9 +663,17 @@ const FilePreview: React.FC<FilePreviewProps> = ({
       .docx-wrapper > div {
         background: white !important;
         box-shadow: none !important;
+        width: auto !important;
+        max-width: 100% !important;
+        margin: 0 auto !important;
       }
       .docx p, .docx div, .docx section, .docx * {
         box-shadow: none !important;
+      }
+      /* 保持原始大小的样式 */
+      .docx-wrapper > div > div {
+        width: auto !important;
+        margin: 0 auto !important;
       }
     `;
     document.head.appendChild(styleElement);

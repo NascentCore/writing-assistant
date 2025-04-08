@@ -5,6 +5,7 @@ import type { FileItem } from '@/types/common';
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
   CloudUploadOutlined,
+  LoadingOutlined,
   // PlusCircleOutlined,
   PaperClipOutlined,
   SwapOutlined,
@@ -762,7 +763,10 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                       display: 'block',
                                     }}
                                   >
-                                    处理中...
+                                    处理中
+                                    <LoadingOutlined
+                                      style={{ marginLeft: 8 }}
+                                    />
                                     {currentMessage.process !== undefined && (
                                       <div style={{ margin: '10px 0' }}>
                                         <div style={{ marginTop: 5 }}>
