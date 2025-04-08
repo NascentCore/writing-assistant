@@ -1,7 +1,7 @@
 import { fetchWithAuthNew } from '@/utils/fetch';
 import { FieldTimeOutlined } from '@ant-design/icons';
 import { history } from '@umijs/max';
-import { Button, Spin, message } from 'antd';
+import { Alert, Button, Spin, message } from 'antd';
 import React, { useEffect, useState } from 'react';
 import CustomerSender from './components/Sender';
 import styles from './index.less';
@@ -191,6 +191,7 @@ const Home: React.FC = () => {
           <p className={styles.subtitle}>
             请告诉我你的具体需求，让我来帮你完成吧~
           </p>
+          <Alert message="最佳实践" type="info" />
         </div>
         <Spin spinning={loading} tip="加载模板中...">
           <div className={styles.cardGrid}>
