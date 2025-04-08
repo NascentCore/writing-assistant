@@ -1644,6 +1644,7 @@ async def get_chat_sessions(
     page: int = 1,
     page_size: int = 10,
     global_search: Optional[bool] = False,
+    username: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1659,6 +1660,14 @@ async def get_chat_sessions(
         
         if not global_search:
             query = query.filter(ChatSession.user_id == current_user.user_id)
+
+        if username:
+            # 查询用户信息
+            users = db.query(User).filter(User.username.contains(username)).all()
+            if not users:
+                return APIResponse.error(message="用户不存在")
+            user_ids = [user.user_id for user in users]
+            query = query.filter(ChatSession.user_id.in_(user_ids))
 
         # 获取总记录数
         total = query.count()
