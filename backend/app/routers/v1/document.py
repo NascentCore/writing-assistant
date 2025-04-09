@@ -342,6 +342,7 @@ async def export_document_docx(
     doc_id: str,
     include_versions: bool = False,
     add_numbering: bool = True,
+    chinese_numbering: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -385,7 +386,8 @@ async def export_document_docx(
             title=document.title,
             author=current_user.username,
             versions=versions,
-            add_numbering=add_numbering
+            add_numbering=add_numbering,
+            chinese_numbering=chinese_numbering
         )
 
         # 设置文件名（处理可能的非法字符）
@@ -416,6 +418,7 @@ async def export_document_pdf(
     doc_id: str,
     include_versions: bool = False,
     add_numbering: bool = True,
+    chinese_numbering: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -459,7 +462,8 @@ async def export_document_pdf(
             title=document.title,
             author=current_user.username,
             versions=versions,
-            add_numbering=add_numbering
+            add_numbering=add_numbering,
+            chinese_numbering=chinese_numbering
         )
 
         # 设置文件名（处理可能的非法字符）
