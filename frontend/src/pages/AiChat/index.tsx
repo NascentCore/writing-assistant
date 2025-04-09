@@ -8,13 +8,24 @@ import {
   CloudUploadOutlined,
   CopyOutlined,
   PaperClipOutlined,
+  QuestionCircleOutlined,
   SwapOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import type { AttachmentsProps } from '@ant-design/x';
 import { Attachments, Bubble, Sender, XProvider, XStream } from '@ant-design/x';
 import { history, useLocation } from '@umijs/max';
-import { Badge, Button, Flex, GetRef, message, Select, Typography } from 'antd';
+import {
+  Badge,
+  Button,
+  Flex,
+  GetRef,
+  message,
+  Select,
+  Switch,
+  Tooltip,
+  Typography,
+} from 'antd';
 import React, {
   forwardRef,
   useCallback,
@@ -52,6 +63,7 @@ declare module './components/ChatSessionList' {
 
 const MODEL_STORAGE_KEY = 'ai_chat_model';
 const SESSION_STORAGE_KEY = 'current_chat_session_id';
+const ENHANCED_SEARCH_STORAGE_KEY = 'ai_chat_enhanced_search';
 
 // 定义可用的模型类型
 type ModelType = string;
@@ -100,6 +112,12 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
   const [selectedModel, setSelectedModel] = useState<ModelType>(() => {
     const savedModel = localStorage.getItem(MODEL_STORAGE_KEY);
     return savedModel || '';
+  });
+  const [enhancedSearch, setEnhancedSearch] = useState<boolean>(() => {
+    const savedEnhancedSearch = localStorage.getItem(
+      ENHANCED_SEARCH_STORAGE_KEY,
+    );
+    return savedEnhancedSearch === 'true';
   });
   const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
 
@@ -232,6 +250,12 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
     localStorage.setItem(MODEL_STORAGE_KEY, value);
   };
 
+  // 处理精确查找开关变更
+  const handleEnhancedSearchChange = (checked: boolean) => {
+    setEnhancedSearch(checked);
+    localStorage.setItem(ENHANCED_SEARCH_STORAGE_KEY, String(checked));
+  };
+
   // 处理会话列表刷新
   const handleRefreshSessions = useCallback((refreshFn: () => void) => {
     setRefreshSessionsList(() => refreshFn);
@@ -347,6 +371,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
       file_ids: string[];
       question: string;
       stream: boolean;
+      enhanced_search: boolean;
       session_id?: string;
       files?: {
         file_id: string;
@@ -366,6 +391,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
         .map((file) => file.file_id),
       question: value,
       stream: true,
+      enhanced_search: enhancedSearch,
       // 添加 messages 字段，包含当前消息和关联的文件信息
       files: selectedFiles.length > 0 ? selectedFiles : undefined,
     };
@@ -566,6 +592,27 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
                     </Select.Option>
                   ))}
                 </Select>
+                <div
+                  style={{
+                    fontSize: '16px',
+                    fontWeight: 500,
+                    marginTop: -7,
+                    marginLeft: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  精确查找
+                  <Tooltip title="如需借助 AI 对文件内容进行总结，可随时开启该功能。此举能够提升总结精度，不过相应地，会增加处理耗时">
+                    <QuestionCircleOutlined style={{ marginLeft: 4 }} />
+                  </Tooltip>
+                  ：
+                </div>
+                <Switch
+                  checked={enhancedSearch}
+                  onChange={handleEnhancedSearchChange}
+                  style={{ marginLeft: 8, marginTop: -7 }}
+                />
               </div>
             </Flex>
             <div className={styles.scrollContainer} ref={scrollContainerRef}>

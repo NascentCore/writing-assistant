@@ -29,3 +29,4 @@ alwaysApply: true
 
 ## 7. 所有表格都用 @ant-design/pro-components 中的 ProTable
 ## 8.当前项目是基于 umi Max 构建的，所以在涉及样式方面，新样式应遵循 cssModule 规范，请勿直接使用简单的 className，现有内容可继续保持原样。
+## 9.所有普通请求都要使用src/utils/fetch下的fetchWithAuthNew来发起，流式请求的话用该文件中的fetchWithAuthStream

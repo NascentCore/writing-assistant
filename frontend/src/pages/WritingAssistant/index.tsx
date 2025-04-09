@@ -68,7 +68,7 @@ const Home: React.FC = () => {
         try {
           // fetchWithAuthNew 直接返回 data 部分
           const data = await fetchWithAuthNew<TemplateResponse>(
-            '/api/v1/writing/templates?page=1&page_size=10',
+            '/api/v1/writing/templates?page=1&page_size=99999',
           );
           if (data && 'templates' in data) {
             setTemplates(data.templates);
@@ -194,6 +194,7 @@ const Home: React.FC = () => {
           <Alert
             message={
               <div style={{ textAlign: 'left' }}>
+                <h3>最佳实践：</h3>
                 <div>
                   1.字数5万字以下，提示词指定字数，不指定大纲层级（默认2级大纲）
                 </div>
