@@ -1472,8 +1472,9 @@ async def get_templates(
         # 计算总数
         total = query.count()
         
-        # 分页
-        templates = query.offset((page - 1) * page_size) \
+        # 按创建时间降序排序并分页
+        templates = query.order_by(WritingTemplate.created_at.desc()) \
+                        .offset((page - 1) * page_size) \
                         .limit(page_size) \
                         .all()
         
