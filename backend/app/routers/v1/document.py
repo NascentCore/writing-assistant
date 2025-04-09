@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -342,7 +342,7 @@ async def export_document_docx(
     doc_id: str,
     include_versions: bool = False,
     add_numbering: bool = True,
-    chinese_numbering: bool = False,
+    numbering_type: str = Query("number", enum=["number", "chinese"]),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -387,7 +387,7 @@ async def export_document_docx(
             author=current_user.username,
             versions=versions,
             add_numbering=add_numbering,
-            chinese_numbering=chinese_numbering
+            numbering_type=numbering_type
         )
 
         # 设置文件名（处理可能的非法字符）
@@ -418,7 +418,7 @@ async def export_document_pdf(
     doc_id: str,
     include_versions: bool = False,
     add_numbering: bool = True,
-    chinese_numbering: bool = False,
+    numbering_type: str = Query("number", enum=["number", "chinese"]),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -463,7 +463,7 @@ async def export_document_pdf(
             author=current_user.username,
             versions=versions,
             add_numbering=add_numbering,
-            chinese_numbering=chinese_numbering
+            numbering_type=numbering_type
         )
 
         # 设置文件名（处理可能的非法字符）
