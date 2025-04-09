@@ -11,7 +11,7 @@ from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.oxml import parse_xml, OxmlElement
 import re
 
-def add_numbering_to_headers(html_text):
+def add_numbering_to_headers(html_text, numbering_type):
     # 使用 BeautifulSoup 解析 HTML 内容
     soup = BeautifulSoup(html_text, 'html.parser')
     
@@ -21,7 +21,6 @@ def add_numbering_to_headers(html_text):
                        "二十一", "二十二", "二十三", "二十四", "二十五", "二十六", "二十七", "二十八", "二十九", "三十",
                        "三十一", "三十二", "三十三", "三十四", "三十五", "三十六", "三十七", "三十八", "三十九", "四十",
                        "四十一", "四十二", "四十三", "四十四", "四十五", "四十六", "四十七", "四十八", "四十九", "五十"]
-    
     # 获取中文数字，处理超出范围的情况
     def get_chinese_number(index):
         if index < len(chinese_numbers):
@@ -71,9 +70,12 @@ def add_numbering_to_headers(html_text):
             h3_counters[current_h2_id] = 0
             
             # 生成编号
-            numbering = f'{get_chinese_number(h2_counter-1)}、'
+            if numbering_type == "chinese":
+                numbering = f'第{get_chinese_number(h2_counter-1)}章、'
+            else:
+                numbering = f'{h2_counter}'
             tag.clear()
-            tag.append(f"{numbering}{text}")
+            tag.append(f"{numbering} {text}")
         
         elif level == 3:
             # 三级标题：1.1, 1.2, 2.1...
@@ -87,7 +89,10 @@ def add_numbering_to_headers(html_text):
             h4_counters[current_h3_id] = 0
             
             # 生成编号
-            numbering = f'{current_h2_id}.{h3_counters[current_h2_id]}'
+            if numbering_type == "chinese":
+                numbering = f'第{get_chinese_number(h3_counters[current_h2_id]-1)}节、'
+            else:
+                numbering = f'{current_h2_id}.{h3_counters[current_h2_id]}'
             tag.clear()
             tag.append(f"{numbering} {text}")
         
@@ -107,7 +112,10 @@ def add_numbering_to_headers(html_text):
             h5_counters[current_h4_id] = 0
             
             # 生成编号
-            numbering = f'{current_h3_id}.{h4_counters[current_h3_id]}'
+            if numbering_type == "chinese":
+                numbering = f'第{get_chinese_number(h4_counters[current_h3_id]-1)}小节、'
+            else:
+                numbering = f'{current_h3_id}.{h4_counters[current_h3_id]}'
             tag.clear()
             tag.append(f"{numbering} {text}")
         
@@ -131,7 +139,10 @@ def add_numbering_to_headers(html_text):
             h6_counters[current_h5_id] = 0
             
             # 生成编号
-            numbering = f'{current_h4_id}.{h5_counters[current_h4_id]}'
+            if numbering_type == "chinese":
+                numbering = f'第{get_chinese_number(h5_counters[current_h4_id]-1)}项、'
+            else:
+                numbering = f'{current_h4_id}.{h5_counters[current_h4_id]}'
             tag.clear()
             tag.append(f"{numbering} {text}")
             
@@ -156,7 +167,10 @@ def add_numbering_to_headers(html_text):
             h6_counters[current_h5_id] += 1
             
             # 生成编号
-            numbering = f'{current_h5_id}.{h6_counters[current_h5_id]}'
+            if numbering_type == "chinese":
+                numbering = f'第{get_chinese_number(h6_counters[current_h5_id]-1)}小项、'
+            else:
+                numbering = f'{current_h5_id}.{h6_counters[current_h5_id]}'
             tag.clear()
             tag.append(f"{numbering} {text}")
     
@@ -547,7 +561,8 @@ def html_to_docx(
     title: str = "Document", 
     author: str = "System",
     versions: Optional[List[dict]] = None,
-    add_numbering: bool = True
+    add_numbering: bool = True,
+    numbering_type: str = "number",
 ) -> BytesIO:
     """
     将HTML内容转换为DOCX格式
@@ -596,7 +611,7 @@ def html_to_docx(
     
     # 根据add_numbering参数决定是否添加序号
     if add_numbering:
-        html_text_with_numbers = add_numbering_to_headers(preprocessed_html)
+        html_text_with_numbers = add_numbering_to_headers(preprocessed_html, numbering_type)
     else:
         html_text_with_numbers = preprocessed_html
     
@@ -894,7 +909,8 @@ def html_to_pdf(
     title: str = "Document", 
     author: str = "System",
     versions: Optional[List[dict]] = None,
-    add_numbering: bool = True
+    add_numbering: bool = True,
+    numbering_type: str = "number",
 ) -> BytesIO:
     """
     将HTML内容转换为PDF格式
@@ -963,7 +979,7 @@ def html_to_pdf(
         
         # 根据add_numbering参数决定是否添加序号
         if add_numbering:
-            html_text_with_numbers = add_numbering_to_headers(preprocessed_html)
+            html_text_with_numbers = add_numbering_to_headers(preprocessed_html, numbering_type)
         else:
             html_text_with_numbers = preprocessed_html
         
