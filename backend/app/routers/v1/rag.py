@@ -43,6 +43,7 @@ class ChatRequest(BaseModel):
     enhanced_search: Optional[bool] = Field(default=False, description="是否使用增强检索")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
+    at_file_ids: Optional[List[str]] = Field(default=[], description="@的文件ID列表")
     stream: Optional[bool] = Field(default=True, description="是否使用流式返回")
 
     class Config:
@@ -55,6 +56,7 @@ class ChatRequest(BaseModel):
                 "enhanced_search": False,
                 "file_ids": ["file-1234567890", "file-1234567891"],
                 "files": [],
+                "at_file_ids": ["file-1234567890", "file-1234567891"],
                 "stream": True
             }
         }
@@ -711,11 +713,22 @@ async def chat(
             rerank = True
             hybrid_search = True
 
+        at_kb_file_ids = []
+        if request.at_file_ids:
+            at_files = db.query(RagFile).filter(
+                RagFile.file_id.in_(request.at_file_ids),
+                RagFile.status == RagFileStatus.DONE,
+                RagFile.is_deleted == False
+            ).all()
+            for at_file in at_files:
+                at_kb_file_ids.append(at_file.kb_file_id)
+
         logger.info(json.dumps({
             "session_id": session_id,
             "message_id": question_message_id,
             "user_id": current_user.user_id,
             "kb_ids": list(kb_ids),
+            "at_file_ids": at_kb_file_ids,
             "question": request.question,
             "custom_prompt": custom_prompt,
             "history": history,
@@ -758,6 +771,7 @@ async def chat(
             top_p=settings.RAG_CHAT_TOP_P,
             top_k=settings.RAG_CHAT_TOP_K,
             temperature=settings.RAG_CHAT_TEMPERATURE,
+            file_ids=at_kb_file_ids if at_kb_file_ids else None
         )
 
         if streaming:
