@@ -239,6 +239,7 @@ class RagAPIAsync:
         top_p: float = 1.0,
         top_k: int = 30,
         temperature: float = 0.5,
+        file_ids: Optional[List[str]] = None,
         user_id: str = "zzp"
     ) -> Union[Dict[str, Any], AsyncIterator[Dict[str, Any]]]:
         """
@@ -264,6 +265,7 @@ class RagAPIAsync:
             top_p: 核采样参数
             top_k: 保留最高概率的k个token
             temperature: 温度参数
+            file_ids: 文件ID列表
             user_id: 用户ID
             
         Returns:
@@ -292,7 +294,8 @@ class RagAPIAsync:
             "chunk_size": chunk_size,
             "top_p": top_p,
             "top_k": top_k,
-            "temperature": temperature
+            "temperature": temperature,
+            "file_ids": file_ids
         }
     
         if streaming:
