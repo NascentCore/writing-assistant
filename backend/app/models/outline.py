@@ -196,6 +196,7 @@ class WritingTemplate(Base):
     template_type = Column(Enum(WritingTemplateType), default=WritingTemplateType.OTHER, comment="模板类型")
     variables = Column(JSON, nullable=True, comment="模板变量列表")
     default_outline_ids = Column(JSON, nullable=True, comment="默认大纲ID列表")
+    sort_order = Column(Integer, default=0, nullable=True, comment="排序顺序，值越小排序越靠前")
     
     # 使用UTC时间并简化时间戳创建方式
     created_at = Column(DateTime, default=datetime.now(timezone.utc), comment="创建时间")

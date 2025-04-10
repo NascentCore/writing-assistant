@@ -381,7 +381,8 @@ class OutlineGenerator:
         only_need_search_results: bool = False,
         context_msg: str = "",
         networking: bool = False,
-        rerank: bool = False
+        rerank: bool = False,
+        at_file_ids: Optional[List[str]] = None
     ) -> Optional[str]:
         """
         调用RAG API的通用方法
@@ -413,7 +414,8 @@ class OutlineGenerator:
                 api_key=self.api_key,
                 model=self.model,
                 networking=networking,
-                rerank=rerank
+                rerank=rerank,
+                file_ids=at_file_ids
             )
 
             # 记录完整的RAG响应
@@ -485,7 +487,7 @@ class OutlineGenerator:
         
         return cleaned.strip()
 
-    def _get_rag_context(self, question: str, user_id: Optional[str], kb_ids: Optional[List[str]], context_msg: str = "", networking: bool = False, rerank: bool = False) -> str:
+    def _get_rag_context(self, question: str, user_id: Optional[str], kb_ids: Optional[List[str]], context_msg: str = "", networking: bool = False, rerank: bool = False, at_file_ids: Optional[List[str]] = None) -> str:
         """
         获取RAG上下文的通用方法
         
@@ -513,7 +515,8 @@ class OutlineGenerator:
                 user_id=user_id,
                 context_msg=context_msg,
                 networking=networking,
-                rerank=rerank
+                rerank=rerank,
+                at_file_ids=at_file_ids
             )
             
             if rag_response:
@@ -529,7 +532,7 @@ class OutlineGenerator:
         
         return rag_context
 
-    def generate_outline(self, prompt: str, file_contents: List[str] = None, user_id: str = None, kb_ids: List[str] = None, task_id: Optional[str] = None, db_session = None) -> Dict[str, Any]:
+    def generate_outline(self, prompt: str, file_contents: List[str] = None, user_id: str = None, kb_ids: List[str] = None, task_id: Optional[str] = None, db_session = None, at_file_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         生成结构化大纲
         
@@ -2149,7 +2152,7 @@ class OutlineGenerator:
             logger.error(f"生成文章标题时出错: {str(e)}")
             return outline_title
 
-    def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, user_prompt: str = "", doc_id: str = None) -> Dict[str, Any]:
+    def generate_full_content(self, outline_id: str, db_session, user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, user_prompt: str = "", doc_id: str = None, at_file_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         生成完整的文章内容
         
@@ -2328,7 +2331,8 @@ class OutlineGenerator:
                         question=question,
                         user_id=user_id,
                         kb_ids=kb_ids,
-                        context_msg=f"查询问题 {i+1}: {question}"
+                        context_msg=f"查询问题 {i+1}: {question}",
+                        at_file_ids=at_file_ids
                     )
                     
                     # 如果查询结果不为空，添加到组合上下文中
@@ -2352,7 +2356,8 @@ class OutlineGenerator:
                         question=f"生成关于{outline.title}的文章",
                         user_id=user_id,
                         kb_ids=kb_ids,
-                        context_msg=user_prompt
+                        context_msg=user_prompt,
+                        at_file_ids=at_file_ids
                     )
                     update_task_progress(task_id, db_session, 27, "默认RAG查询完成", f"获取上下文长度: {len(rag_context)} 字符")
 
@@ -2382,7 +2387,8 @@ class OutlineGenerator:
                     question=f"生成关于{outline.title}的文章",
                     user_id=user_id,
                     kb_ids=kb_ids,
-                    context_msg=user_prompt
+                    context_msg=user_prompt,
+                    at_file_ids=at_file_ids
                 )
                 update_task_progress(task_id, db_session, 32, "使用替代方式完成RAG查询", f"获取上下文长度: {len(rag_context)} 字符")
             
@@ -3393,7 +3399,7 @@ class OutlineGenerator:
             # 如果优化失败，返回原始内容
             return final_content
 
-    def generate_content_directly(self, prompt: str, file_contents: List[str], user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, doc_id: str = None) -> Dict[str, Any]:
+    def generate_content_directly(self, prompt: str, file_contents: List[str], user_id: Optional[str] = None, kb_ids: Optional[List[str]] = None, doc_id: str = None, at_file_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         直接生成文章内容，不需要先生成大纲
         
@@ -3496,7 +3502,8 @@ class OutlineGenerator:
                         question=question,
                         user_id=user_id,
                         kb_ids=kb_ids,
-                        context_msg=f"查询问题 {i+1}: {question}"
+                        context_msg=f"查询问题 {i+1}: {question}",
+                        at_file_ids=at_file_ids
                     )
                     
                     # 如果查询结果不为空，添加到组合上下文中
@@ -3519,7 +3526,8 @@ class OutlineGenerator:
                     rag_context = self._get_rag_context(
                         question=f"生成关于{prompt}的文章",
                         user_id=user_id,
-                        kb_ids=kb_ids
+                        kb_ids=kb_ids,
+                        at_file_ids=at_file_ids
                     )
                     update_task_progress(task_id, db_session, 27, "默认RAG查询完成", f"获取上下文长度: {len(rag_context)} 字符")
 
@@ -3548,7 +3556,8 @@ class OutlineGenerator:
                 rag_context = self._get_rag_context(
                     question=f"生成关于{prompt}的文章",
                     user_id=user_id,
-                    kb_ids=kb_ids
+                    kb_ids=kb_ids,
+                    at_file_ids=at_file_ids
                 )
                 update_task_progress(task_id, db_session, 32, "使用替代方式完成RAG查询", f"获取上下文长度: {len(rag_context)} 字符")
             
