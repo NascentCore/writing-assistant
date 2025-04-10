@@ -58,6 +58,7 @@ class ChatRequest(BaseModel):
                 "file_ids": ["file-1234567890", "file-1234567891"],
                 "files": [],
                 "at_file_ids": ["file-1234567890", "file-1234567891"],
+                "atfiles": [],
                 "stream": True
             }
         }
