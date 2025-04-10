@@ -18,7 +18,6 @@ from datetime import datetime, timedelta
 from app.schemas.response import APIResponse, PaginationData
 from app.database import get_db
 from app.services import OutlineGenerator
-from app.models.upload_file import UploadFile
 from app.models.outline import (
     Outline,
     ReferenceStatus, 
@@ -29,17 +28,16 @@ from app.models.outline import (
     Reference,
     WebLink,
     ReferenceType as ModelReferenceType,
-    generate_uuid
 )
 from app.models.chat import ChatSession, ChatMessage, ChatSessionType, ContentType
-from app.config import Settings, settings
+from app.config import settings
 from app.parser import DocxParser, MarkdownParser
 from app.auth import get_current_user
 from app.models.user import User, UserRole
-from app.utils.outline import build_paragraph_key, build_paragraph_response
+from app.utils.outline import  build_paragraph_response
 from app.models.task import Task, TaskStatus, TaskType
-from app.models.document import Document, DocumentVersion
-from app.models.rag import RagFile, RagKnowledgeBase, RagKnowledgeBaseType
+from app.models.document import Document
+from app.models.rag import RagFile, RagFileStatus, RagKnowledgeBase, RagKnowledgeBaseType
 from app.models.department import UserDepartment
 from app.models.system_config import SystemConfig
 
@@ -79,7 +77,10 @@ class GenerateOutlineRequest(BaseModel):
     outline_id: Optional[str] = Field(None, description="大纲ID，如果提供则直接返回对应大纲")
     prompt: Optional[str] = Field(None, description="写作提示")
     file_ids: Optional[List[str]] = Field(None, description="文件ID列表")
+    at_file_ids: Optional[List[str]] = Field(default=[], description="@的文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
+    at_file_ids: Optional[List[str]] = Field(default=[], description="@的文件ID列表")
+    atfiles: Optional[List[Dict[str, Any]]] = Field(default=[], description="@的文件内容")
     model_name: Optional[str] = Field(None, description="模型")
     web_search: Optional[bool] = Field(False, description="是否进行网页搜索")
 
@@ -111,7 +112,7 @@ class UpdateOutlineContent(BaseModel):
     children: Optional[List["UpdateOutlineContent"]] = Field([], description="子段落列表")
 
 # 解决循环引用问题
-UpdateOutlineContent.update_forward_refs()
+UpdateOutlineContent.model_rebuild()
 
 class UpdateOutlineMetaRequest(BaseModel):
     outline_id: str = Field(..., description="大纲ID")
@@ -300,12 +301,6 @@ async def generate_outline(
             
             return result
         
-        # 构建响应
-        response_data = {
-            "id": outline.id,
-            "title": outline.title,
-            "sub_paragraphs": build_paragraph_tree()
-        }
         
         # 创建聊天会话
         session_id = f"chat-{shortuuid.uuid()}"[:22]
@@ -323,7 +318,10 @@ async def generate_outline(
             role="user",
             content=request.prompt or f"获取大纲: {outline.title}",
             content_type=ContentType.TEXT,
-            meta=json.dumps({"files": request.files})
+            meta=json.dumps({
+                "files": request.files,
+                "atfiles": request.atfiles
+            })
         )
         db.add(user_message)
         
@@ -356,6 +354,15 @@ async def generate_outline(
         
         # 提交事务
         db.commit()
+
+        at_file_ids = []
+        if request.at_file_ids:
+            at_files = db.query(RagFile).filter(
+                RagFile.file_id.in_(request.at_file_ids),
+                RagFile.status == RagFileStatus.DONE,
+                RagFile.is_deleted == False
+            ).all()
+            at_file_ids = [at_file.kb_file_id for at_file in at_files]
         
         # 记录任务到运行集合中
         with task_lock:
@@ -369,7 +376,8 @@ async def generate_outline(
             session_id=session_id,
             assistant_message_id=assistant_message_id,
             readable_model_name=request.model_name,
-            web_search=request.web_search
+            web_search=request.web_search,
+            at_file_ids=at_file_ids
         )
         
         # 立即返回响应，不等待异步任务完成
@@ -394,7 +402,10 @@ async def generate_outline(
         role="user",
         content=request.prompt,
         content_type=ContentType.TEXT,
-        meta=json.dumps({"files": request.files})
+        meta=json.dumps({
+            "files": request.files,
+            "atfiles": request.atfiles
+        })
     )
     db.add(user_message)
 
@@ -421,7 +432,8 @@ async def generate_outline(
             "user_id": current_user.user_id,
             "prompt": request.prompt,
             "file_ids": request.file_ids or [],
-            "web_search": request.web_search
+            "web_search": request.web_search,
+            "at_file_ids": request.at_file_ids
         }
     )
     db.add(task)
@@ -441,7 +453,8 @@ async def generate_outline(
         session_id=session_id,
         assistant_message_id=assistant_message_id,
         readable_model_name=request.model_name,
-        web_search=request.web_search
+        web_search=request.web_search,
+        at_file_ids=at_file_ids
     )
     
     # 立即返回响应，不等待异步任务完成
@@ -451,7 +464,7 @@ async def generate_outline(
     })
 
 
-async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str], session_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None, web_search: bool = False):
+async def process_outline_generation(task_id: str, prompt: str, file_ids: List[str], session_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None, web_search: bool = False, at_file_ids: Optional[List[str]] = None):
     """
     异步处理大纲生成任务
     
@@ -512,10 +525,10 @@ async def process_outline_generation(task_id: str, prompt: str, file_ids: List[s
                         kb_ids.extend([kb.kb_id for kb in department_kbs])
             
             # 生成大纲
-            outline_data = await _generate_outline(outline_generator, prompt, file_contents, user_id, kb_ids, task_id, db)
+            outline_data = await _generate_outline(outline_generator, prompt, file_contents, user_id, kb_ids, task_id, db, at_file_ids)
             
             # 保存大纲并更新消息
-            outline_id = await _save_outline_and_update_message(
+            await _save_outline_and_update_message(
                 db, outline_generator, outline_data, user_id, task_id, 
                 session_id, assistant_message_id
             )
@@ -542,11 +555,12 @@ async def _generate_outline(
     user_id: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
     task_id: Optional[str] = None,
-    db_session = None
+    db_session = None,
+    at_file_ids: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """生成大纲"""
     logger.info("开始生成结构化大纲")
-    outline_data = outline_generator.generate_outline(prompt, file_contents, user_id, kb_ids, task_id, db_session)
+    outline_data = outline_generator.generate_outline(prompt, file_contents, user_id, kb_ids, task_id, db_session, at_file_ids)
     logger.info("结构化大纲生成完成")
     return outline_data
 
@@ -1033,6 +1047,8 @@ class GenerateFullContentRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="直接生成模式下的写作提示")
     file_ids: Optional[List[str]] = Field(None, description="直接生成模式下的参考文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="直接生成模式下的参考文件内容")
+    at_file_ids: Optional[List[str]] = Field(default=[], description="@的文件ID列表")
+    atfiles: Optional[List[Dict[str, Any]]] = Field(default=[], description="@的文件内容")
     model_name: Optional[str] = Field(None, description="模型")
     web_search: Optional[bool] = Field(False, description="是否进行网页搜索")
 
@@ -1119,7 +1135,10 @@ async def generate_content(
         role="user",
         content=message_content,
         content_type=ContentType.TEXT,
-        meta=json.dumps({"files": request.files}),
+        meta=json.dumps({
+            "files": request.files,
+            "atfiles": request.atfiles
+        }),
         outline_id=outline_id
     )
     db.add(chat_message)
@@ -1137,6 +1156,16 @@ async def generate_content(
         document_id=doc_id
     )
     db.add(assistant_message)
+
+    at_file_ids = []
+    if request.at_file_ids:
+        at_files = db.query(RagFile).filter(
+            RagFile.file_id.in_(request.at_file_ids),
+            RagFile.status == RagFileStatus.DONE,
+            RagFile.is_deleted == False
+        ).all()
+        for at_file in at_files:
+            at_file_ids.append(at_file.kb_file_id)
     
     # 创建任务记录，确保ID不超过22位
     task_id = f"task-{shortuuid.uuid()}"[:22]
@@ -1151,7 +1180,8 @@ async def generate_content(
             "prompt": request.prompt,
             "file_ids": request.file_ids or [],
             "doc_id": doc_id,
-            "web_search": request.web_search
+            "web_search": request.web_search,
+            "at_file_ids": request.at_file_ids
         }
     )
     db.add(task)
@@ -1172,7 +1202,8 @@ async def generate_content(
         assistant_message_id=assistant_message_id,
         readable_model_name=request.model_name,
         doc_id=doc_id,
-        web_search=request.web_search
+        web_search=request.web_search,
+        at_file_ids=at_file_ids
     )
     
     # 立即返回响应，不等待异步任务完成
@@ -1182,7 +1213,7 @@ async def generate_content(
     })
 
 
-async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None, doc_id: str = None, web_search: bool = False):
+async def process_content_generation(task_id: str, outline_id: Optional[str], prompt: Optional[str], file_ids: List[str], session_id: str, message_id: str, assistant_message_id: str, readable_model_name: Optional[str] = None, doc_id: str = None, web_search: bool = False, at_file_ids: Optional[List[str]] = None):
     """
     异步处理内容生成任务
     
@@ -1236,9 +1267,9 @@ async def process_content_generation(task_id: str, outline_id: Optional[str], pr
                 RagKnowledgeBase.is_deleted == False).all()
             if department_kbs:
                 kb_ids.extend([kb.kb_id for kb in department_kbs])
-            
+
             # 生成内容
-            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids, session_id, doc_id)
+            full_content = await _generate_content(outline_generator, outline_id, prompt, file_contents, db, user_id, kb_ids, session_id, doc_id, at_file_ids)
             
             # 保存文档并更新消息
             document_id = await _save_document_and_update_message(
@@ -1289,7 +1320,8 @@ async def _generate_content(
     user_id: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
     session_id: Optional[str] = None,
-    doc_id: Optional[str] = None
+    doc_id: Optional[str] = None,
+    at_file_ids: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """根据模式生成内容"""
     if outline_id:
@@ -1307,11 +1339,11 @@ async def _generate_content(
         user_prompt = first_user_message.content if first_user_message else ""
         logger.info(f"获取到用户第一条消息: {user_prompt}")
         
-        full_content = outline_generator.generate_full_content(outline_id, db, user_id, kb_ids, user_prompt, doc_id)
+        full_content = outline_generator.generate_full_content(outline_id, db, user_id, kb_ids, user_prompt, doc_id, at_file_ids)
     else:
         # 直接生成模式
         logger.info("开始直接生成全文")
-        full_content = outline_generator.generate_content_directly(prompt, file_contents, user_id, kb_ids, doc_id)
+        full_content = outline_generator.generate_content_directly(prompt, file_contents, user_id, kb_ids, doc_id, at_file_ids)
     
     logger.info("全文生成完成")
     return full_content
@@ -1424,6 +1456,7 @@ class TemplateBase(BaseModel):
     template_type: WritingTemplateType = Field(WritingTemplateType.OTHER, description="模板类型")
     variables: Optional[List[str]] = Field(None, description="模板变量列表")
     outline_ids: Optional[List[str]] = Field(None, description="大纲ID列表")
+    sort_order: Optional[int] = Field(0, description="排序顺序，值越小排序越靠前")
 
 class TemplateCreate(TemplateBase):
     pass
@@ -1472,8 +1505,8 @@ async def get_templates(
         # 计算总数
         total = query.count()
         
-        # 按创建时间降序排序并分页
-        templates = query.order_by(WritingTemplate.created_at.desc()) \
+        # 优先按sort_order字段排序，然后按创建时间降序排序
+        templates = query.order_by(WritingTemplate.sort_order, WritingTemplate.created_at.desc()) \
                         .offset((page - 1) * page_size) \
                         .limit(page_size) \
                         .all()
@@ -1502,6 +1535,7 @@ async def get_templates(
                     "background_url": template.background_url,
                     "template_type": template.template_type,
                     "variables": template.variables,
+                    "sort_order": template.sort_order,
                     "created_at": template.created_at.isoformat(),
                     "updated_at": template.updated_at.isoformat(),
                     "outlines": [outlines.get(str(outline_id), {"id": str(outline_id), "title": "未知大纲"}) 
@@ -1558,7 +1592,8 @@ async def create_template(
             background_url=template.background_url,
             template_type=template.template_type,
             variables=template.variables,
-            default_outline_ids=template.outline_ids
+            default_outline_ids=template.outline_ids,
+            sort_order=template.sort_order
         )
         
         # 保存到数据库
@@ -2511,6 +2546,7 @@ def refresh_writing_tasks_status():
                     file_ids = params.get("file_ids", [])
                     model_name = params.get("model_name")
                     web_search = params.get("web_search", False)
+                    at_file_ids = params.get("at_file_ids", [])
                     
                     # 在线程池中启动任务
                     logger.info(f"恢复大纲生成任务: {task_id}")
@@ -2521,7 +2557,8 @@ def refresh_writing_tasks_status():
                         session_id=session_id,
                         assistant_message_id=assistant_message_id,
                         readable_model_name=model_name,
-                        web_search=web_search
+                        web_search=web_search,
+                        at_file_ids=at_file_ids
                     )
                 
                 elif task_type == TaskType.GENERATE_CONTENT:
@@ -2532,6 +2569,7 @@ def refresh_writing_tasks_status():
                     doc_id = params.get("doc_id")
                     model_name = params.get("model_name")
                     web_search = params.get("web_search", False)
+                    at_file_ids = params.get("at_file_ids", [])
                     # 在线程池中启动任务
                     logger.info(f"恢复内容生成任务: {task_id}")
                     executor.submit(run_content_task,
@@ -2544,7 +2582,8 @@ def refresh_writing_tasks_status():
                         assistant_message_id=assistant_message_id,
                         readable_model_name=model_name,
                         doc_id=doc_id,
-                        web_search=web_search
+                        web_search=web_search,
+                        at_file_ids=at_file_ids
                     )
             
             except Exception as e:
@@ -2587,7 +2626,7 @@ def refresh_writing_tasks_status():
         db.close()
 
 # 用于启动大纲生成任务的函数
-def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id, readable_model_name=None, web_search=False):
+def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id, readable_model_name=None, web_search=False, at_file_ids=None):
     try:
         # 创建新的事件循环
         loop = asyncio.new_event_loop()
@@ -2601,7 +2640,8 @@ def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id
             session_id=session_id,
             assistant_message_id=assistant_message_id,
             readable_model_name=readable_model_name,
-            web_search=web_search
+            web_search=web_search,
+            at_file_ids=at_file_ids
         ))
         
         loop.close()
@@ -2612,7 +2652,7 @@ def run_outline_task(task_id, prompt, file_ids, session_id, assistant_message_id
                 running_tasks.remove(task_id)
 
 # 用于启动内容生成任务的函数
-def run_content_task(task_id, outline_id, prompt, file_ids, session_id, message_id, assistant_message_id, readable_model_name=None, doc_id=None, web_search=False):
+def run_content_task(task_id, outline_id, prompt, file_ids, session_id, message_id, assistant_message_id, readable_model_name=None, doc_id=None, web_search=False, at_file_ids=None):
     try:
         # 创建新的事件循环
         loop = asyncio.new_event_loop()
@@ -2629,7 +2669,8 @@ def run_content_task(task_id, outline_id, prompt, file_ids, session_id, message_
             assistant_message_id=assistant_message_id,
             readable_model_name=readable_model_name,
             doc_id=doc_id,
-            web_search=web_search
+            web_search=web_search,
+            at_file_ids=at_file_ids
         ))
         
         loop.close()
@@ -2725,6 +2766,7 @@ async def update_template(
         existing_template.template_type = template.template_type
         existing_template.variables = template.variables
         existing_template.default_outline_ids = template.outline_ids
+        existing_template.sort_order = template.sort_order
         
         # 保存更改
         db.commit()
@@ -2813,3 +2855,49 @@ async def get_outlines(
     except Exception as e:
         logger.error(f"获取大纲列表失败: {str(e)}")
         return APIResponse.error(message=f"获取大纲列表失败: {str(e)}")
+
+class UpdateTemplateSortOrderRequest(BaseModel):
+    template_ids: List[str] = Field(..., description="模板ID列表，按照期望的排序顺序排列")
+
+@router.post("/templates/sort")
+async def update_template_sort_order(
+    request: UpdateTemplateSortOrderRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    更新模板排序顺序
+    
+    Args:
+        template_ids: 模板ID列表，按照期望的排序顺序排列
+        
+    Returns:
+        success: 是否更新成功
+    """
+    try:
+        # 检查用户权限
+        if current_user.admin != UserRole.SYS_ADMIN:
+            return APIResponse.error(message="只有系统管理员才能更新模板排序")
+            
+        # 验证所有模板ID是否存在
+        template_ids = request.template_ids
+        templates = db.query(WritingTemplate).filter(WritingTemplate.id.in_(template_ids)).all()
+        if len(templates) != len(template_ids):
+            found_ids = {template.id for template in templates}
+            missing_ids = [template_id for template_id in template_ids if template_id not in found_ids]
+            return APIResponse.error(message=f"无法找到以下模板ID: {', '.join(missing_ids)}")
+        
+        # 更新模板排序
+        for index, template_id in enumerate(template_ids):
+            db.query(WritingTemplate).filter(WritingTemplate.id == template_id).update(
+                {"sort_order": index}, synchronize_session=False
+            )
+        
+        # 提交更改
+        db.commit()
+        
+        return APIResponse.success(message="更新模板排序成功")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"更新模板排序失败: {str(e)}")
+        return APIResponse.error(message=f"更新模板排序失败: {str(e)}")

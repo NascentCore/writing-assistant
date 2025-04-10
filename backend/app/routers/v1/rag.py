@@ -43,6 +43,8 @@ class ChatRequest(BaseModel):
     enhanced_search: Optional[bool] = Field(default=False, description="是否使用增强检索")
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
+    at_file_ids: Optional[List[str]] = Field(default=[], description="@的文件ID列表")
+    atfiles: Optional[List[Dict[str, Any]]] = Field(default=[], description="@的文件内容")
     stream: Optional[bool] = Field(default=True, description="是否使用流式返回")
 
     class Config:
@@ -55,6 +57,8 @@ class ChatRequest(BaseModel):
                 "enhanced_search": False,
                 "file_ids": ["file-1234567890", "file-1234567891"],
                 "files": [],
+                "at_file_ids": ["file-1234567890", "file-1234567891"],
+                "atfiles": [],
                 "stream": True
             }
         }
@@ -596,6 +600,7 @@ async def get_chat_session_detail(
                         "content_type": msg.content_type if hasattr(msg, 'content_type') else "text",
                         "outline_id": msg.outline_id if hasattr(msg, 'outline_id') else "",
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
+                        "atfiles": json.loads(msg.meta).get("atfiles", []) if msg.meta else [],
                         "model_name": json.loads(msg.meta).get("model_name", "") if msg.meta else "",
                         "reference_files": json.loads(msg.meta).get("reference_files", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
@@ -700,7 +705,10 @@ async def chat(
             session_id=session_id,
             role="user",
             content=request.question,
-            meta=json.dumps({"files": request.files})
+            meta=json.dumps({
+                "files": request.files,
+                "atfiles": request.atfiles
+            })
         )
         db.add(user_question)
         db.commit()
@@ -711,11 +719,22 @@ async def chat(
             rerank = True
             hybrid_search = True
 
+        at_kb_file_ids = []
+        if request.at_file_ids:
+            at_files = db.query(RagFile).filter(
+                RagFile.file_id.in_(request.at_file_ids),
+                RagFile.status == RagFileStatus.DONE,
+                RagFile.is_deleted == False
+            ).all()
+            for at_file in at_files:
+                at_kb_file_ids.append(at_file.kb_file_id)
+
         logger.info(json.dumps({
             "session_id": session_id,
             "message_id": question_message_id,
             "user_id": current_user.user_id,
             "kb_ids": list(kb_ids),
+            "at_file_ids": at_kb_file_ids,
             "question": request.question,
             "custom_prompt": custom_prompt,
             "history": history,
@@ -758,6 +777,7 @@ async def chat(
             top_p=settings.RAG_CHAT_TOP_P,
             top_k=settings.RAG_CHAT_TOP_K,
             temperature=settings.RAG_CHAT_TEMPERATURE,
+            file_ids=at_kb_file_ids if at_kb_file_ids else None
         )
 
         if streaming:

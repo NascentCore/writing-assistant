@@ -199,7 +199,8 @@ class RagAPI:
         top_p: float = 1.0,
         top_k: int = 30,
         temperature: float = 0.5,
-        user_id: str = "zzp"
+        user_id: str = "zzp",
+        file_ids: Optional[list[str]] = None
     ) -> Union[Dict[str, Any], Iterator[Dict[str, Any]]]:
         """
         知识库问答接口
@@ -250,7 +251,8 @@ class RagAPI:
             "chunk_size": chunk_size,
             "top_p": top_p,
             "top_k": top_k,
-            "temperature": temperature
+            "temperature": temperature,
+            "file_ids": file_ids
         }
         
         if streaming:
