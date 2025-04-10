@@ -48,6 +48,14 @@ interface SessionDetailResponse {
       status: number;
       created_at: string;
     }[];
+    atfiles?: {
+      file_id: string;
+      name: string;
+      size: number;
+      type: string;
+      status: number;
+      created_at: string;
+    }[];
   }[];
   page: number;
   page_size: number;
@@ -80,6 +88,14 @@ export interface ChatMessage {
   outline_id?: string;
   content_type?: 'outline' | 'document' | 'text';
   files?: {
+    file_id: string;
+    name: string;
+    size: number;
+    type: string;
+    status: number;
+    created_at: string;
+  }[];
+  atfiles?: {
     file_id: string;
     name: string;
     size: number;
@@ -299,6 +315,7 @@ const ChatSessionList: React.FC<ChatSessionListProps> = ({
                   ? ('user' as const)
                   : ('assistant' as const),
               files: msg.files,
+              atfiles: msg.atfiles, // 添加知识库文件
               status: msg.task_status,
               error: msg.task_result,
               document_id: msg.document_id,

@@ -1,7 +1,12 @@
 import type { ActionType } from '@ant-design/pro-components';
 import { message } from 'antd';
 import { useRef, useState } from 'react';
-import { createTemplate, deleteTemplate, updateTemplate } from './service';
+import {
+  createTemplate,
+  deleteTemplate,
+  sortTemplates,
+  updateTemplate,
+} from './service';
 import type { Template, TemplateFormValues } from './type';
 
 export const useTemplateManage = () => {
@@ -9,6 +14,7 @@ export const useTemplateManage = () => {
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [currentTemplate, setCurrentTemplate] = useState<Template>();
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [dataSource, setDataSource] = useState<Template[]>([]);
   const actionRef = useRef<ActionType>();
 
   // 打开创建模板弹窗
@@ -88,17 +94,43 @@ export const useTemplateManage = () => {
     }
   };
 
+  // 拖拽排序结束后处理
+  const handleDragSortEnd = async (
+    beforeIndex: number,
+    afterIndex: number,
+    newDataSource: Template[],
+  ) => {
+    // 立即更新本地数据源，使排序效果可见
+    setDataSource([...newDataSource]);
+
+    try {
+      // 获取排序后的所有模板ID
+      const template_ids = newDataSource.map((item) => item.id);
+      // 调用排序接口
+      await sortTemplates(template_ids);
+      message.success('排序成功');
+    } catch (error) {
+      console.error('排序失败：', error);
+      message.error('排序失败');
+      // 如果排序失败，刷新表格恢复原有顺序
+      actionRef.current?.reload();
+    }
+  };
+
   return {
     createModalOpen,
     updateModalOpen,
     currentTemplate,
     confirmLoading,
     actionRef,
+    dataSource,
+    setDataSource,
     handleAdd,
     handleEdit,
     handleCreateTemplate,
     handleUpdateTemplate,
     handleDeleteTemplate,
+    handleDragSortEnd,
     setCreateModalOpen,
     setUpdateModalOpen,
   };

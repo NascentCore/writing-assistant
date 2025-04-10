@@ -88,12 +88,14 @@ const createMessage = (
   content: string,
   isUser: boolean,
   files?: FileItem[],
+  atfiles?: FileItem[],
 ): ChatMessage => ({
   key: Date.now().toString(),
   placement: isUser ? 'end' : 'start',
   content,
   avatarType: isUser ? 'user' : 'assistant',
   files,
+  atfiles,
 });
 
 const DEFAULT_MESSAGE = createMessage('你好，我是你的AI助手', false);
@@ -463,6 +465,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
   const handleSubmit = async () => {
     if (!value.trim()) return;
 
+    // 创建用户消息，区分普通附件和知识库文件
     const userMessage = createMessage(value, true, selectedFiles);
     setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
 
@@ -509,6 +512,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
         status: number;
         created_at: string;
       }[];
+      at_file_ids?: string[];
+      atfiles?: FileItem[];
     } = {
       model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
       file_ids: selectedFiles
@@ -889,16 +894,43 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                 gap="small"
                                 style={{
                                   marginTop: 8,
-                                  background: '#f5f5f5',
                                   padding: 8,
                                   borderRadius: 4,
                                 }}
                               >
                                 <Typography.Text type="secondary">
-                                  关联文件：
+                                  附件：
                                 </Typography.Text>
                                 <Flex wrap="wrap" gap="small">
                                   {currentMessage.files.map((file) => (
+                                    <PreviewableFileCard
+                                      key={file.file_id}
+                                      file={file}
+                                      onPreview={showPreview}
+                                    />
+                                  ))}
+                                </Flex>
+                              </Flex>
+                            )}
+
+                          {/* 只在用户消息中渲染知识库文件 */}
+                          {isUser &&
+                            currentMessage?.atfiles &&
+                            currentMessage.atfiles.length > 0 && (
+                              <Flex
+                                vertical
+                                gap="small"
+                                style={{
+                                  marginTop: 8,
+                                  padding: 8,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Typography.Text type="secondary">
+                                  知识库文件：
+                                </Typography.Text>
+                                <Flex wrap="wrap" gap="small">
+                                  {currentMessage.atfiles.map((file) => (
                                     <PreviewableFileCard
                                       key={file.file_id}
                                       file={file}

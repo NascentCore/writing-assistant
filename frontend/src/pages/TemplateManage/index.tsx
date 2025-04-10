@@ -1,6 +1,6 @@
 import { PlusOutlined } from '@ant-design/icons';
 import type { ProColumns } from '@ant-design/pro-components';
-import { PageContainer, ProTable } from '@ant-design/pro-components';
+import { DragSortTable, PageContainer } from '@ant-design/pro-components';
 import { Button, Popconfirm, Space, Tag } from 'antd';
 import TemplateForm from './components/TemplateForm';
 import { useTemplateManage } from './hook';
@@ -14,16 +14,25 @@ const TemplateManage = () => {
     currentTemplate,
     confirmLoading,
     actionRef,
+    dataSource,
+    setDataSource,
     handleAdd,
     handleEdit,
     handleCreateTemplate,
     handleUpdateTemplate,
     handleDeleteTemplate,
+    handleDragSortEnd,
     setCreateModalOpen,
     setUpdateModalOpen,
   } = useTemplateManage();
 
   const columns: ProColumns<Template>[] = [
+    {
+      title: '排序',
+      dataIndex: 'sort',
+      width: 60,
+      className: 'drag-visible',
+    },
     {
       title: 'ID',
       dataIndex: 'id',
@@ -95,12 +104,13 @@ const TemplateManage = () => {
 
   return (
     <PageContainer>
-      <ProTable<Template>
+      <DragSortTable<Template>
         headerTitle="模板列表"
         actionRef={actionRef}
         options={false}
         rowKey="id"
         search={false}
+        dataSource={dataSource}
         toolBarRender={() => [
           <Button
             key="add"
@@ -112,10 +122,10 @@ const TemplateManage = () => {
           </Button>,
         ]}
         request={async (params) => {
-          const { current = 1, pageSize = 10 } = params;
+          const { current = 1 } = params;
           const result = await getTemplateList({
             page: current,
-            page_size: pageSize,
+            page_size: 999999999,
           });
 
           if (!result) {
@@ -130,12 +140,17 @@ const TemplateManage = () => {
           const templates = 'templates' in result ? result.templates : [];
           const total = 'total' in result ? result.total : 0;
 
+          // 更新本地数据源状态
+          setDataSource(templates);
+
           return {
             data: templates,
             success: true,
             total: total,
           };
         }}
+        dragSortKey="sort"
+        onDragSortEnd={handleDragSortEnd}
         columns={columns}
         pagination={{
           showQuickJumper: true,

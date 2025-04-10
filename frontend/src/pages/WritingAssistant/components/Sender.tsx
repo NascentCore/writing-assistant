@@ -1,14 +1,29 @@
+import FilePreview from '@/components/FilePreview';
+import KnowledgeSearch from '@/components/KnowledgeSearch';
 import { API_BASE_URL } from '@/config';
-import { fetchWithAuthNew } from '@/utils/fetch';
+import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
+  BookOutlined,
   CloudUploadOutlined,
+  DeleteOutlined,
+  EyeOutlined,
   FileOutlined,
   PaperClipOutlined,
+  PlusOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
 import { Attachments, XProvider, Sender as XSender } from '@ant-design/x';
 import { history } from '@umijs/max';
-import { Badge, Button, Flex, GetRef, Select, Switch, message } from 'antd';
+import {
+  Badge,
+  Button,
+  Flex,
+  GetRef,
+  List,
+  Select,
+  Switch,
+  message,
+} from 'antd';
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import styles from './Sender.module.less';
 
@@ -18,6 +33,17 @@ interface FileItem {
   size: number;
   type: string;
   status: number;
+  created_at: string;
+}
+
+interface KnowledgeFileItem {
+  kb_id: string;
+  file_id: string;
+  file_name: string;
+  file_size: number;
+  file_words: number;
+  status: string;
+  error_message: string;
   created_at: string;
 }
 
@@ -65,6 +91,18 @@ const Sender = forwardRef<any, SenderProps>(
       return saved ? saved === 'true' : true;
     });
 
+    // 添加知识库相关状态
+    const [kbSearchModalVisible, setKbSearchModalVisible] = useState(false);
+    const [kbFilesOpen, setKbFilesOpen] = useState(false);
+    const [knowledgeFiles, setKnowledgeFiles] = useState<KnowledgeFileItem[]>(
+      [],
+    );
+    const [previewVisible, setPreviewVisible] = useState(false);
+    const [previewFile, setPreviewFile] = useState<{
+      fileName: string;
+      fileId: string;
+    }>({ fileName: '', fileId: '' });
+
     const attachmentsRef = useRef<GetRef<typeof Attachments>>(null);
     const senderRef = useRef<GetRef<typeof XSender>>(null);
 
@@ -103,6 +141,113 @@ const Sender = forwardRef<any, SenderProps>(
     const handleOutlineChange = (value: number) => {
       setSelectedOutlineId(value);
     };
+
+    // 处理知识库文件选择
+    const handleKnowledgeFilesSelect = (files: KnowledgeFileItem[]) => {
+      // 直接使用选择的文件列表替换原有列表
+      setKnowledgeFiles(files);
+      setKbSearchModalVisible(false);
+      setKbFilesOpen(true);
+    };
+
+    // 删除知识库文件
+    const handleDeleteKnowledgeFile = (fileId: string) => {
+      setKnowledgeFiles((prevFiles) => {
+        const newFiles = prevFiles.filter((file) => file.file_id !== fileId);
+        // 如果删除后没有文件了，自动关闭面板
+        if (newFiles.length === 0) {
+          setKbFilesOpen(false);
+        }
+        return newFiles;
+      });
+    };
+
+    const formatFileSize = (size: number) => {
+      if (size < 1024) return `${size}B`;
+      if (size < 1024 * 1024) return `${(size / 1024).toFixed(2)}KB`;
+      return `${(size / (1024 * 1024)).toFixed(2)}MB`;
+    };
+
+    // 处理文件预览
+    const handleFilePreview = (fileName: string, fileId: string) => {
+      setPreviewFile({
+        fileName,
+        fileId,
+      });
+      setPreviewVisible(true);
+    };
+
+    // 添加知识库文件展示的headerNode
+    const kbFilesHeaderNode = (
+      <XSender.Header
+        title="知识库文件"
+        open={kbFilesOpen}
+        onOpenChange={setKbFilesOpen}
+        styles={{
+          content: {
+            padding: 0,
+          },
+        }}
+        forceRender
+      >
+        <div style={{ padding: '16px', maxHeight: 300, overflow: 'auto' }}>
+          <Flex vertical gap={12}>
+            <List
+              size="small"
+              bordered
+              dataSource={knowledgeFiles}
+              renderItem={(item) => (
+                <List.Item
+                  actions={[
+                    <Button
+                      key="preview"
+                      type="text"
+                      icon={<EyeOutlined style={{ color: '#1677ff' }} />}
+                      onClick={() =>
+                        handleFilePreview(item.file_name, item.file_id)
+                      }
+                    />,
+                    <Button
+                      key="delete"
+                      type="text"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleDeleteKnowledgeFile(item.file_id)}
+                    />,
+                  ]}
+                >
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        fontWeight: 500,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {item.file_name}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
+                      {formatFileSize(item.file_size)}
+                    </div>
+                  </div>
+                </List.Item>
+              )}
+              footer={
+                <Button
+                  type="dashed"
+                  block
+                  icon={<PlusOutlined />}
+                  onClick={() => setKbSearchModalVisible(true)}
+                >
+                  添加知识库文件
+                </Button>
+              }
+            />
+          </Flex>
+        </div>
+      </XSender.Header>
+    );
 
     const headerNode = (
       <XSender.Header
@@ -248,6 +393,8 @@ const Sender = forwardRef<any, SenderProps>(
           save_to_kb: boolean;
           web_search?: boolean;
           files?: FileItem[];
+          at_file_ids?: string[];
+          atfiles?: KnowledgeFileItem[];
         } = {
           model_name: selectedModel,
           file_ids: selectedFiles
@@ -273,6 +420,12 @@ const Sender = forwardRef<any, SenderProps>(
           requestData.outline_id = selectedOutlineId;
         }
 
+        // 添加知识库文件ID和文件信息
+        if (knowledgeFiles.length > 0) {
+          requestData.at_file_ids = knowledgeFiles.map((file) => file.file_id);
+          requestData.atfiles = knowledgeFiles;
+        }
+
         // 调用回调函数
         onMessageSent?.(value);
 
@@ -281,6 +434,9 @@ const Sender = forwardRef<any, SenderProps>(
         setOpen(false);
         setSelectedFiles([]);
         setItems([]);
+        // 清空知识库文件选择
+        setKbFilesOpen(false);
+        setKnowledgeFiles([]);
 
         // 发送请求
         const response = await fetchWithAuthNew(apiPath, {
@@ -419,15 +575,24 @@ const Sender = forwardRef<any, SenderProps>(
             </Flex>
             <XSender
               ref={senderRef}
-              header={headerNode}
+              header={[headerNode, kbFilesHeaderNode]}
               value={value}
               prefix={
-                <Badge dot={!open && selectedFiles.length > 0}>
-                  <Button
-                    icon={<PaperClipOutlined style={{ fontSize: 18 }} />}
-                    onClick={() => setOpen(!open)}
-                  />
-                </Badge>
+                <>
+                  <Badge dot={!open && selectedFiles.length > 0}>
+                    <Button
+                      icon={<PaperClipOutlined style={{ fontSize: 18 }} />}
+                      onClick={() => setOpen(!open)}
+                    />
+                  </Badge>
+                  <Badge dot={!kbFilesOpen && knowledgeFiles.length > 0}>
+                    <Button
+                      style={{ marginLeft: 8 }}
+                      icon={<BookOutlined style={{ fontSize: 18 }} />}
+                      onClick={() => setKbFilesOpen(!kbFilesOpen)}
+                    />
+                  </Badge>
+                </>
               }
               onChange={(nextVal: string) => {
                 setValue(nextVal);
@@ -440,6 +605,35 @@ const Sender = forwardRef<any, SenderProps>(
             />
           </Flex>
         </div>
+
+        {/* 知识库文件选择弹窗 */}
+        {kbSearchModalVisible && (
+          <KnowledgeSearch
+            isModal={true}
+            onSelect={handleKnowledgeFilesSelect}
+            onCancel={() => setKbSearchModalVisible(false)}
+            selectedFiles={knowledgeFiles}
+          />
+        )}
+
+        {/* 文件预览弹窗 */}
+        <FilePreview
+          open={previewVisible}
+          onCancel={() => setPreviewVisible(false)}
+          fileName={previewFile.fileName}
+          fetchFile={async () => {
+            const response = await fetchWithAuthStream(
+              `/api/v1/rag/files/${previewFile.fileId}/download`,
+              { method: 'GET' },
+              true,
+            );
+            if (!response) {
+              throw new Error('Failed to fetch file');
+            }
+            const blob = await response.blob();
+            return URL.createObjectURL(blob);
+          }}
+        />
       </XProvider>
     );
   },

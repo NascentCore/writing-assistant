@@ -46,6 +46,14 @@ interface SessionDetailResponse {
       status: number;
       created_at: string;
     }[];
+    atfiles?: {
+      file_id: string;
+      name: string;
+      size: number;
+      type: string;
+      status: number;
+      created_at: string;
+    }[];
     reference_files?: {
       file_id: string;
       file_name: string;
@@ -67,6 +75,14 @@ export interface ChatMessage {
   avatarType: 'user' | 'assistant';
   loading?: boolean;
   files?: {
+    file_id: string;
+    name: string;
+    size: number;
+    type: string;
+    status: number;
+    created_at: string;
+  }[];
+  atfiles?: {
     file_id: string;
     name: string;
     size: number;
@@ -291,6 +307,7 @@ const ChatSessionList = forwardRef<ChatSessionListRef, ChatSessionListProps>(
                     ? ('user' as const)
                     : ('assistant' as const),
                 files: msg.files,
+                atfiles: msg.atfiles,
                 reference_files: msg.reference_files,
               }));
 

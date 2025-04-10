@@ -1,13 +1,18 @@
 import FilePreview from '@/components/FilePreview';
+import KnowledgeSearch from '@/components/KnowledgeSearch';
 import PreviewableFileCard from '@/components/PreviewableFileCard';
 import ReferenceContentRenderer from '@/components/ReferenceContentRenderer';
 import useFilePreview from '@/hooks/useFilePreview';
 import type { FileItem } from '@/types/common';
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
 import {
+  BookOutlined,
   CloudUploadOutlined,
   CopyOutlined,
+  DeleteOutlined,
+  EyeOutlined,
   PaperClipOutlined,
+  PlusOutlined,
   QuestionCircleOutlined,
   SwapOutlined,
   UserOutlined,
@@ -20,6 +25,7 @@ import {
   Button,
   Flex,
   GetRef,
+  List,
   message,
   Select,
   Switch,
@@ -76,13 +82,22 @@ const createMessage = (
   content: string,
   isUser: boolean,
   files?: FileItem[],
+  atfiles?: FileItem[],
 ): ChatMessage => ({
   key: `${Date.now()}-${messageCounter++}`,
   placement: isUser ? 'end' : 'start',
   content,
   avatarType: isUser ? 'user' : 'assistant',
   files,
+  atfiles,
 });
+
+// 格式化文件大小的辅助函数
+const formatFileSize = (size: number) => {
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(2)}KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)}MB`;
+};
 
 const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
   // 获取当前路由信息
@@ -121,6 +136,11 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
   });
   const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
 
+  // 添加知识库相关状态
+  const [kbSearchModalVisible, setKbSearchModalVisible] = useState(false);
+  const [kbFilesOpen, setKbFilesOpen] = useState(false);
+  const [knowledgeFiles, setKnowledgeFiles] = useState<FileItem[]>([]);
+
   // 在组件内部添加文件预览相关的 hooks
   const { previewState, showPreview, hidePreview, fetchPreviewFile } =
     useFilePreview();
@@ -146,6 +166,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
     setActiveSessionId(null);
     setMessages([]);
     setSelectedFiles([]);
+    setKnowledgeFiles([]);
     setValue('');
 
     // 清除localStorage中保存的会话ID
@@ -304,10 +325,120 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
     }
   }, [location.search, activeSessionId, history]);
 
+  // 处理知识库文件选择
+  const handleKnowledgeFilesSelect = (files: any[]) => {
+    // 将KnowledgeSearch组件的FileItem类型转换为本文件使用的FileItem类型
+    const convertedFiles: FileItem[] = files.map((file) => ({
+      file_id: file.file_id,
+      name: file.file_name,
+      size: file.file_size,
+      type: file.file_id.split('.').pop() || '',
+      status: file.status === 'Done' ? 1 : 0,
+      created_at: file.created_at,
+    }));
+
+    // 直接使用选择的文件列表替换原有列表
+    setKnowledgeFiles(convertedFiles);
+    setKbSearchModalVisible(false);
+    setKbFilesOpen(true);
+  };
+
+  // 删除知识库文件
+  const handleDeleteKnowledgeFile = (fileId: string) => {
+    setKnowledgeFiles((prevFiles) => {
+      const newFiles = prevFiles.filter((file) => file.file_id !== fileId);
+      // 如果删除后没有文件了，自动关闭面板
+      if (newFiles.length === 0) {
+        setKbFilesOpen(false);
+      }
+      return newFiles;
+    });
+  };
+
+  // 处理文件预览
+  const handleFilePreview = (fileName: string, fileId: string) => {
+    showPreview(fileName, fileId);
+  };
+
+  // 添加知识库文件展示的headerNode
+  const kbFilesHeaderNode = (
+    <Sender.Header
+      title="知识库文件"
+      open={kbFilesOpen}
+      onOpenChange={setKbFilesOpen}
+      styles={{
+        content: {
+          padding: 0,
+        },
+      }}
+      forceRender
+    >
+      <div style={{ padding: '16px', maxHeight: 300, overflow: 'auto' }}>
+        <Flex vertical gap={12}>
+          <List
+            size="small"
+            bordered
+            dataSource={knowledgeFiles}
+            renderItem={(item) => (
+              <List.Item
+                actions={[
+                  <Button
+                    key="preview"
+                    type="text"
+                    icon={<EyeOutlined style={{ color: '#1677ff' }} />}
+                    onClick={() => handleFilePreview(item.name, item.file_id)}
+                  />,
+                  <Button
+                    key="delete"
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeleteKnowledgeFile(item.file_id)}
+                  />,
+                ]}
+              >
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      fontWeight: 500,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {item.name}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
+                    {formatFileSize(item.size)}
+                  </div>
+                </div>
+              </List.Item>
+            )}
+            footer={
+              <Button
+                type="dashed"
+                block
+                icon={<PlusOutlined />}
+                onClick={() => setKbSearchModalVisible(true)}
+              >
+                添加知识库文件
+              </Button>
+            }
+          />
+        </Flex>
+      </div>
+    </Sender.Header>
+  );
+
   const handleSubmit = async () => {
     if (!value || !value.trim()) return;
 
-    const userMessage = createMessage(value, true, selectedFiles);
+    const userMessage = createMessage(
+      value,
+      true,
+      selectedFiles,
+      knowledgeFiles,
+    );
     setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
 
     // 准备请求数据
@@ -381,6 +512,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
         status: number;
         created_at: string;
       }[];
+      at_file_ids?: string[];
+      atfiles?: FileItem[];
     } = {
       model_name: localStorage.getItem(MODEL_STORAGE_KEY) || '',
       file_ids: selectedFiles
@@ -392,9 +525,14 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
       question: value,
       stream: true,
       enhanced_search: enhancedSearch,
-      // 添加 messages 字段，包含当前消息和关联的文件信息
       files: selectedFiles.length > 0 ? selectedFiles : undefined,
     };
+
+    // 添加知识库文件ID和文件信息
+    if (knowledgeFiles.length > 0) {
+      requestData.at_file_ids = knowledgeFiles.map((file) => file.file_id);
+      requestData.atfiles = knowledgeFiles;
+    }
 
     // 只有当 currentSessionId 不为 null 时才添加到请求数据中
     if (currentSessionId) {
@@ -402,6 +540,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
     }
     setValue('');
     setOpen(false);
+    setKbFilesOpen(false);
     try {
       const response = await fetchWithAuthStream(
         '/api/v1/rag/chat',
@@ -483,6 +622,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
       // 消息发送完成后再清空选中的文件
       setSelectedFiles([]);
       setItems([]);
+      setKnowledgeFiles([]);
+      setKbFilesOpen(false);
 
       // 刷新会话列表
       if (refreshSessionsList) {
@@ -509,6 +650,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
       // 发生错误时也清空选中的文件
       setSelectedFiles([]);
       setItems([]);
+      setKnowledgeFiles([]);
     }
   };
 
@@ -674,16 +816,43 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
                                 gap="small"
                                 style={{
                                   marginTop: 8,
-                                  background: '#f5f5f5',
                                   padding: 8,
                                   borderRadius: 4,
                                 }}
                               >
                                 <Typography.Text type="secondary">
-                                  关联文件：
+                                  附件：
                                 </Typography.Text>
                                 <Flex wrap="wrap" gap="small">
                                   {currentMessage.files.map((file) => (
+                                    <PreviewableFileCard
+                                      key={file.file_id}
+                                      file={file}
+                                      onPreview={showPreview}
+                                    />
+                                  ))}
+                                </Flex>
+                              </Flex>
+                            )}
+
+                          {/* 只在用户消息中渲染知识库文件 */}
+                          {isUser &&
+                            currentMessage?.atfiles &&
+                            currentMessage.atfiles.length > 0 && (
+                              <Flex
+                                vertical
+                                gap="small"
+                                style={{
+                                  marginTop: 8,
+                                  padding: 8,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Typography.Text type="secondary">
+                                  知识库文件：
+                                </Typography.Text>
+                                <Flex wrap="wrap" gap="small">
+                                  {currentMessage.atfiles.map((file) => (
                                     <PreviewableFileCard
                                       key={file.file_id}
                                       file={file}
@@ -707,7 +876,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
                 style={{
                   marginTop: 12,
                 }}
-                header={
+                header={[
                   <Sender.Header
                     title="附件"
                     open={open}
@@ -718,6 +887,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
                       },
                     }}
                     forceRender
+                    key="attachments"
                   >
                     <Attachments
                       accept=".doc,.docx,.pdf"
@@ -853,16 +1023,26 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
                       }
                       getDropContainer={() => senderRef.current?.nativeElement}
                     />
-                  </Sender.Header>
-                }
+                  </Sender.Header>,
+                  kbFilesHeaderNode,
+                ]}
                 value={value}
                 prefix={
-                  <Badge dot={!open && selectedFiles.length > 0}>
-                    <Button
-                      icon={<PaperClipOutlined style={{ fontSize: 18 }} />}
-                      onClick={() => setOpen(!open)}
-                    />
-                  </Badge>
+                  <>
+                    <Badge dot={!open && selectedFiles.length > 0}>
+                      <Button
+                        icon={<PaperClipOutlined style={{ fontSize: 18 }} />}
+                        onClick={() => setOpen(!open)}
+                      />
+                    </Badge>
+                    <Badge dot={!kbFilesOpen && knowledgeFiles.length > 0}>
+                      <Button
+                        style={{ marginLeft: 8 }}
+                        icon={<BookOutlined style={{ fontSize: 18 }} />}
+                        onClick={() => setKbFilesOpen(!kbFilesOpen)}
+                      />
+                    </Badge>
+                  </>
                 }
                 onChange={(nextVal: string) => {
                   setValue(nextVal);
@@ -882,6 +1062,25 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
           fileName={previewState.fileName}
           fetchFile={fetchPreviewFile}
         />
+
+        {/* 知识库文件选择弹窗 */}
+        {kbSearchModalVisible && (
+          <KnowledgeSearch
+            isModal={true}
+            onSelect={handleKnowledgeFilesSelect}
+            onCancel={() => setKbSearchModalVisible(false)}
+            selectedFiles={knowledgeFiles.map((file) => ({
+              kb_id: '',
+              file_id: file.file_id,
+              file_name: file.name,
+              file_size: file.size,
+              file_words: 0,
+              status: file.status === 1 ? 'Done' : 'Failed',
+              error_message: '',
+              created_at: file.created_at,
+            }))}
+          />
+        )}
       </XProvider>
     </div>
   );

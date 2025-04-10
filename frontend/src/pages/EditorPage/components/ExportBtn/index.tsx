@@ -79,7 +79,7 @@ const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
       <Modal
         title="选择导出样式"
         open={isModalVisible}
-        width={600}
+        width={800}
         destroyOnClose={true}
         onOk={handleConfirmExport}
         onCancel={handleCancel}
@@ -99,6 +99,16 @@ const ExportBtnGroup: React.FC<ExportBtnGroupProps> = ({ editorRef }) => {
                       width={200}
                       src="/chinese.png"
                       alt="中文编号示例"
+                    />
+                  </Space>
+                </Radio>
+                <Radio value="mix">
+                  <Space>
+                    <Image
+                      preview={false}
+                      width={200}
+                      src="/mix.png"
+                      alt="混合编号示例"
                     />
                   </Space>
                 </Radio>

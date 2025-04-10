@@ -15,7 +15,7 @@ const PreviewableFileCard: React.FC<PreviewableFileCardProps> = ({
   const [isHovered, setIsHovered] = useState(false);
 
   return (
-    <Tooltip title="点击预览文件">
+    <Tooltip title="">
       <div
         style={{
           cursor: 'pointer',

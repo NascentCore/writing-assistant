@@ -36,6 +36,7 @@ export interface ChatMessage {
   content: string;
   avatarType: 'user' | 'assistant';
   files?: FileItem[];
+  atfiles?: FileItem[];
   loading?: boolean;
   reference_files?: ReferenceFile[];
 }

@@ -38,3 +38,11 @@ export async function deleteTemplate(id: string) {
     method: 'DELETE',
   });
 }
+
+// 排序模板
+export async function sortTemplates(template_ids: string[]) {
+  return fetchWithAuthNew<null>('/api/v1/writing/templates/sort', {
+    method: 'POST',
+    data: { template_ids },
+  });
+}

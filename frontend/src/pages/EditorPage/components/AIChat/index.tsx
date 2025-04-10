@@ -582,13 +582,12 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({ setShowAIChat }, ref) => {
                                 gap="small"
                                 style={{
                                   marginTop: 8,
-                                  background: '#f5f5f5',
                                   padding: 8,
                                   borderRadius: 4,
                                 }}
                               >
                                 <Typography.Text type="secondary">
-                                  关联文件：
+                                  附件：
                                 </Typography.Text>
                                 <Flex wrap="wrap" gap="small">
                                   {currentMessage.files.map((file) => (
