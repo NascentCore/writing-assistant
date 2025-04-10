@@ -41,6 +41,7 @@ const TemplateManage = () => {
     },
     {
       title: '模板名称',
+      ellipsis: true,
       dataIndex: 'show_name',
       width: 150,
     },
