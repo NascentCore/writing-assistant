@@ -342,7 +342,7 @@ async def export_document_docx(
     doc_id: str,
     include_versions: bool = False,
     add_numbering: bool = True,
-    numbering_type: str = Query("number", enum=["number", "chinese"]),
+    numbering_type: str = Query("number", enum=["number", "chinese", "mix"]),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -418,7 +418,7 @@ async def export_document_pdf(
     doc_id: str,
     include_versions: bool = False,
     add_numbering: bool = True,
-    numbering_type: str = Query("number", enum=["number", "chinese"]),
+    numbering_type: str = Query("number", enum=["number", "chinese", "mix"]),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

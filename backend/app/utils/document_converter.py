@@ -21,10 +21,25 @@ def add_numbering_to_headers(html_text, numbering_type):
                        "二十一", "二十二", "二十三", "二十四", "二十五", "二十六", "二十七", "二十八", "二十九", "三十",
                        "三十一", "三十二", "三十三", "三十四", "三十五", "三十六", "三十七", "三十八", "三十九", "四十",
                        "四十一", "四十二", "四十三", "四十四", "四十五", "四十六", "四十七", "四十八", "四十九", "五十"]
+    at_numbers = [
+        "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩",
+        "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳",
+        "㉑", "㉒", "㉓", "㉔", "㉕", "㉖", "㉗", "㉘", "㉙", "㉚",
+        "㉛", "㉜", "㉝", "㉞", "㉟", "㊱", "㊲", "㊳", "㊴", "㊵",
+        "㊶", "㊷", "㊸", "㊹", "㊺", "㊻", "㊼", "㊽", "㊾", "㊿"
+    ]
+    
     # 获取中文数字，处理超出范围的情况
     def get_chinese_number(index):
         if index < len(chinese_numbers):
             return chinese_numbers[index]
+        else:
+            return str(index + 1)
+        
+    # 获取at数字，处理超出范围的情况
+    def get_at_number(index):
+        if index < len(at_numbers):
+            return at_numbers[index]
         else:
             return str(index + 1)
     
@@ -72,6 +87,8 @@ def add_numbering_to_headers(html_text, numbering_type):
             # 生成编号
             if numbering_type == "chinese":
                 numbering = f'第{get_chinese_number(h2_counter-1)}章、'
+            elif numbering_type == "mix":
+                numbering = f'{get_chinese_number(h2_counter-1)}、'
             else:
                 numbering = f'{h2_counter}'
             tag.clear()
@@ -91,6 +108,8 @@ def add_numbering_to_headers(html_text, numbering_type):
             # 生成编号
             if numbering_type == "chinese":
                 numbering = f'第{get_chinese_number(h3_counters[current_h2_id]-1)}节、'
+            elif numbering_type == "mix":
+                numbering = f'（{get_chinese_number(h3_counters[current_h2_id]-1)}）'
             else:
                 numbering = f'{current_h2_id}.{h3_counters[current_h2_id]}'
             tag.clear()
@@ -113,7 +132,9 @@ def add_numbering_to_headers(html_text, numbering_type):
             
             # 生成编号
             if numbering_type == "chinese":
-                numbering = f'第{get_chinese_number(h4_counters[current_h3_id]-1)}小节、'
+                numbering = f'{get_chinese_number(h4_counters[current_h3_id]-1)}、'
+            elif numbering_type == "mix":
+                numbering = f'{h4_counters[current_h3_id]}.'
             else:
                 numbering = f'{current_h3_id}.{h4_counters[current_h3_id]}'
             tag.clear()
@@ -140,7 +161,9 @@ def add_numbering_to_headers(html_text, numbering_type):
             
             # 生成编号
             if numbering_type == "chinese":
-                numbering = f'第{get_chinese_number(h5_counters[current_h4_id]-1)}项、'
+                numbering = f'{h5_counters[current_h4_id]}.'
+            elif numbering_type == "mix":
+                numbering = f'（{h5_counters[current_h4_id]}）'
             else:
                 numbering = f'{current_h4_id}.{h5_counters[current_h4_id]}'
             tag.clear()
@@ -168,7 +191,9 @@ def add_numbering_to_headers(html_text, numbering_type):
             
             # 生成编号
             if numbering_type == "chinese":
-                numbering = f'第{get_chinese_number(h6_counters[current_h5_id]-1)}小项、'
+                numbering = f'（{h6_counters[current_h5_id]}）'
+            elif numbering_type == "mix":
+                numbering = f'{get_at_number(h6_counters[current_h5_id]-1)}'
             else:
                 numbering = f'{current_h5_id}.{h6_counters[current_h5_id]}'
             tag.clear()
