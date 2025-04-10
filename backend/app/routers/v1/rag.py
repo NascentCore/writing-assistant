@@ -44,6 +44,7 @@ class ChatRequest(BaseModel):
     file_ids: Optional[List[str]] = Field(default=[], description="关联的文件ID列表")
     files: Optional[List[Dict[str, Any]]] = Field(default=[], description="关联的文件内容")
     at_file_ids: Optional[List[str]] = Field(default=[], description="@的文件ID列表")
+    atfiles: Optional[List[Dict[str, Any]]] = Field(default=[], description="@的文件内容")
     stream: Optional[bool] = Field(default=True, description="是否使用流式返回")
 
     class Config:
@@ -598,6 +599,7 @@ async def get_chat_session_detail(
                         "content_type": msg.content_type if hasattr(msg, 'content_type') else "text",
                         "outline_id": msg.outline_id if hasattr(msg, 'outline_id') else "",
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
+                        "atfiles": json.loads(msg.meta).get("atfiles", []) if msg.meta else [],
                         "model_name": json.loads(msg.meta).get("model_name", "") if msg.meta else "",
                         "reference_files": json.loads(msg.meta).get("reference_files", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
@@ -702,7 +704,10 @@ async def chat(
             session_id=session_id,
             role="user",
             content=request.question,
-            meta=json.dumps({"files": request.files})
+            meta=json.dumps({
+                "files": request.files,
+                "atfiles": request.atfiles
+            })
         )
         db.add(user_question)
         db.commit()
