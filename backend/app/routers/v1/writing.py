@@ -163,6 +163,15 @@ async def generate_outline(
         task_id: 任务ID
         session_id: 会话ID
     """
+
+    at_file_ids = []
+    if request.at_file_ids:
+        at_files = db.query(RagFile).filter(
+            RagFile.file_id.in_(request.at_file_ids),
+            RagFile.status == RagFileStatus.DONE,
+            RagFile.is_deleted == False
+        ).all()
+        at_file_ids = [at_file.kb_file_id for at_file in at_files]
     
     # 如果提供了outline_id，直接返回对应大纲
     if request.outline_id:
@@ -342,27 +351,21 @@ async def generate_outline(
         task = Task(
             id=task_id,
             type=TaskType.GENERATE_OUTLINE,
-            status=TaskStatus.COMPLETED,
+            status=TaskStatus.PENDING,
             session_id=session_id,
             params={
                 "user_id": current_user.user_id,
-                "outline_id": str(outline.id)
-            },
-            result={"outline_id": str(outline.id)}
+                "prompt": request.prompt,
+                "file_ids": request.file_ids or [],
+                "web_search": request.web_search,
+                "at_file_ids": request.at_file_ids
+            }
         )
         db.add(task)
         
         # 提交事务
         db.commit()
-
-        at_file_ids = []
-        if request.at_file_ids:
-            at_files = db.query(RagFile).filter(
-                RagFile.file_id.in_(request.at_file_ids),
-                RagFile.status == RagFileStatus.DONE,
-                RagFile.is_deleted == False
-            ).all()
-            at_file_ids = [at_file.kb_file_id for at_file in at_files]
+        
         
         # 记录任务到运行集合中
         with task_lock:
