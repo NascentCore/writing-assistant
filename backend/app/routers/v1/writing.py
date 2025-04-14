@@ -1839,6 +1839,7 @@ async def get_chat_session_detail(
                         "task_status": msg.task_status,
                         "task_result": msg.task_result,
                         "files": json.loads(msg.meta).get("files", []) if msg.meta else [],
+                        "atfiles": json.loads(msg.meta).get("atfiles", []) if msg.meta else [],
                         "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     for msg in messages
