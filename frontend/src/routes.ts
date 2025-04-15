@@ -77,6 +77,11 @@ export const routes = [
     component: './TemplateManage',
   },
   {
+    name: '用户手册',
+    path: '/UserManual',
+    component: './UserManual',
+  },
+  {
     path: '/*',
     component: '@/pages/404',
     name: '404',

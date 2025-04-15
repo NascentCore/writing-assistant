@@ -43,6 +43,7 @@ const iconMap: Record<string, React.ReactNode> = {
   '/DepartManage': <Icon type="DepartMana" />,
   '/KnowledgeSearch': <Icon type="KnSearch" />,
   '/TemplateManage': <Icon type="TemplateManage" />,
+  '/UserManual': <Icon type="UserManual" />,
 };
 
 // 将路由配置转换为菜单项
