@@ -7,11 +7,10 @@ const UserManual: React.FC = () => {
     <div className={styles.container}>
       {/* 这里通过 iframe 嵌入飞书文档，后续如需替换链接可直接修改 src */}
       <iframe
-        src="https://ycnlxgpsu8qv.feishu.cn/wiki/ByAQw0E9EiEbYckBvrccgZClnNg"
+        src="https://www.yuque.com/xuanxuan-r7m8s/ag1pfw/sh6u6amunezlwy8u?singleDoc#%20%E3%80%8A%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8C%E3%80%8B"
         title="用户手册"
         width="100%"
         height="100%"
-        frameBorder="0"
         style={{ minHeight: '80vh', border: 'none' }}
         allowFullScreen
       />
