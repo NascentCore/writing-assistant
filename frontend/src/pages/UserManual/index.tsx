@@ -1,8 +1,18 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import styles from './index.module.less';
 
 // 用户手册页面，嵌入飞书文档
 const UserManual: React.FC = () => {
+  useEffect(() => {
+    // 进入页面时设置 body 样式
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    // 页面卸载时恢复 body 样式
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
   return (
     <div className={styles.container}>
       {/* 这里通过 iframe 嵌入飞书文档，后续如需替换链接可直接修改 src */}
