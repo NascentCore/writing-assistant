@@ -9,6 +9,11 @@
   border-right: 1px solid #f0f0f0;
   padding: 16px 0;
   transition: width 0.3s;
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  z-index: 100;
 
   &.collapsed {
     width: 80px;
@@ -43,7 +48,7 @@
 .userName {
   font-size: 16px;
   font-weight: 500;
-  color: rgba(0, 0, 0, 0.85);
+  color: rgba(0, 0, 0, 85%);
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
@@ -56,7 +61,7 @@
 .collapseButton {
   cursor: pointer;
   font-size: 16px;
-  color: rgba(0, 0, 0, 0.65);
+  color: rgba(0, 0, 0, 65%);
   transition: color 0.3s;
   z-index: 0;
   margin-left: 15px;
@@ -64,8 +69,9 @@
   padding: 4px;
   border-radius: 4px;
   background-color: #fff;
+
   &:hover {
-    color: rgba(0, 0, 0, 0.85);
+    color: rgba(0, 0, 0, 85%);
   }
 }
 
@@ -80,19 +86,19 @@
   padding: 12px;
   cursor: pointer;
   transition: all 0.3s;
-  color: rgba(0, 0, 0, 0.85);
+  color: rgba(0, 0, 0, 85%);
   margin: 10px;
   border-radius: 12px;
   margin-right: 20px;
 
   &:hover {
-    background: rgba(0, 0, 0, 0.04);
+    background: rgba(0, 0, 0, 4%);
   }
 
   &.selected {
     font-weight: bold;
     background: #fff;
-    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 10%);
   }
 
   .sideMenu.collapsed & {
@@ -110,6 +116,7 @@
   .sideMenu.collapsed & {
     justify-content: center;
   }
+
   .menuItemTitle {
     white-space: nowrap;
     overflow: hidden;
@@ -121,7 +128,7 @@
 .arrow {
   font-size: 12px;
   transition: transform 0.2s ease-in-out;
-  color: rgba(0, 0, 0, 0.45);
+  color: rgba(0, 0, 0, 45%);
   transform: rotate(90deg);
 
   &.expanded {
@@ -134,7 +141,8 @@
   overflow: scroll;
   font-size: 14px;
   transition: max-height 0.1s ease-in-out;
-  color: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 0, 0, 50%);
+
   &:global(.expanded) {
     max-height: 300px;
   }
@@ -144,7 +152,7 @@
   padding: 10px 24px 10px 48px;
   cursor: pointer;
   transition: all 0.3s;
-  color: rgba(0, 0, 0, 0.65);
+  color: rgba(0, 0, 0, 65%);
   margin: 10px;
   margin-top: 0;
   border-radius: 12px;
@@ -154,12 +162,12 @@
   white-space: nowrap;
 
   &:hover {
-    background: rgba(0, 0, 0, 0.04);
+    background: rgba(0, 0, 0, 4%);
   }
 
   &.selected {
     background: #fff;
-    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 10%);
   }
 }
 
@@ -168,4 +176,5 @@
   background-color: #fff;
   padding: 24px;
   overflow: auto;
+  margin-left: 240px;
 }
