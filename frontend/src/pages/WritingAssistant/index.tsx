@@ -180,11 +180,6 @@ const Home: React.FC = () => {
           />
         </div>
       )}
-      {/* <Tabs defaultActiveKey="0" className={styles.tabs}>
-        {tabs.map((tab, index) => (
-          <TabPane tab={tab} key={index} />
-        ))}
-      </Tabs> */}
       <div style={{ marginBottom: 'auto' }}>
         <div className={styles.header}>
           <h1 className={styles.title}>我是你的写作助手</h1>
