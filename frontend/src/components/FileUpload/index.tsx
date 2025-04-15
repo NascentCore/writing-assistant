@@ -102,7 +102,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <p className="ant-upload-drag-icon">
           <InboxOutlined />
         </p>
-        <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
+        <p className="ant-upload-text">
+          点击或拖拽文件到此区域上传，支持 pdf，docx，doc
+        </p>
         <p className="ant-upload-hint">支持单个或批量上传</p>
       </Dragger>
     </div>

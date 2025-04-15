@@ -273,6 +273,8 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
             };
           }}
           rowSelection={{
+            preserveSelectedRowKeys: true,
+            selectedRowKeys: selectedUserIds,
             onChange: (selectedRowKeys) => {
               setSelectedUserIds(selectedRowKeys as string[]);
             },
@@ -280,10 +282,13 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
           pagination={{
             showSizeChanger: true,
           }}
-          tableAlertRender={({ selectedRowKeys }) => (
+          tableAlertRender={({ selectedRowKeys, onCleanSelected }) => (
             <div>
               已选择 <a style={{ fontWeight: 600 }}>{selectedRowKeys.length}</a>{' '}
               项
+              <a style={{ marginLeft: 8 }} onClick={onCleanSelected}>
+                清空
+              </a>
             </div>
           )}
           options={false}

@@ -110,7 +110,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
           <Input size="large" />
         </Form.Item>
 
-        <Form.Item
+        {/* <Form.Item
           label="当前密码"
           name="current_password"
           rules={[
@@ -125,7 +125,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
           ]}
         >
           <Input.Password size="large" />
-        </Form.Item>
+        </Form.Item> */}
 
         <Form.Item
           label="新密码"

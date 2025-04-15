@@ -1084,7 +1084,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                           : {
                               icon: <CloudUploadOutlined />,
                               title: '上传文件',
-                              description: '点击或拖拽文件到此区域上传',
+                              description:
+                                '点击或拖拽文件到此区域上传，支持 pdf，docx，doc',
                             }
                       }
                       getDropContainer={() => senderRef.current?.nativeElement}

@@ -126,7 +126,7 @@ const KnowledgeSearch: React.FC = () => {
         options={false}
         request={async (params) => {
           if (!params.file_name?.trim()) {
-            message.warning('请输入搜索关键词');
+            // message.warning('请输入搜索关键词');
             setTotalCount(0);
             return {
               data: [],

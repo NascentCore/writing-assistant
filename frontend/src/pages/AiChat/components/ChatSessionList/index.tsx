@@ -1,7 +1,7 @@
 import { fetchWithAuthNew } from '@/utils/fetch';
 import { DeleteOutlined } from '@ant-design/icons';
 import { history, useLocation } from '@umijs/max';
-import { Button, Empty, Spin, Typography, message } from 'antd';
+import { Button, Empty, message, Popconfirm, Spin, Typography } from 'antd';
 import React, {
   forwardRef,
   useCallback,
@@ -151,10 +151,10 @@ const ConversationsList = React.memo(
   }) => {
     // 自定义渲染会话项，添加删除按钮
     const renderItem = (item: any, isActive: boolean) => {
-      const handleDelete = (e: React.MouseEvent) => {
-        e.stopPropagation(); // 阻止事件冒泡
-        onDeleteSession(item.key);
-      };
+      // const handleDelete = (e: React.MouseEvent) => {
+      //   e.stopPropagation(); // 阻止事件冒泡
+      //   onDeleteSession(item.key);
+      // };
 
       return (
         <div
@@ -169,14 +169,24 @@ const ConversationsList = React.memo(
             <div className={styles.sessionLabel}>{item.label}</div>
             <div className={styles.sessionDescription}>{item.description}</div>
           </div>
-          <Button
-            type="text"
-            size="small"
-            icon={<DeleteOutlined />}
-            danger
-            className={styles.deleteButton}
-            onClick={handleDelete}
-          />
+          <Popconfirm
+            title="确定要删除该会话吗？"
+            onConfirm={() => {
+              // 由于 Popconfirm 的 onConfirm 没有冒泡事件，这里不需要阻止冒泡
+              onDeleteSession(item.key);
+            }}
+            okText="删除"
+            cancelText="取消"
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<DeleteOutlined />}
+              danger
+              className={styles.deleteButton}
+              onClick={(e) => e.stopPropagation()} // 阻止冒泡，防止触发会话切换
+            />
+          </Popconfirm>
         </div>
       );
     };
@@ -540,6 +550,15 @@ const ChatSessionList = forwardRef<ChatSessionListRef, ChatSessionListProps>(
 
     // 创建新会话按钮点击处理
     const handleCreateNewSession = useCallback(() => {
+      // 如果当前路径没有查询参数，直接提示
+      if (
+        !location.search ||
+        location.search === '' ||
+        location.search === '?'
+      ) {
+        message.info('当前已经是最新会话了');
+        return;
+      }
       // 更新路由，移除 id 参数
       history.push(location.pathname);
 
@@ -548,7 +567,7 @@ const ChatSessionList = forwardRef<ChatSessionListRef, ChatSessionListProps>(
 
       // 如果有新会话创建，可能需要刷新会话列表
       // 但这里不直接刷新，而是等待用户发送第一条消息后再刷新
-    }, [onCreateNewSession]);
+    }, [onCreateNewSession, location.search, location.pathname]);
 
     // 实现刷新会话列表的函数
     const refreshSessionsList = useCallback(() => {
