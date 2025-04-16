@@ -27,7 +27,7 @@ const LoginPage: React.FC = () => {
         method: 'POST',
         data: formData,
       });
-
+      console.log('response', response);
       if (response && 'access_token' in response) {
         localStorage.setItem('token', response.access_token);
         localStorage.setItem('username', values.username);

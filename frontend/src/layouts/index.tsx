@@ -44,6 +44,7 @@ const iconMap: Record<string, React.ReactNode> = {
   '/KnowledgeSearch': <Icon type="KnSearch" />,
   '/TemplateManage': <Icon type="TemplateManage" />,
   '/UserManual': <Icon type="UserManual" />,
+  '/UserSessionList': <Icon type="UserSessionList" />,
 };
 
 // 将路由配置转换为菜单项
@@ -52,17 +53,19 @@ const convertRoutesToMenuItems = (routes: RouteItem[]): MenuItem[] => {
 
   const menuItems: MenuItem[] = routes
     .filter((route) => {
-      // 如果不是管理员，过滤掉 SystemKnowledge 路由
-      if (route.path === '/SystemKnowledge' && admin !== '2') {
+      // 如果不是管理员，过滤掉相关路由
+      const adminOnlyRoutes = [
+        '/SystemKnowledge',
+        '/UserSessionList',
+        '/TemplateManage',
+      ];
+      if (adminOnlyRoutes.includes(route.path) && admin !== '2') {
         return false;
       }
-      if (route.path === '/TemplateManage' && admin !== '2') {
-        return false;
-      }
-      if (route.path === '/DepartKnowledge' && admin === '0') {
-        return false;
-      }
-      if (route.path === '/DepartManage' && admin === '0') {
+
+      // 如果是普通用户，过滤掉部门相关路由
+      const departRoutes = ['/DepartKnowledge', '/DepartManage'];
+      if (departRoutes.includes(route.path) && admin === '0') {
         return false;
       }
 

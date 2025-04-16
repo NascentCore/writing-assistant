@@ -282,7 +282,19 @@ function App() {
               onClick={() => {
                 // 更新路由，添加会话ID参数
                 const query = new URLSearchParams(location.search);
-                history.push(`/WritingHistory?id=${query.get('pre-id') || ''}`);
+                // 获取user_id参数（如果存在）
+                const userId = query.get('user_id');
+                // 构建新的查询参数
+                const newQuery = new URLSearchParams();
+                if (query.get('id')) {
+                  newQuery.set('id', query.get('id') || '');
+                }
+                // 如果存在user_id，则添加到查询参数中
+                if (userId) {
+                  newQuery.set('user_id', userId);
+                }
+                // 跳转到写作历史页面，带上所有必要的参数
+                history.push(`/WritingHistory?${newQuery.toString()}`);
               }}
             >
               返回

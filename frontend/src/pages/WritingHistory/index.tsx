@@ -835,12 +835,17 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                             '*',
                                           );
                                         }
+                                        // 先获取当前所有查询参数
+                                        const searchParams =
+                                          new URLSearchParams(location.search);
+                                        // 设置/覆盖 document_id
+                                        searchParams.set(
+                                          'document_id',
+                                          String(currentMessage.document_id),
+                                        );
+                                        // 跳转到 EditorPage，带上所有参数
                                         history.push(
-                                          `/EditorPage?document_id=${
-                                            currentMessage.document_id
-                                          }&pre-id=${new URLSearchParams(
-                                            location.search,
-                                          ).get('id')}`,
+                                          `/EditorPage?${searchParams.toString()}`,
                                         );
                                       }}
                                     >

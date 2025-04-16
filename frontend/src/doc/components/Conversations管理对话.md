@@ -183,6 +183,7 @@ import { RedoOutlined } from '@ant-design/icons';
 import { Conversations, type ConversationsProps } from '@ant-design/x';
 import { Avatar, Divider, type GetProp, Spin, theme } from 'antd';
 import React, { useEffect, useState } from 'react';
+// @ts-ignore
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 const App: React.FC = () => {

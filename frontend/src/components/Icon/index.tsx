@@ -51,6 +51,7 @@ import { ReactComponent as RecentChat } from './assets/icon_recent_chat.svg';
 import { ReactComponent as SystemKnowledge } from './assets/icon_system_knowledge.svg';
 import { ReactComponent as TemplateManage } from './assets/icon_template_manage.svg';
 import { ReactComponent as UserManual } from './assets/icon_user_manual.svg';
+import { ReactComponent as UserSessionList } from './assets/icon_user_session_list.svg';
 import { ReactComponent as VideoDisplay } from './assets/icon_video_display.svg';
 import { ReactComponent as WritingAssistant } from './assets/icon_writing_assistant.svg';
 
@@ -103,7 +104,8 @@ type IconType =
   | 'RecentChat'
   | 'AIChat'
   | 'TemplateManage'
-  | 'UserManual';
+  | 'UserManual'
+  | 'UserSessionList';
 
 const RoadIcon: React.FC<{
   style?: React.CSSProperties;
@@ -213,6 +215,8 @@ const RoadIcon: React.FC<{
     IconComponent = TemplateManage;
   } else if (type === 'UserManual') {
     IconComponent = UserManual;
+  } else if (type === 'UserSessionList') {
+    IconComponent = UserSessionList;
   }
 
   return <Icon style={{ fontSize: 24 }} component={IconComponent} {...rest} />;

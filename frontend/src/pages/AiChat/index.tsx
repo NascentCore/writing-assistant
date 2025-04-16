@@ -489,6 +489,13 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
           const query = new URLSearchParams(location.search);
           query.set('id', currentSessionId!);
           history.push(`${location.pathname}?${query.toString()}`);
+
+          // 新增：延迟 500ms 刷新会话列表
+          if (refreshSessionsList) {
+            setTimeout(() => {
+              refreshSessionsList();
+            }, 500);
+          }
         }
       } catch (error) {
         console.error('创建会话失败:', error);
