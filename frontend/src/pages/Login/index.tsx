@@ -8,6 +8,7 @@ import './index.less';
 interface LoginResponse {
   access_token: string;
   admin: number;
+  user_id: string;
 }
 
 const LoginPage: React.FC = () => {
@@ -29,6 +30,7 @@ const LoginPage: React.FC = () => {
       });
       console.log('response', response);
       if (response && 'access_token' in response) {
+        localStorage.setItem('user_id', response.user_id);
         localStorage.setItem('token', response.access_token);
         localStorage.setItem('username', values.username);
         localStorage.setItem('admin', response.admin.toString());

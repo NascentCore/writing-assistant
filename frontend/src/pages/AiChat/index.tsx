@@ -145,6 +145,9 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
   const { previewState, showPreview, hidePreview, fetchPreviewFile } =
     useFilePreview();
 
+  // 用于标记当前流式输出归属的唯一 key
+  const outputSessionKeyRef = useRef<string>('');
+
   // 获取模型列表
   useEffect(() => {
     const fetchModels = async () => {
@@ -163,6 +166,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
 
   // 创建新会话
   const createNewSession = useCallback(() => {
+    // 切换会话时重置流式输出 key
+    outputSessionKeyRef.current = `${Date.now()}_${Math.random()}`;
     setActiveSessionId(null);
     setMessages([]);
     setSelectedFiles([]);
@@ -234,6 +239,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
   // 处理会话切换，确保切换会话后也滚动到底部
   const handleSessionChange = useCallback(
     (sessionId: string, sessionMessages: ChatMessage[]) => {
+      // 切换会话时重置流式输出 key
+      outputSessionKeyRef.current = `${Date.now()}_${Math.random()}`;
       setActiveSessionId(sessionId);
       setMessages(sessionMessages);
 
@@ -433,6 +440,10 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
   const handleSubmit = async () => {
     if (!value || !value.trim()) return;
 
+    // 每次提交时生成新的流式输出 key
+    const myOutputSessionKey = `${Date.now()}_${Math.random()}`;
+    outputSessionKeyRef.current = myOutputSessionKey;
+
     const userMessage = createMessage(
       value,
       true,
@@ -475,7 +486,7 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
 
         if (sessionResponse && sessionResponse.session_id) {
           currentSessionId = sessionResponse.session_id;
-          // 设置活动会话ID
+          // 只有新建会话时才设置活动会话ID
           setActiveSessionId(currentSessionId);
 
           // 保存会话ID到localStorage
@@ -569,6 +580,8 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
       for await (const chunk of XStream({
         readableStream: response.body,
       })) {
+        // 只处理当前 key 匹配的流式输出，否则丢弃
+        if (outputSessionKeyRef.current !== myOutputSessionKey) break;
         try {
           // 如果 chunk.data 是字符串，需要解析它
           let data;
@@ -607,11 +620,16 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>((props, ref) => {
           }
         } catch (error) {}
       }
+      // 只有 outputSessionKey 还是当前的情况下才执行后续副作用
+      if (outputSessionKeyRef.current !== myOutputSessionKey) return;
+      // 确保在流处理结束后，加载一次会话详情
       if (currentSessionId && chatSessionListRef.current) {
         await chatSessionListRef.current.loadSessionDetail(currentSessionId);
       }
       // 确保在流处理结束后，如果消息仍然处于 loading 状态，则移除该状态
       setMessages((prev: ChatMessage[]) => {
+        // 再次判断 outputSessionKey，防止被覆盖
+        if (outputSessionKeyRef.current !== myOutputSessionKey) return prev;
         const newMessages = [...prev];
         const lastMessage = newMessages[newMessages.length - 1];
         // 如果最后一条消息仍然处于 loading 状态，则移除该状态

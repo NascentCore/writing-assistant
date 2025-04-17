@@ -26,6 +26,21 @@ function App() {
   const editorRef = useRef<AiEditor | null>(null);
   const location = useLocation();
 
+  // 新增：获取 url 和 localStorage 的 user_id，并记录只读状态
+  const getUserIdFromQuery = () => {
+    const query = new URLSearchParams(location.search);
+    return query.get('user_id') || '';
+  };
+  const getUserIdFromLocalStorage = () => {
+    return localStorage.getItem('user_id') || '';
+  };
+  const [isReadOnly, setIsReadOnly] = useState(() => {
+    return (
+      getUserIdFromQuery() &&
+      getUserIdFromQuery() !== getUserIdFromLocalStorage()
+    );
+  });
+
   // 从 URL 查询参数中获取 document_id
   const getDocumentIdFromQuery = () => {
     const query = new URLSearchParams(location.search);
@@ -155,6 +170,7 @@ function App() {
           const aiEditor = new AiEditor({
             ...getEditorConfig(divRef.current),
             content, // 直接注入内容
+            editable: !isReadOnly, // 新增：根据 isReadOnly 设置只读
             textSelectionBubbleMenu: {
               enable: true,
               items: [
@@ -217,6 +233,8 @@ function App() {
         } else {
           // 如果编辑器已存在，使用setContent方法更新内容
           editorRef.current.setContent(content);
+          // 新增：动态切换只读状态
+          editorRef.current.setEditable(!isReadOnly);
         }
       }
     };
@@ -231,7 +249,14 @@ function App() {
         editorRef.current = null;
       }
     };
-  }, [currentDocId]);
+  }, [currentDocId, isReadOnly]);
+
+  // 新增：监听 url user_id 变化，自动比对并设置只读
+  useEffect(() => {
+    const urlUserId = getUserIdFromQuery();
+    const localUserId = getUserIdFromLocalStorage();
+    setIsReadOnly(urlUserId && urlUserId !== localUserId);
+  }, [location.search]);
 
   // 监听 URL 查询参数变化，更新 currentDocId
   useEffect(() => {

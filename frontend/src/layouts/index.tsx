@@ -256,7 +256,10 @@ const Layout: React.FC = () => {
           ))}
         </div>
       )}
-      <div className={styles.mainContent}>
+      <div
+        className={styles.mainContent}
+        style={{ marginLeft: !(window as any).isIframe ? '240px' : '0px' }}
+      >
         <Outlet />
       </div>
       {showProfile && <UserProfile onClose={() => setShowProfile(false)} />}

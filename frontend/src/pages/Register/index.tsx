@@ -27,6 +27,7 @@ const RegisterPage: React.FC = () => {
       if (response) {
         localStorage.setItem('token', response.access_token);
         localStorage.setItem('username', values.username);
+        localStorage.setItem('user_id', JSON.stringify(response.user_id));
         history.push('/');
         localStorage.removeItem('current_chat_session_id');
         localStorage.removeItem('current_document_id');

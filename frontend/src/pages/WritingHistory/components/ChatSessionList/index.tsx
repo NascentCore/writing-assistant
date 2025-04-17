@@ -175,11 +175,9 @@ const ConversationsList = React.memo(
           className={`${styles.sessionItem} ${
             isActive ? styles.activeSession : ''
           }`}
+          onClick={() => onActiveChange(item.key)}
         >
-          <div
-            className={styles.sessionContent}
-            onClick={() => onActiveChange(item.key)}
-          >
+          <div className={styles.sessionContent}>
             <div className={styles.sessionLabel}>{item.label}</div>
             <div className={styles.sessionDescription}>{item.description}</div>
           </div>

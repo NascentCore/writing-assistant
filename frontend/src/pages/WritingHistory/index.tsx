@@ -852,18 +852,34 @@ const AIChat = forwardRef<AIChatRef, AIChatProps>(({}, ref) => {
                                       查看结果
                                     </Button>
                                   )}
-                                  {currentMessage.content_type ===
-                                    'outline' && (
-                                    <TreeWrapper
-                                      ref={treeWrapperRef}
-                                      outlineId={currentMessage.outline_id}
-                                      readOnly={messages.length > 3}
-                                      onGenerateLongDocument={
-                                        handleGenerateLongDocument
-                                      }
-                                      currentMessage={currentMessage}
-                                    />
-                                  )}
+                                  {currentMessage.content_type === 'outline' &&
+                                    (() => {
+                                      // 新增：判断user_id
+                                      const searchParams = new URLSearchParams(
+                                        location.search,
+                                      );
+                                      const userIdFromUrl =
+                                        searchParams.get('user_id');
+                                      const userIdFromLocal =
+                                        localStorage.getItem('user_id');
+                                      const forceReadOnly =
+                                        userIdFromUrl &&
+                                        userIdFromLocal &&
+                                        userIdFromUrl !== userIdFromLocal;
+                                      return (
+                                        <TreeWrapper
+                                          ref={treeWrapperRef}
+                                          outlineId={currentMessage.outline_id}
+                                          readOnly={
+                                            forceReadOnly || messages.length > 3
+                                          }
+                                          onGenerateLongDocument={
+                                            handleGenerateLongDocument
+                                          }
+                                          currentMessage={currentMessage}
+                                        />
+                                      );
+                                    })()}
                                   {currentMessage.log && (
                                     <LogContainer log={currentMessage.log} />
                                   )}
