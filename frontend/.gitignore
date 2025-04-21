@@ -13,3 +13,4 @@
 .swc
 tsconfig.tsbuildinfo
 .DS_Store
+.user-data
