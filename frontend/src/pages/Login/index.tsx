@@ -37,7 +37,7 @@ const LoginPage: React.FC = () => {
         localStorage.removeItem('current_chat_session_id');
         localStorage.removeItem('current_document_id');
         localStorage.removeItem('ai_chat_model');
-        window.location.href = '/';
+        window.location.href = '/WritingAssistant';
       }
     } catch (error) {
       messageApi.error('登录失败，请稍后重试');
