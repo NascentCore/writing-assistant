@@ -189,7 +189,10 @@ const Home: React.FC = () => {
           <Alert
             message={
               <div style={{ textAlign: 'left' }}>
-                <h3>最佳实践：</h3>
+                <h3>
+                  最佳实践：（3000 字以下的文章推荐使用 ai
+                  对话直接生成效果更佳）
+                </h3>
                 <div>
                   1.字数5万字以下，提示词指定字数，不指定大纲层级（默认2级大纲）
                 </div>

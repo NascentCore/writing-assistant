@@ -123,3 +123,26 @@ export async function setUserAdmin(params: SetUserAdminParams): Promise<any> {
     data: params,
   });
 }
+
+// 编辑部门
+export async function editDepartment(params: {
+  department_id: string;
+  name: string;
+  description: string;
+}): Promise<any> {
+  return fetchWithAuthNew(`${BASE_API}/departments/${params.department_id}`, {
+    method: 'PUT',
+    data: {
+      name: params.name,
+      description: params.description,
+      department_id: params.department_id,
+    },
+  });
+}
+
+// 删除部门
+export async function deleteDepartment(department_id: string): Promise<any> {
+  return fetchWithAuthNew(`${BASE_API}/departments/${department_id}`, {
+    method: 'DELETE',
+  });
+}

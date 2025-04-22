@@ -26,6 +26,9 @@ const KnowledgeBaseList: React.FC = () => {
     fileName: string;
     fileId: string;
   }>({ fileName: '', fileId: '' });
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [deleting, setDeleting] = useState(false);
+  const [dataSource, setDataSource] = useState<KnowledgeBaseFile[]>([]);
 
   const handleModalOk = () => {
     setIsModalOpen(false);
@@ -120,6 +123,18 @@ const KnowledgeBaseList: React.FC = () => {
     },
   ];
 
+  const onSelectChange = (newSelectedRowKeys: React.Key[]) => {
+    setSelectedRowKeys((prevSelected) => {
+      const currentPageAllKeys = dataSource.map((row) => row.file_id);
+
+      const keysFromOtherPages = prevSelected.filter(
+        (key) => !currentPageAllKeys.includes(key as string),
+      );
+
+      return [...keysFromOtherPages, ...newSelectedRowKeys];
+    });
+  };
+
   return (
     <>
       <ProTable<KnowledgeBaseFile>
@@ -138,6 +153,8 @@ const KnowledgeBaseList: React.FC = () => {
                 ...rest,
               },
             });
+            setDataSource(response.list || []);
+
             return {
               data: response.list,
               success: true,
@@ -158,7 +175,44 @@ const KnowledgeBaseList: React.FC = () => {
         }}
         dateFormatter="string"
         headerTitle="知识库文件列表"
+        rowSelection={{
+          selectedRowKeys,
+          onChange: onSelectChange,
+        }}
         toolBarRender={() => [
+          selectedRowKeys.length > 0 && (
+            <Popconfirm
+              key="batch-delete"
+              title={`确定要删除选中的 ${selectedRowKeys.length} 个文件吗？`}
+              onConfirm={async () => {
+                setDeleting(true);
+                try {
+                  const result = await fetchWithAuthNew('/api/v1/rag/files', {
+                    method: 'DELETE',
+                    data: {
+                      file_ids: selectedRowKeys,
+                    },
+                  });
+                  if (result !== undefined) {
+                    message.success('批量删除成功');
+                    setSelectedRowKeys((prev) =>
+                      prev.filter((key) => !selectedRowKeys.includes(key)),
+                    );
+                    actionRef.current?.reload();
+                  }
+                } catch (error) {
+                  message.error('批量删除失败');
+                } finally {
+                  setDeleting(false);
+                }
+              }}
+              okButtonProps={{ loading: deleting }}
+            >
+              <Button danger loading={deleting} disabled={deleting}>
+                批量删除
+              </Button>
+            </Popconfirm>
+          ),
           <Button
             key="upload"
             icon={<UploadOutlined />}

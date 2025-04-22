@@ -126,12 +126,12 @@ const DepartmentUsers: React.FC<DepartmentUsersProps> = ({
       render: (_, record) => (
         <span>
           {record.admin === 2 ? (
-            <span style={{ color: '#1890ff' }}>
+            <span style={{ color: '#1677ff' }}>
               <CrownOutlined style={{ marginRight: 4 }} />
               系统管理员
             </span>
           ) : record.admin === 1 ? (
-            <span style={{ color: '#1890ff' }}>
+            <span style={{ color: '#1677ff' }}>
               <CrownOutlined style={{ marginRight: 4 }} />
               管理员
             </span>

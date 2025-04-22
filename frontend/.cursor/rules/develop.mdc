@@ -30,3 +30,7 @@ alwaysApply: true
 ## 7. 所有表格都用 @ant-design/pro-components 中的 ProTable
 ## 8.当前项目是基于 umi Max 构建的，所以在涉及样式方面，新样式应遵循 cssModule 规范，请勿直接使用简单的 className，现有内容可继续保持原样。
 ## 9.所有普通请求都要使用src/utils/fetch下的fetchWithAuthNew来发起，流式请求的话用该文件中的fetchWithAuthStream
+
+# 管理员身份判断规则
+
+在项目中判断用户是否为管理员时，应通过 `localStorage` 中的 `admin` 字段进行判断。只有当 `localStorage.getItem('admin') === '2'` 时，才视为管理员权限。其他值或未设置时均不视为管理员。

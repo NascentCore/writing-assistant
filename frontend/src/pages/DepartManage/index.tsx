@@ -23,6 +23,14 @@ const DepartManage: React.FC = () => {
         // 默认选中第一个部门
         if (result.length > 0 && !currentDepartment) {
           setCurrentDepartment(result[0]);
+        } else if (currentDepartment) {
+          // 如果当前有选中部门，刷新为新列表中的同 id 对象，保证名称等信息同步
+          const updated = result.find(
+            (dep) => dep.department_id === currentDepartment.department_id,
+          );
+          if (updated) {
+            setCurrentDepartment(updated);
+          }
         }
       }
     } catch (error) {
