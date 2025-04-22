@@ -1121,3 +1121,45 @@ async def get_file_markdown(
         logger.error(f"获取文件markdown格式内容失败: {str(e)}")
         return APIResponse.error(message=f"获取文件markdown格式内容失败: {str(e)}")
 
+@router.post("/file/{file_id}/reupload", summary="重新上传失败的文件")
+async def reupload_file(
+    file_id: str = Path(..., description="文件ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 查询文件
+        file = db.query(RagFile).filter(
+            RagFile.file_id == file_id,
+            RagFile.is_deleted == False
+        ).first()
+        
+        if not file:
+            logger.warning(f"重新上传文件失败: user_id={current_user.user_id}, file_id={file_id}, msg=文件不存在或已被删除")
+            return APIResponse.error(message="文件不存在或已被删除")
+
+        # 检查用户是否有权限修改文件
+        if file.user_id != current_user.user_id:
+            logger.warning(f"重新上传文件失败: user_id={current_user.user_id}, file_id={file_id}, msg=没有权限修改文件")
+            return APIResponse.error(message="没有权限修改文件")
+
+        # 检查文件状态是否为FAILED
+        if file.status != RagFileStatus.FAILED:
+            logger.warning(f"重新上传文件失败: user_id={current_user.user_id}, file_id={file_id}, msg=只有失败状态的文件可以重新上传")
+            return APIResponse.error(message="只有失败状态的文件可以重新上传")
+
+        # 检查文件是否存在
+        if not os.path.exists(file.file_path):
+            logger.warning(f"重新上传文件失败: user_id={current_user.user_id}, file_id={file_id}, msg=文件已被清理，请删除后重新上传")
+            return APIResponse.error(message="文件已被清理，请删除后重新上传")
+
+        # 更新文件状态为LOCAL_SAVED，清空错误信息
+        file.status = RagFileStatus.LOCAL_SAVED
+        file.error_message = ""
+        db.commit()
+
+        return APIResponse.success(message="文件已重新加入上传队列，正在处理中")
+    except Exception as e:
+        logger.error(f"重新上传文件失败: {str(e)}")
+        return APIResponse.error(message=f"重新上传文件失败: {str(e)}")
+
