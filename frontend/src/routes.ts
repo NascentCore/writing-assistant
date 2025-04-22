@@ -87,6 +87,11 @@ export const routes = [
     component: './UserSessionList',
   },
   {
+    name: '测试页',
+    path: '/TestPage',
+    component: './TestPage',
+  },
+  {
     path: '/*',
     component: '@/pages/404',
     name: '404',
