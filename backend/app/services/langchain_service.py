@@ -4317,7 +4317,7 @@ class OutlineGenerator:
                 
                 # 检查是否是标题行
                 is_title = False
-                if content.startswith(("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、")):
+                if re.match(r'^[一二三四五六七八九十]+、', content):
                     is_title = True
                     level = 0
                 elif re.match(r'^\d+\.\d+$', content.split()[0]):  # 匹配 1.1, 1.2 等
