@@ -1,6 +1,6 @@
 import FilePreview from '@/components/FilePreview';
 import { fetchWithAuthNew, fetchWithAuthStream } from '@/utils/fetch';
-import { UploadOutlined } from '@ant-design/icons';
+import { ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
 import { Button, message, Modal, Popconfirm, Tag, Tooltip } from 'antd';
@@ -72,28 +72,26 @@ const KnowledgeBaseList: React.FC = () => {
               </span>
             </Tooltip>
             {record.status === 'Failed' && (
-              <Button
-                size="small"
-                type="link"
-                style={{ padding: 0, height: 22 }}
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  try {
-                    await fetchWithAuthNew(
-                      `/api/v1/rag/file/${record.file_id}/reupload`,
-                      {
-                        method: 'POST',
-                      },
-                    );
-                    message.success('重新上传已发起');
-                    actionRef.current?.reload();
-                  } catch (error) {
-                    message.error('重新上传失败');
-                  }
-                }}
-              >
-                重新上传
-              </Button>
+              <Tooltip title="重新上传">
+                <ReloadOutlined
+                  style={{ marginTop: 12, color: '#1677ff' }}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    try {
+                      await fetchWithAuthNew(
+                        `/api/v1/rag/file/${record.file_id}/reupload`,
+                        {
+                          method: 'POST',
+                        },
+                      );
+                      message.success('重新上传已发起');
+                      actionRef.current?.reload();
+                    } catch (error) {
+                      message.error('重新上传失败');
+                    }
+                  }}
+                />
+              </Tooltip>
             )}
           </>
         );
