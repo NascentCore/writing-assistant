@@ -6,18 +6,7 @@ import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
 import { Button, message, Modal, Popconfirm, Switch, Tag, Tooltip } from 'antd';
 import { useRef, useState } from 'react';
-
-type KnowledgeBaseFile = {
-  kb_id: string;
-  file_id: string;
-  file_name: string;
-  file_size: number;
-  file_words: number;
-  status: string;
-  error_message: string;
-  created_at: string;
-  kb_type: string;
-};
+import type { KnowledgeBaseFile } from './type';
 
 const KnowledgeBaseList: React.FC = () => {
   const actionRef = useRef<ActionType>();
@@ -64,13 +53,42 @@ const KnowledgeBaseList: React.FC = () => {
         }
 
         return (
-          <Tooltip title={tooltipText}>
-            <Tag color={color}>{text}</Tag>
-          </Tooltip>
+          <>
+            <Tooltip title={tooltipText}>
+              <span>
+                <Tag color={color} style={{ marginRight: 8 }}>
+                  {text}
+                </Tag>
+              </span>
+            </Tooltip>
+            {record.status === 'Failed' && (
+              <Button
+                size="small"
+                type="link"
+                style={{ padding: 0, height: 22 }}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    await fetchWithAuthNew(
+                      `/api/v1/rag/file/${record.file_id}/reupload`,
+                      {
+                        method: 'POST',
+                      },
+                    );
+                    message.success('重新上传已发起');
+                    actionRef.current?.reload();
+                  } catch (error) {
+                    message.error('重新上传失败');
+                  }
+                }}
+              >
+                重新上传
+              </Button>
+            )}
+          </>
         );
       },
     },
-
     {
       title: '仅自己可见',
       dataIndex: 'kb_type',
@@ -107,7 +125,6 @@ const KnowledgeBaseList: React.FC = () => {
         );
       },
     },
-
     {
       title: '创建时间',
       search: false,
@@ -120,7 +137,7 @@ const KnowledgeBaseList: React.FC = () => {
       key: 'option',
       render: (_, record) => [
         record.status === 'Done' && (
-          <Button
+          <a
             key="view"
             type="link"
             onClick={() => {
@@ -132,7 +149,7 @@ const KnowledgeBaseList: React.FC = () => {
             }}
           >
             查看
-          </Button>
+          </a>
         ),
         <Popconfirm
           key="delete"
@@ -154,9 +171,9 @@ const KnowledgeBaseList: React.FC = () => {
             }
           }}
         >
-          <Button type="link" danger>
+          <a type="link" style={{ color: '#f5222d' }}>
             删除
-          </Button>
+          </a>
         </Popconfirm>,
       ],
     },
