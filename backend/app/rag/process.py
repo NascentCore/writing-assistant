@@ -14,6 +14,12 @@ rag_summary_queue = asyncio.Queue()
 rag_upload_queue = asyncio.Queue()
 rag_parsing_queue = asyncio.Queue()
 
+# Architectural hinge:
+# The ingestion worker is the counterweight to the writing router:
+#   - `/api/v1/rag` + `/api/v1/writing` enqueue `RagFile` rows; this loop advances their state so prompts can trust `RagFile.status`.
+#   - Startup hooks in `app/main.py` call `rag_worker()` to guarantee outline/content jobs never reference stale KB pointers.
+#   - Upload + parsing tasks interact with the same external RAG API consumed by `app/services/langchain_service.py`, ensuring KB IDs stay consistent across agent flows.
+
 async def get_rag_task():
     while True:
         await asyncio.sleep(5)

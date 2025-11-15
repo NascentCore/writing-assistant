@@ -99,3 +99,15 @@ API采用RESTful设计，主要路由包括：
 3. **多级知识库**：支持从个人到组织不同层次的知识管理
 4. **文档解析与结构提取**：能从多种格式文档中提取结构化内容
 5. **异步任务处理**：长时间运行的任务(如大纲生成、内容生成)通过异步任务处理
+
+## 内部组件依赖关系
+
+结合 `ARCHITECTURE.md` 的整体设计，写作代理依靠以下关键铰链保持各子系统协同：
+
+- **应用生命周期 (`app/main.py`)**：启动时串联配置、数据库建表、`ensure_knowledge_bases()` 以及 `rag_worker()`/`refresh_writing_tasks_status()`，保证写作路由接管请求前就有一致的任务与知识库状态。
+- **写作路由 (`app/routers/v1/writing.py`)**：作为编排层，负责把前端指令转换为 `Task`、`ChatSession`、`ChatMessage` 实体，并将所需的 RAG 文件/模板上下文传给 LangChain 服务。
+- **LangChain 服务 (`app/services/langchain_service.py`)**：`OutlineGenerator` 等组件消费路由整理的上下文，调用 `rag_api` 与可选 Web 搜索拼接提示词，并把流式进度写回 `Task`，供 UI 进度条与重启恢复使用。
+- **知识库流水线 (`app/rag/process.py`)**：推进 `RagFile` 状态（本地保存 → 上传 → 解析），其产出的 `kb_file_id` 与 `status` 被写作路由和 LangChain 服务引用，确保提示词始终指向可用的知识。
+- **文档导出工具 (`app/utils/document_converter.py` 等)**：依赖 `Document`/`Outline` 的结构化数据，将 LangChain 生成的 HTML/Markdown 转换成 DOCX/PDF，闭合“生成→编辑→导出”的业务链路。
+
+这些依赖关系确保：用户在前端触发写作→FastAPI 路由→LangChain 推理→RAG 上传/轮询→文档导出的全链路共享统一的任务进度与知识库指针。

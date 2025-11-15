@@ -27,6 +27,11 @@ from app.database import get_db
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+# Architectural hinge:
+# `OutlineGenerator` and its helpers sit between the HTTP layer (`app/routers/v1/writing.py`) and infrastructure services:
+#   - Consumes KB selections prepared by the writing router and calls `app.rag.rag_api` / web search to assemble prompt context.
+#   - Streams progress/log data back into `models.task.Task`, which the router polls and the FastAPI lifespan hook replays on restart.
+#   - Emits normalized outline/paragraph structures (`models.outline`) and document content (`models.document`) relied upon by `/api/v1/document` exports.
 
 logger = logging.getLogger(__name__)
 

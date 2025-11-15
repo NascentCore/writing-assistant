@@ -52,6 +52,13 @@ task_lock = threading.Lock()
 # 创建线程池执行器
 executor = concurrent.futures.ThreadPoolExecutor()
 
+# Architectural hinge:
+# This router is the coordination layer between user-facing writing flows and the lower-level services described in ARCHITECTURE.md.
+# - Task lifecycle: every long-running job persists to `models.task.Task` so `refresh_writing_tasks_status()` in `app/main.py` can rehydrate crashes.
+# - AI execution: paragraph/outline generation delegates to `app.services.langchain_service.OutlineGenerator`, which in turn streams progress via the same Task rows.
+# - Knowledge context: file references are validated against `models.rag.RagFile` so that the asynchronous pipelines in `app/rag/process.py` and `/api/v1/rag` stay in sync with what gets injected into prompts.
+# - Chat coupling: each writing request mirrors a `ChatSession`/`ChatMessage` pair, allowing the frontend AI side panel to consume the same history as `/api/v1/rag`.
+
 # 枚举类型
 class CountStyle(str, Enum):
     SHORT = "short"

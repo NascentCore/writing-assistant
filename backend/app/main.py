@@ -15,6 +15,12 @@ from app.rag.kb import ensure_knowledge_bases
 from app.routers.v1.writing import refresh_writing_tasks_status
 from fastapi.logger import logger as fastapi_logger
 
+# Architectural hinge:
+# This entrypoint stitches together configuration, API routers, and background workers:
+#   - `lifespan` initializes DB state, knowledge bases, and the `rag_worker`, so writing endpoints can assume KB metadata exists.
+#   - Router wiring here mirrors the separation documented in ARCHITECTURE.md (auth/users/document/writing/rag) and keeps their cross-calls explicit.
+#   - `refresh_writing_tasks_status` bridges persisted `Task` rows with the thread-pool used in `app/routers/v1/writing.py`, ensuring restarts do not orphan UI-visible jobs.
+
 logger = logging.getLogger("app")
 
 def setup_logging():
